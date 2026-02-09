@@ -1,0 +1,16 @@
+{
+  "name": "games-relay",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev ./dist --d1=DB",
+    "deploy": "wrangler pages deploy ./dist",
+    "db:local": "wrangler d1 execute games-relay-db --local --file=./schema.sql",
+    "db:prod": "wrangler d1 execute games-relay-db --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0",
+    "@cloudflare/workers-types": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

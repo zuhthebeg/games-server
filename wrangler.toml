@@ -1,0 +1,13 @@
+name = "games-relay"
+compatibility_date = "2024-01-01"
+pages_build_output_dir = "./dist"
+
+# D1 Database (생성 후 ID 채우기)
+# npx wrangler d1 create games-relay-db
+[[d1_databases]]
+binding = "DB"
+database_name = "games-relay-db"
+database_id = "7025f89b-3de0-458a-a93a-974eb544e4a1"
+
+[vars]
+ENVIRONMENT = "development"
