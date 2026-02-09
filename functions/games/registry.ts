@@ -11,6 +11,7 @@ import { echoPlugin } from './echo';
 import { pokerPlugin } from './poker';
 import { gomokuPlugin } from './gomoku';
 import { connect4Plugin } from './connect4';
+import { catanPlugin } from './catan';
 
 const registry = new Map<string, GameRegistryEntry>();
 
@@ -65,3 +66,4 @@ registerGame(echoPlugin, { targetScore: 10 });
 registerGame(pokerPlugin, { startingChips: 1000, bigBlind: 20 });
 registerGame(gomokuPlugin, {});
 registerGame(connect4Plugin, {});
+registerGame(catanPlugin, {});
