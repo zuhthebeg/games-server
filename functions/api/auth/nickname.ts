@@ -1,10 +1,13 @@
-// POST /api/auth/nickname - 익명 사용자 닉네임 설정
+// POST /api/auth/nickname - 닉네임 설정 (익명 + JWT 둘 다 지원)
+import { verifyJWT } from '../../lib/auth';
+
 interface Env {
     DB: D1Database;
+    JWT_SECRET: string;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-    const { DB } = context.env;
+    const { DB, JWT_SECRET } = context.env;
     
     // Get token from Authorization header
     const authHeader = context.request.headers.get('Authorization');
@@ -22,10 +25,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             return Response.json({ error: '닉네임은 2-12자여야 합니다' }, { status: 400 });
         }
         
-        // Find user by token (anonymous token is the user id for anonymous users)
+        let userId: string | null = null;
+        
+        // Try JWT verification first
+        const jwtPayload = await verifyJWT(token, JWT_SECRET);
+        if (jwtPayload && jwtPayload.sub) {
+            userId = jwtPayload.sub;
+        } else {
+            // Fall back to anonymous token (token is the user id)
+            userId = token;
+        }
+        
+        // Find user
         const user = await DB.prepare(`
             SELECT id, nickname FROM users WHERE id = ?
-        `).bind(token).first<{ id: string; nickname: string }>();
+        `).bind(userId).first<{ id: string; nickname: string }>();
         
         if (!user) {
             return Response.json({ error: '사용자를 찾을 수 없습니다' }, { status: 404 });
