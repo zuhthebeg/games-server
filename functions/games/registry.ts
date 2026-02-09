@@ -8,7 +8,7 @@
 
 import type { GamePlugin, GameRegistryEntry } from './types';
 import { echoPlugin } from './echo';
-// import { pokerPlugin } from './poker';
+import { pokerPlugin } from './poker';
 // import { unoPlugin } from './uno';
 
 const registry = new Map<string, GameRegistryEntry>();
@@ -61,5 +61,5 @@ export function hasGame(gameType: string): boolean {
 // ============================================
 
 registerGame(echoPlugin, { targetScore: 10 });
-// registerGame(pokerPlugin, { startingChips: 1000, blinds: [10, 20] });
+registerGame(pokerPlugin, { startingChips: 1000, bigBlind: 20 });
 // registerGame(unoPlugin, { startingCards: 7 });
