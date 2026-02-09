@@ -6,9 +6,55 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     nickname TEXT,
     is_anonymous INTEGER DEFAULT 1,
+    
+    -- 이메일 인증
+    email TEXT UNIQUE,
+    password_hash TEXT,
+    email_verified INTEGER DEFAULT 0,
+    
+    -- OAuth
+    google_id TEXT UNIQUE,
+    
+    -- 프로필
+    avatar_url TEXT,
+    
+    -- 타임스탬프
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT,
     last_seen_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_google ON users(google_id);
+
+-- 이메일 인증 토큰
+CREATE TABLE IF NOT EXISTS email_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL,  -- 'verify' | 'reset'
+    expires_at INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_email_tokens_user ON email_tokens(user_id);
+
+-- 리프레시 토큰
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+
+-- 이메일 발송 추적 (월 3000통 제한)
+CREATE TABLE IF NOT EXISTS email_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    type TEXT NOT NULL,
+    sent_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_email_log_month ON email_log(sent_at);
 
 -- 방
 CREATE TABLE IF NOT EXISTS rooms (

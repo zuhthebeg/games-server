@@ -11,3 +11,10 @@ database_id = "7025f89b-3de0-458a-a93a-974eb544e4a1"
 
 [vars]
 ENVIRONMENT = "development"
+BASE_URL = "https://cocy.io"
+
+# Secrets (set via wrangler secret put):
+# - JWT_SECRET: JWT signing key (generate with: openssl rand -hex 32)
+# - RESEND_API_KEY: Resend API key for emails
+# - GOOGLE_CLIENT_ID: Google OAuth client ID
+# - GOOGLE_CLIENT_SECRET: Google OAuth client secret

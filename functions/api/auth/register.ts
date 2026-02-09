@@ -1,60 +1,79 @@
-/**
- * POST /api/auth/register
- * 닉네임 등록 (익명 → 등록 또는 새 등록)
- */
+// POST /api/auth/register - 이메일 가입
+import { hashPassword, generateId, isValidEmail, isValidPassword, createJWT, generateToken } from '../../lib/auth';
 
-import type { Env } from '../../types';
-import { jsonResponse, errorResponse, generateId, createToken, getUserFromRequest } from '../../types';
-
-interface PagesContext {
-    request: Request;
-    env: Env;
+interface Env {
+    DB: D1Database;
+    JWT_SECRET: string;
 }
 
-export const onRequestPost = async (context: PagesContext): Promise<Response> => {
-    const { request, env } = context;
-
+export const onRequestPost: PagesFunction<Env> = async (context) => {
+    const { DB, JWT_SECRET } = context.env;
+    
     try {
-        const body = await request.json() as { nickname?: string };
-        const nickname = body.nickname?.trim();
-
-        if (!nickname || nickname.length < 2 || nickname.length > 20) {
-            return errorResponse('닉네임은 2-20자여야 합니다', 400);
+        const body = await context.request.json() as { email?: string; password?: string; nickname?: string };
+        const { email, password, nickname } = body;
+        
+        // Validation
+        if (!email || !password) {
+            return Response.json({ error: '이메일과 비밀번호를 입력해주세요' }, { status: 400 });
         }
-
-        // Check for existing token (upgrade anonymous to registered)
-        const existingUser = getUserFromRequest(request);
-        const now = new Date().toISOString();
-
-        let userId: string;
-
-        if (existingUser && existingUser.isAnonymous) {
-            // Upgrade anonymous user
-            userId = existingUser.userId;
-            await env.DB.prepare(
-                'UPDATE users SET nickname = ?, is_anonymous = 0, last_seen_at = ? WHERE id = ?'
-            ).bind(nickname, now, userId).run();
-        } else {
-            // Create new registered user
-            userId = generateId();
-            await env.DB.prepare(
-                'INSERT INTO users (id, nickname, is_anonymous, created_at, last_seen_at) VALUES (?, ?, 0, ?, ?)'
-            ).bind(userId, nickname, now, now).run();
+        if (!isValidEmail(email)) {
+            return Response.json({ error: '올바른 이메일 형식이 아닙니다' }, { status: 400 });
         }
-
-        // Generate new token
-        const token = createToken({ userId, isAnonymous: false });
-
-        return jsonResponse({
-            token,
+        if (!isValidPassword(password)) {
+            return Response.json({ error: '비밀번호는 8자 이상이어야 합니다' }, { status: 400 });
+        }
+        
+        // Check if email already exists
+        const existing = await DB.prepare(
+            `SELECT id FROM users WHERE email = ?`
+        ).bind(email.toLowerCase()).first();
+        
+        if (existing) {
+            return Response.json({ error: '이미 가입된 이메일입니다' }, { status: 409 });
+        }
+        
+        // Create user (auto-verified, no email verification for now)
+        const userId = generateId();
+        const passwordHash = await hashPassword(password);
+        const displayName = nickname || email.split('@')[0];
+        
+        await DB.prepare(`
+            INSERT INTO users (id, email, password_hash, nickname, is_anonymous, email_verified, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 0, 1, datetime('now'), datetime('now'))
+        `).bind(userId, email.toLowerCase(), passwordHash, displayName).run();
+        
+        // Auto-login: create tokens
+        const accessToken = await createJWT({
+            sub: userId,
+            email: email.toLowerCase(),
+            nickname: displayName,
+            emailVerified: true
+        }, JWT_SECRET, 900); // 15 minutes
+        
+        const refreshToken = generateToken(48);
+        const refreshExpires = Math.floor(Date.now() / 1000) + 2592000; // 30 days
+        
+        await DB.prepare(`
+            INSERT INTO refresh_tokens (token, user_id, expires_at)
+            VALUES (?, ?, ?)
+        `).bind(refreshToken, userId, refreshExpires).run();
+        
+        return Response.json({
+            success: true,
+            message: '가입 완료!',
+            accessToken,
+            refreshToken,
             user: {
                 id: userId,
-                nickname,
-                isAnonymous: false,
-            },
-        });
-    } catch (error) {
-        console.error('Register error:', error);
-        return errorResponse('Failed to register', 500);
+                email: email.toLowerCase(),
+                nickname: displayName,
+                emailVerified: true
+            }
+        }, { status: 201 });
+        
+    } catch (e) {
+        console.error('Register error:', e);
+        return Response.json({ error: '서버 오류가 발생했습니다' }, { status: 500 });
     }
 };
