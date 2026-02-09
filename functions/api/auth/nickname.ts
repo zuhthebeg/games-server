@@ -1,5 +1,6 @@
 // POST /api/auth/nickname - 닉네임 설정 (익명 + JWT 둘 다 지원)
 import { verifyJWT } from '../../lib/auth';
+import { parseToken } from '../../types';
 
 interface Env {
     DB: D1Database;
@@ -27,13 +28,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         
         let userId: string | null = null;
         
-        // Try JWT verification first
-        const jwtPayload = await verifyJWT(token, JWT_SECRET);
-        if (jwtPayload && jwtPayload.sub) {
-            userId = jwtPayload.sub;
+        // 1. Try anonymous token format (unsigned JWT from createToken)
+        const anonPayload = parseToken(token);
+        if (anonPayload && anonPayload.userId) {
+            userId = anonPayload.userId;
         } else {
-            // Fall back to anonymous token (token is the user id)
-            userId = token;
+            // 2. Try signed JWT (from login)
+            const jwtPayload = await verifyJWT(token, JWT_SECRET);
+            if (jwtPayload && jwtPayload.sub) {
+                userId = jwtPayload.sub;
+            }
+        }
+        
+        if (!userId) {
+            return Response.json({ error: '유효하지 않은 토큰입니다' }, { status: 401 });
         }
         
         // Find user
