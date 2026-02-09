@@ -21,8 +21,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
     }
 
     try {
-        const body = await request.json() as { gameType: string; config?: any; maxPlayers?: number };
-        const { gameType, config, maxPlayers } = body;
+        const body = await request.json() as { gameType: string; config?: any; maxPlayers?: number; isPublic?: boolean };
+        const { gameType, config, maxPlayers, isPublic } = body;
 
         // Validate game type
         if (!hasGame(gameType)) {
@@ -47,12 +47,13 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         }
 
         const now = new Date().toISOString();
+        const roomConfig = { ...(config || {}), isPublic: isPublic === true };
 
         // Create room
         await env.DB.prepare(
             `INSERT INTO rooms (id, game_type, status, host_id, config, max_players, created_at)
              VALUES (?, ?, 'waiting', ?, ?, ?, ?)`
-        ).bind(roomId, gameType, user.userId, JSON.stringify(config || {}), effectiveMaxPlayers, now).run();
+        ).bind(roomId, gameType, user.userId, JSON.stringify(roomConfig), effectiveMaxPlayers, now).run();
 
         // Add host as first player
         await env.DB.prepare(
