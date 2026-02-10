@@ -200,22 +200,32 @@ export const enhanceGame: GamePlugin = {
 
             const { damage, isCrit } = rollDamage(attacker, isCounter);
             let finalDamage = damage;
-            let blocked = false;
 
-            // If defender is defending, they block 50% and prepare counter
+            // If defender is defending, roll for defense success
             if (defender.isDefending) {
-                finalDamage = Math.floor(damage / 2);
-                defender.counterReady = true;  // Defender gets counter on next attack
-                blocked = true;
-                newState.log.push({ 
-                    type: 'info', 
-                    text: `🛡️ ${defender.nickname}의 방어! 피해 50% 감소 + 카운터 준비!` 
-                });
+                const defenseRoll = Math.random() * 100;
+                const defenseChance = 60; // 60% chance for perfect defense
+                
+                if (defenseRoll < defenseChance) {
+                    // Perfect defense! 50% damage reduction + counter ready
+                    finalDamage = Math.floor(damage / 2);
+                    defender.counterReady = true;
+                    newState.log.push({ 
+                        type: 'info', 
+                        text: `🛡️ ${defender.nickname}의 완벽한 방어! 피해 50% 감소 + 카운터 준비!` 
+                    });
+                } else {
+                    // Partial defense - only 25% damage reduction, no counter
+                    finalDamage = Math.floor(damage * 0.75);
+                    newState.log.push({ 
+                        type: 'info', 
+                        text: `🛡️ ${defender.nickname}의 부분 방어! 피해 25% 감소` 
+                    });
+                }
+                defender.isDefending = false;
             }
-            
-            // Reset defender's defending state after being attacked
-            defender.isDefending = false;
 
+            // Apply damage (ensure HP doesn't go below 0)
             defender.hp = Math.max(0, defender.hp - finalDamage);
 
             if (isCounter && isCrit) {
