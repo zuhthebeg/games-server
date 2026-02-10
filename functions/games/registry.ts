@@ -12,6 +12,7 @@ import { pokerPlugin } from './poker';
 import { gomokuPlugin } from './gomoku';
 import { connect4Plugin } from './connect4';
 import { catanPlugin } from './catan';
+import { enhanceGame } from './enhance';
 
 const registry = new Map<string, GameRegistryEntry>();
 
@@ -67,3 +68,4 @@ registerGame(pokerPlugin, { startingChips: 1000, bigBlind: 20 });
 registerGame(gomokuPlugin, {});
 registerGame(connect4Plugin, {});
 registerGame(catanPlugin, {});
+registerGame(enhanceGame, {});
