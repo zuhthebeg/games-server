@@ -1,5 +1,8 @@
 /**
  * POST /api/rooms/:id/ready - 준비 완료/취소
+ * 
+ * Body: { ready?: boolean, playerData?: any }
+ * - playerData is optional game-specific data (e.g. weapon info for enhance game)
  */
 
 import type { Env, DBRoom, DBRoomPlayer } from '../../../types';
@@ -21,7 +24,7 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
     }
 
     try {
-        const body = await request.json().catch(() => ({})) as { ready?: boolean };
+        const body = await request.json().catch(() => ({})) as { ready?: boolean; playerData?: any };
 
         // Get room
         const room = await env.DB.prepare(
@@ -48,12 +51,19 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         // Toggle or set ready status
         const newReady = body.ready !== undefined ? (body.ready ? 1 : 0) : (player.is_ready === 1 ? 0 : 1);
 
-        await env.DB.prepare(
-            'UPDATE room_players SET is_ready = ? WHERE room_id = ? AND user_id = ?'
-        ).bind(newReady, roomId, user.userId).run();
+        // Update with optional playerData (stored in player_state)
+        if (body.playerData !== undefined) {
+            await env.DB.prepare(
+                'UPDATE room_players SET is_ready = ?, player_state = ? WHERE room_id = ? AND user_id = ?'
+            ).bind(newReady, JSON.stringify(body.playerData), roomId, user.userId).run();
+        } else {
+            await env.DB.prepare(
+                'UPDATE room_players SET is_ready = ? WHERE room_id = ? AND user_id = ?'
+            ).bind(newReady, roomId, user.userId).run();
+        }
 
         // Add event
-        await addEvent(env, roomId, 'player_ready', user.userId, { ready: newReady === 1 });
+        await addEvent(env, roomId, 'player_ready', user.userId, { ready: newReady === 1, hasPlayerData: !!body.playerData });
 
         return jsonResponse({ ready: newReady === 1 });
     } catch (error) {

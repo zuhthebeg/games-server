@@ -75,7 +75,39 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             seat: p.seat,
         }));
 
+        // Merge room config with player data
         const config = room.config ? JSON.parse(room.config) : {};
+        
+        // Extract player-specific data (weapons, gold, etc.) from player_state
+        const playerData: Record<string, any> = {};
+        for (const p of dbPlayers) {
+            if (p.player_state) {
+                try {
+                    playerData[p.user_id] = JSON.parse(p.player_state);
+                } catch (e) {
+                    // Ignore parse errors
+                }
+            }
+        }
+        
+        // Add player data to config for game plugins
+        // For enhance game: config.weapons[playerId], config.gold[playerId]
+        if (Object.keys(playerData).length > 0) {
+            config.playerData = playerData;
+            
+            // Convenience accessors for enhance game
+            config.weapons = {};
+            config.gold = {};
+            for (const [playerId, data] of Object.entries(playerData)) {
+                if ((data as any).weapon) {
+                    config.weapons[playerId] = (data as any).weapon;
+                }
+                if ((data as any).gold !== undefined) {
+                    config.gold[playerId] = (data as any).gold;
+                }
+            }
+        }
+        
         const initialState = game.createInitialState(players, config);
 
         const now = new Date().toISOString();

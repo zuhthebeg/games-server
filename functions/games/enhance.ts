@@ -1,22 +1,67 @@
 /**
  * Enhance Battle Game Plugin
  * 무기 강화 배틀 - 2인 턴제 대전
+ * 
+ * Features:
+ * - Weapon grades (common, magic, rare, legendary, unique)
+ * - Weapon types with bonuses
+ * - Defense with counter-attack
+ * - Gold betting
  */
 
 import { GamePlugin, Player, GameAction, GameEvent, GameResult, ValidationResult, ActionResult } from './types';
+
+// Weapon type bonuses
+const WEAPON_TYPES: Record<string, { damage: number; crit: number }> = {
+    sword: { damage: 1.0, crit: 1.0 },
+    axe: { damage: 1.15, crit: 0.9 },
+    spear: { damage: 0.95, crit: 1.1 },
+    hammer: { damage: 1.2, crit: 0.85 },
+    dagger: { damage: 0.85, crit: 1.25 },
+    staff: { damage: 0.9, crit: 1.0 },
+    katana: { damage: 1.05, crit: 1.15 },
+    scythe: { damage: 1.1, crit: 1.05 }
+};
+
+// Grade multipliers
+const GRADES: Record<string, number> = {
+    common: 1.0,
+    magic: 1.3,
+    rare: 1.7,
+    legendary: 2.2,
+    unique: 3.0
+};
+
+interface WeaponData {
+    type: string;
+    grade: string;
+    level: number;
+    name: string;
+    icon: string;
+}
 
 interface BattlePlayer {
     id: string;
     seat: number;
     nickname: string;
+    // Weapon info
+    weaponType: string;
+    weaponGrade: string;
     weaponLevel: number;
+    weaponName: string;
+    weaponIcon: string;
+    // Combat stats
     hp: number;
     maxHp: number;
     damageMin: number;
     damageMax: number;
     critChance: number;
     critDamage: number;
+    // Battle state
     isDefending: boolean;
+    counterReady: boolean;  // Next attack is counter
+    // Gold
+    betGold: number;
 }
 
 interface EnhanceState {
@@ -26,9 +71,14 @@ interface EnhanceState {
     log: { type: string; text: string }[];
     winner: string | null;
     gameOver: boolean;
+    totalPrize: number;
 }
 
-function getWeaponStats(level: number) {
+function getWeaponStats(weapon: WeaponData) {
+    const typeBonus = WEAPON_TYPES[weapon.type] || { damage: 1.0, crit: 1.0 };
+    const gradeMultiplier = GRADES[weapon.grade] || 1.0;
+    const level = weapon.level || 0;
+
     const baseDamageMin = 10;
     const baseDamageMax = 15;
     const damagePerLevel = 5;
@@ -37,37 +87,48 @@ function getWeaponStats(level: number) {
     const baseCritDamage = 150;
     const critDamagePerLevel = 5;
 
-    return {
-        damageMin: baseDamageMin + (level * damagePerLevel),
-        damageMax: baseDamageMax + (level * damagePerLevel),
-        critChance: Math.min(50, baseCritChance + (level * critPerLevel)),
-        critDamage: baseCritDamage + (level * critDamagePerLevel),
-        hp: 100 + (level * 20),
-        maxHp: 100 + (level * 20)
-    };
+    const damageMin = Math.floor((baseDamageMin + level * damagePerLevel) * gradeMultiplier * typeBonus.damage);
+    const damageMax = Math.floor((baseDamageMax + level * damagePerLevel) * gradeMultiplier * typeBonus.damage);
+    const critChance = Math.min(60, Math.floor((baseCritChance + level * critPerLevel) * typeBonus.crit));
+    const critDamage = baseCritDamage + level * critDamagePerLevel;
+    const hp = Math.floor((100 + level * 20) * gradeMultiplier);
+
+    return { damageMin, damageMax, critChance, critDamage, hp, maxHp: hp };
 }
 
-function createBattlePlayer(player: Player, weaponLevel: number): BattlePlayer {
-    const stats = getWeaponStats(weaponLevel);
+function createBattlePlayer(player: Player, weapon: WeaponData, betGold: number): BattlePlayer {
+    const stats = getWeaponStats(weapon);
     return {
         id: player.id,
         seat: player.seat,
         nickname: player.nickname,
-        weaponLevel,
+        weaponType: weapon.type || 'sword',
+        weaponGrade: weapon.grade || 'common',
+        weaponLevel: weapon.level || 0,
+        weaponName: weapon.name || '무기',
+        weaponIcon: weapon.icon || '🗡️',
         hp: stats.hp,
         maxHp: stats.maxHp,
         damageMin: stats.damageMin,
         damageMax: stats.damageMax,
         critChance: stats.critChance,
         critDamage: stats.critDamage,
-        isDefending: false
+        isDefending: false,
+        counterReady: false,
+        betGold: betGold
     };
 }
 
-function rollDamage(player: BattlePlayer): { damage: number; isCrit: boolean } {
+function rollDamage(player: BattlePlayer, isCounter: boolean = false): { damage: number; isCrit: boolean } {
     const baseDamage = Math.floor(Math.random() * (player.damageMax - player.damageMin + 1)) + player.damageMin;
-    const isCrit = Math.random() * 100 < player.critChance;
-    const damage = isCrit ? Math.floor(baseDamage * player.critDamage / 100) : baseDamage;
+    // Counter attacks have +20% crit chance
+    const critChance = isCounter ? Math.min(80, player.critChance + 20) : player.critChance;
+    const isCrit = Math.random() * 100 < critChance;
+    // Counter attacks deal 1.3x damage
+    let damage = isCrit ? Math.floor(baseDamage * player.critDamage / 100) : baseDamage;
+    if (isCounter) {
+        damage = Math.floor(damage * 1.3);
+    }
     return { damage, isCrit };
 }
 
@@ -78,24 +139,33 @@ export const enhanceGame: GamePlugin = {
     maxPlayers: 2,
     
     createInitialState(players: Player[], config?: any): EnhanceState {
-        // Get weapon levels from config (stored by client before game start)
-        const weaponLevels = config?.weaponLevels || {};
+        // Get weapon data and gold from config
+        const weaponData = config?.weapons || {};
+        const goldData = config?.gold || {};
         
         const battlePlayers = players.map(p => {
-            const level = weaponLevels[p.id] || 0;
-            return createBattlePlayer(p, level);
+            const weapon: WeaponData = weaponData[p.id] || { type: 'sword', grade: 'common', level: 0, name: '기본 검', icon: '🗡️' };
+            const gold = goldData[p.id] || 1000;
+            // Bet is minimum of their gold and 1000 (base bet)
+            const betGold = Math.min(gold, 1000);
+            return createBattlePlayer(p, weapon, betGold);
         });
 
         // Random first turn
         const firstTurn = battlePlayers[Math.floor(Math.random() * battlePlayers.length)].id;
+        const totalPrize = battlePlayers.reduce((sum, p) => sum + p.betGold, 0);
 
         return {
             players: battlePlayers,
             currentTurn: firstTurn,
             round: 1,
-            log: [{ type: 'info', text: `⚔️ 배틀 시작! ${battlePlayers.find(p => p.id === firstTurn)?.nickname}의 선공!` }],
+            log: [
+                { type: 'info', text: `💰 총 상금: ${totalPrize.toLocaleString()}G` },
+                { type: 'info', text: `⚔️ 배틀 시작! ${battlePlayers.find(p => p.id === firstTurn)?.nickname}의 선공!` }
+            ],
             winner: null,
-            gameOver: false
+            gameOver: false,
+            totalPrize
         };
     },
 
@@ -123,25 +193,42 @@ export const enhanceGame: GamePlugin = {
         const attacker = newState.players.find(p => p.id === playerId)!;
         const defender = newState.players.find(p => p.id !== playerId)!;
 
-        // Reset attacker's defending state
-        attacker.isDefending = false;
-
         if (action.type === 'attack') {
-            const { damage, isCrit } = rollDamage(attacker);
-            let finalDamage = damage;
+            // Check if attacker has counter ready
+            const isCounter = attacker.counterReady;
+            attacker.counterReady = false;
 
-            // Defending reduces damage by 50%
+            const { damage, isCrit } = rollDamage(attacker, isCounter);
+            let finalDamage = damage;
+            let blocked = false;
+
+            // If defender is defending, they block 50% and prepare counter
             if (defender.isDefending) {
                 finalDamage = Math.floor(damage / 2);
+                defender.counterReady = true;  // Defender gets counter on next attack
+                blocked = true;
                 newState.log.push({ 
                     type: 'info', 
-                    text: `🛡️ ${defender.nickname}의 방어로 피해 50% 감소!` 
+                    text: `🛡️ ${defender.nickname}의 방어! 피해 50% 감소 + 카운터 준비!` 
                 });
             }
+            
+            // Reset defender's defending state after being attacked
+            defender.isDefending = false;
 
             defender.hp = Math.max(0, defender.hp - finalDamage);
 
-            if (isCrit) {
+            if (isCounter && isCrit) {
+                newState.log.push({ 
+                    type: 'crit', 
+                    text: `⚡ ${attacker.nickname}의 카운터 크리티컬! ${finalDamage} 데미지!` 
+                });
+            } else if (isCounter) {
+                newState.log.push({ 
+                    type: 'damage', 
+                    text: `⚡ ${attacker.nickname}의 카운터 공격! ${finalDamage} 데미지!` 
+                });
+            } else if (isCrit) {
                 newState.log.push({ 
                     type: 'crit', 
                     text: `💥 ${attacker.nickname}의 크리티컬! ${finalDamage} 데미지!` 
@@ -153,13 +240,16 @@ export const enhanceGame: GamePlugin = {
                 });
             }
 
+            // Reset attacker's defending state
+            attacker.isDefending = false;
+
             // Check for winner
             if (defender.hp <= 0) {
                 newState.winner = attacker.id;
                 newState.gameOver = true;
                 newState.log.push({ 
                     type: 'info', 
-                    text: `🏆 ${attacker.nickname} 승리!` 
+                    text: `🏆 ${attacker.nickname} 승리! +${newState.totalPrize.toLocaleString()}G` 
                 });
 
                 events.push({
@@ -168,7 +258,8 @@ export const enhanceGame: GamePlugin = {
                         winnerId: attacker.id,
                         winnerNickname: attacker.nickname,
                         loserId: defender.id,
-                        loserNickname: defender.nickname
+                        loserNickname: defender.nickname,
+                        prizeGold: newState.totalPrize
                     }
                 });
             }
@@ -177,7 +268,7 @@ export const enhanceGame: GamePlugin = {
             attacker.isDefending = true;
             newState.log.push({ 
                 type: 'info', 
-                text: `🛡️ ${attacker.nickname}이(가) 방어 태세!` 
+                text: `🛡️ ${attacker.nickname}이(가) 방어 태세! (다음 피격시 카운터)` 
             });
         }
 
