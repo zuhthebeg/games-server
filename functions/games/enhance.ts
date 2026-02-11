@@ -492,9 +492,11 @@ export const enhanceGame: GamePlugin = {
 
     getResult(state: EnhanceState): GameResult | null {
         if (!state.gameOver) return null;
+        const loser = state.players.find(p => p.id !== state.winner);
         return {
             winnerId: state.winner || undefined,
-            reason: 'knockout'
+            reason: 'knockout',
+            prizeGold: loser?.weaponSalePrice || 0
         };
     },
 
