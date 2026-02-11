@@ -3,10 +3,10 @@
  * 무기 강화 배틀 - 2인 턴제 대전
  * 
  * Features:
- * - Weapon grades (common, magic, rare, legendary, unique)
- * - Weapon types with bonuses
- * - Defense with counter-attack
- * - Gold betting
+ * - Rock-Paper-Scissors attack system (강타 > 빠른공격 > 정밀타격 > 강타)
+ * - Element advantage system (Fire > Wind > Earth > Water > Fire)
+ * - Hidden defense (opponent can't see your defense state)
+ * - Weapon betting (loser loses weapon, winner gets sale price)
  */
 
 import { GamePlugin, Player, GameAction, GameEvent, GameResult, ValidationResult, ActionResult } from './types';
@@ -23,13 +23,34 @@ const WEAPON_TYPES: Record<string, { damage: number; crit: number }> = {
     scythe: { damage: 1.1, crit: 1.05 }
 };
 
-// Grade multipliers
-const GRADES: Record<string, number> = {
-    common: 1.0,
-    magic: 1.3,
-    rare: 1.7,
-    legendary: 2.2,
-    unique: 3.0
+// Grade multipliers and sale prices
+const GRADES: Record<string, { multiplier: number; basePrice: number }> = {
+    common: { multiplier: 1.0, basePrice: 100 },
+    magic: { multiplier: 1.3, basePrice: 500 },
+    rare: { multiplier: 1.7, basePrice: 2000 },
+    legendary: { multiplier: 2.2, basePrice: 10000 },
+    unique: { multiplier: 3.0, basePrice: 50000 }
+};
+
+// Element advantage system (circular)
+// fire > ice > lightning > fire (triangle)
+// holy > poison > silver > holy (triangle)  
+// Cross advantages: fire/ice/lightning beat poison/silver/holy
+const ELEMENT_ADVANTAGE: Record<string, string[]> = {
+    fire: ['ice', 'poison'],
+    ice: ['lightning', 'silver'],
+    lightning: ['fire', 'holy'],
+    holy: ['poison', 'fire'],
+    poison: ['silver', 'ice'],
+    silver: ['holy', 'lightning']
+};
+
+// Attack types: Rock-Paper-Scissors
+// strong > quick > precise > strong
+const ATTACK_ADVANTAGE: Record<string, string> = {
+    strong: 'quick',    // 강타 > 빠른공격
+    quick: 'precise',   // 빠른공격 > 정밀타격
+    precise: 'strong'   // 정밀타격 > 강타
 };
 
 interface WeaponData {
@@ -38,6 +59,7 @@ interface WeaponData {
     level: number;
     name: string;
     icon: string;
+    element?: string;
 }
 
 interface BattlePlayer {
@@ -50,6 +72,8 @@ interface BattlePlayer {
     weaponLevel: number;
     weaponName: string;
     weaponIcon: string;
+    weaponElement: string | null;
+    weaponSalePrice: number;
     // Combat stats
     hp: number;
     maxHp: number;
@@ -57,26 +81,32 @@ interface BattlePlayer {
     damageMax: number;
     critChance: number;
     critDamage: number;
-    // Battle state
+    // Battle state (hidden from opponent)
+    selectedAction: string | null;  // 'strong', 'quick', 'precise', 'defend'
     isDefending: boolean;
-    counterReady: boolean;  // Next attack is counter
-    // Gold
-    betGold: number;
+    counterReady: boolean;
 }
 
 interface EnhanceState {
     players: BattlePlayer[];
-    currentTurn: string;
+    phase: 'select' | 'resolve';  // Both select, then resolve
     round: number;
     log: { type: string; text: string }[];
     winner: string | null;
     gameOver: boolean;
-    totalPrize: number;
+    // Prize is loser's weapon sale price
+}
+
+function calculateSalePrice(weapon: WeaponData): number {
+    const gradeInfo = GRADES[weapon.grade] || GRADES.common;
+    const levelBonus = weapon.level * 200;
+    return gradeInfo.basePrice + levelBonus;
 }
 
 function getWeaponStats(weapon: WeaponData) {
     const typeBonus = WEAPON_TYPES[weapon.type] || { damage: 1.0, crit: 1.0 };
-    const gradeMultiplier = GRADES[weapon.grade] || 1.0;
+    const gradeInfo = GRADES[weapon.grade] || GRADES.common;
+    const gradeMultiplier = gradeInfo.multiplier;
     const level = weapon.level || 0;
 
     const baseDamageMin = 10;
@@ -96,8 +126,9 @@ function getWeaponStats(weapon: WeaponData) {
     return { damageMin, damageMax, critChance, critDamage, hp, maxHp: hp };
 }
 
-function createBattlePlayer(player: Player, weapon: WeaponData, betGold: number): BattlePlayer {
+function createBattlePlayer(player: Player, weapon: WeaponData): BattlePlayer {
     const stats = getWeaponStats(weapon);
+    const salePrice = calculateSalePrice(weapon);
     return {
         id: player.id,
         seat: player.seat,
@@ -107,29 +138,56 @@ function createBattlePlayer(player: Player, weapon: WeaponData, betGold: number)
         weaponLevel: weapon.level || 0,
         weaponName: weapon.name || '무기',
         weaponIcon: weapon.icon || '🗡️',
+        weaponElement: weapon.element || null,
+        weaponSalePrice: salePrice,
         hp: stats.hp,
         maxHp: stats.maxHp,
         damageMin: stats.damageMin,
         damageMax: stats.damageMax,
         critChance: stats.critChance,
         critDamage: stats.critDamage,
+        selectedAction: null,
         isDefending: false,
-        counterReady: false,
-        betGold: betGold
+        counterReady: false
     };
 }
 
 function rollDamage(player: BattlePlayer, isCounter: boolean = false): { damage: number; isCrit: boolean } {
     const baseDamage = Math.floor(Math.random() * (player.damageMax - player.damageMin + 1)) + player.damageMin;
-    // Counter attacks have +20% crit chance
     const critChance = isCounter ? Math.min(80, player.critChance + 20) : player.critChance;
     const isCrit = Math.random() * 100 < critChance;
-    // Counter attacks deal 1.3x damage
     let damage = isCrit ? Math.floor(baseDamage * player.critDamage / 100) : baseDamage;
     if (isCounter) {
         damage = Math.floor(damage * 1.3);
     }
     return { damage, isCrit };
+}
+
+function getAttackAdvantage(attackerAction: string, defenderAction: string): number {
+    // Returns damage multiplier based on attack type matchup
+    if (defenderAction === 'defend') return 1.0;  // Defense doesn't participate in RPS
+    
+    if (ATTACK_ADVANTAGE[attackerAction] === defenderAction) {
+        return 1.3;  // Advantage: +30% damage
+    } else if (ATTACK_ADVANTAGE[defenderAction] === attackerAction) {
+        return 0.7;  // Disadvantage: -30% damage
+    }
+    return 1.0;  // Neutral
+}
+
+function getElementAdvantage(attackerElement: string | null, defenderElement: string | null): number {
+    if (!attackerElement || attackerElement === 'none') return 1.0;
+    if (!defenderElement || defenderElement === 'none') return 1.0;
+    
+    const advantages = ELEMENT_ADVANTAGE[attackerElement] || [];
+    const defenderAdvantages = ELEMENT_ADVANTAGE[defenderElement] || [];
+    
+    if (advantages.includes(defenderElement)) {
+        return 1.2;  // Element advantage: +20% damage
+    } else if (defenderAdvantages.includes(attackerElement)) {
+        return 0.8;  // Element disadvantage: -20% damage
+    }
+    return 1.0;
 }
 
 export const enhanceGame: GamePlugin = {
@@ -139,160 +197,223 @@ export const enhanceGame: GamePlugin = {
     maxPlayers: 2,
     
     createInitialState(players: Player[], config?: any): EnhanceState {
-        // Get weapon data and gold from config
         const weaponData = config?.weapons || {};
-        const goldData = config?.gold || {};
         
         const battlePlayers = players.map(p => {
-            const weapon: WeaponData = weaponData[p.id] || { type: 'sword', grade: 'common', level: 0, name: '기본 검', icon: '🗡️' };
-            const gold = goldData[p.id] || 1000;
-            // Bet is minimum of their gold and 1000 (base bet)
-            const betGold = Math.min(gold, 1000);
-            return createBattlePlayer(p, weapon, betGold);
+            const weapon: WeaponData = weaponData[p.id] || { 
+                type: 'sword', grade: 'common', level: 0, name: '기본 검', icon: '🗡️' 
+            };
+            return createBattlePlayer(p, weapon);
         });
-
-        // Random first turn
-        const firstTurn = battlePlayers[Math.floor(Math.random() * battlePlayers.length)].id;
-        const totalPrize = battlePlayers.reduce((sum, p) => sum + p.betGold, 0);
 
         return {
             players: battlePlayers,
-            currentTurn: firstTurn,
+            phase: 'select',
             round: 1,
             log: [
-                { type: 'info', text: `💰 총 상금: ${totalPrize.toLocaleString()}G` },
-                { type: 'info', text: `⚔️ 배틀 시작! ${battlePlayers.find(p => p.id === firstTurn)?.nickname}의 선공!` }
+                { type: 'info', text: `⚔️ 무기 배틀 시작!` },
+                { type: 'info', text: `🎯 공격 타입을 선택하세요! (강타/빠른공격/정밀타격/방어)` }
             ],
             winner: null,
-            gameOver: false,
-            totalPrize
+            gameOver: false
         };
     },
 
     validateAction(state: EnhanceState, action: GameAction, playerId: string): ValidationResult {
-        if (state.currentTurn !== playerId) {
-            return { valid: false, error: '상대방의 턴입니다' };
-        }
-
         if (state.gameOver) {
             return { valid: false, error: '게임이 이미 종료되었습니다' };
         }
 
-        if (action.type !== 'attack' && action.type !== 'defend') {
-            return { valid: false, error: '알 수 없는 액션입니다' };
+        const player = state.players.find(p => p.id === playerId);
+        if (!player) {
+            return { valid: false, error: '플레이어를 찾을 수 없습니다' };
+        }
+
+        if (state.phase === 'select') {
+            if (player.selectedAction !== null) {
+                return { valid: false, error: '이미 행동을 선택했습니다' };
+            }
+            
+            const validActions = ['strong', 'quick', 'precise', 'defend'];
+            if (!validActions.includes(action.type)) {
+                return { valid: false, error: '유효하지 않은 행동입니다' };
+            }
         }
 
         return { valid: true };
     },
 
     applyAction(state: EnhanceState, action: GameAction, playerId: string): ActionResult {
-        // Deep copy state
         const newState: EnhanceState = JSON.parse(JSON.stringify(state));
         const events: GameEvent[] = [];
 
-        const attacker = newState.players.find(p => p.id === playerId)!;
-        const defender = newState.players.find(p => p.id !== playerId)!;
+        const player = newState.players.find(p => p.id === playerId)!;
+        const opponent = newState.players.find(p => p.id !== playerId)!;
 
-        if (action.type === 'attack') {
-            // Check if attacker has counter ready
-            const isCounter = attacker.counterReady;
-            attacker.counterReady = false;
-
-            const { damage, isCrit } = rollDamage(attacker, isCounter);
-            let finalDamage = damage;
-
-            // If defender is defending, roll for defense success
-            if (defender.isDefending) {
-                const defenseRoll = Math.random() * 100;
-                const defenseChance = 60; // 60% chance for perfect defense
-                
-                if (defenseRoll < defenseChance) {
-                    // Perfect defense! 50% damage reduction + counter ready
-                    finalDamage = Math.floor(damage / 2);
-                    defender.counterReady = true;
-                    newState.log.push({ 
-                        type: 'info', 
-                        text: `🛡️ ${defender.nickname}의 완벽한 방어! 피해 50% 감소 + 카운터 준비!` 
-                    });
-                } else {
-                    // Partial defense - only 25% damage reduction, no counter
-                    finalDamage = Math.floor(damage * 0.75);
-                    newState.log.push({ 
-                        type: 'info', 
-                        text: `🛡️ ${defender.nickname}의 부분 방어! 피해 25% 감소` 
-                    });
-                }
-                defender.isDefending = false;
-            }
-
-            // Apply damage (ensure HP doesn't go below 0)
-            defender.hp = Math.max(0, defender.hp - finalDamage);
-
-            if (isCounter && isCrit) {
-                newState.log.push({ 
-                    type: 'crit', 
-                    text: `⚡ ${attacker.nickname}의 카운터 크리티컬! ${finalDamage} 데미지!` 
-                });
-            } else if (isCounter) {
-                newState.log.push({ 
-                    type: 'damage', 
-                    text: `⚡ ${attacker.nickname}의 카운터 공격! ${finalDamage} 데미지!` 
-                });
-            } else if (isCrit) {
-                newState.log.push({ 
-                    type: 'crit', 
-                    text: `💥 ${attacker.nickname}의 크리티컬! ${finalDamage} 데미지!` 
-                });
-            } else {
-                newState.log.push({ 
-                    type: 'damage', 
-                    text: `⚔️ ${attacker.nickname}의 공격! ${finalDamage} 데미지!` 
-                });
-            }
-
-            // Reset attacker's defending state
-            attacker.isDefending = false;
-
-            // Check for winner
-            if (defender.hp <= 0) {
-                newState.winner = attacker.id;
-                newState.gameOver = true;
-                newState.log.push({ 
-                    type: 'info', 
-                    text: `🏆 ${attacker.nickname} 승리! +${newState.totalPrize.toLocaleString()}G` 
-                });
-
-                events.push({
-                    type: 'game_end',
-                    payload: {
-                        winnerId: attacker.id,
-                        winnerNickname: attacker.nickname,
-                        loserId: defender.id,
-                        loserNickname: defender.nickname,
-                        prizeGold: newState.totalPrize
-                    }
-                });
-            }
-
-        } else if (action.type === 'defend') {
-            attacker.isDefending = true;
+        if (newState.phase === 'select') {
+            // Player selects their action
+            player.selectedAction = action.type;
+            
             newState.log.push({ 
                 type: 'info', 
-                text: `🛡️ ${attacker.nickname}이(가) 방어 태세! (다음 피격시 카운터)` 
+                text: `✅ ${player.nickname} 행동 선택 완료!` 
             });
-        }
 
-        // Switch turn if game not over
-        if (!newState.gameOver) {
-            newState.currentTurn = defender.id;
+            // Check if both players have selected
+            if (newState.players.every(p => p.selectedAction !== null)) {
+                // Resolve phase
+                newState.phase = 'resolve';
+                
+                const p1 = newState.players[0];
+                const p2 = newState.players[1];
+                
+                // Get action names in Korean
+                const actionNames: Record<string, string> = {
+                    strong: '강타',
+                    quick: '빠른공격',
+                    precise: '정밀타격',
+                    defend: '방어'
+                };
+                
+                newState.log.push({ 
+                    type: 'info', 
+                    text: `🎲 ${p1.nickname}: ${actionNames[p1.selectedAction!]} vs ${p2.nickname}: ${actionNames[p2.selectedAction!]}` 
+                });
 
-            // Increment round when back to first player
-            if (newState.currentTurn === newState.players[0].id) {
-                newState.round++;
+                // Process attacks for each player
+                for (const attacker of [p1, p2]) {
+                    const defender = attacker === p1 ? p2 : p1;
+                    
+                    if (attacker.selectedAction === 'defend') {
+                        attacker.isDefending = true;
+                        newState.log.push({ 
+                            type: 'info', 
+                            text: `🛡️ ${attacker.nickname} 방어 태세!` 
+                        });
+                        continue;
+                    }
+
+                    // Calculate damage with all modifiers
+                    const isCounter = attacker.counterReady;
+                    attacker.counterReady = false;
+                    
+                    const { damage: baseDamage, isCrit } = rollDamage(attacker, isCounter);
+                    
+                    // Attack type advantage
+                    const attackAdvantage = getAttackAdvantage(attacker.selectedAction!, defender.selectedAction!);
+                    
+                    // Element advantage
+                    const elementAdvantage = getElementAdvantage(attacker.weaponElement, defender.weaponElement);
+                    
+                    let finalDamage = Math.floor(baseDamage * attackAdvantage * elementAdvantage);
+                    let damageLog = '';
+                    
+                    // Check if defender is defending
+                    if (defender.isDefending) {
+                        const defenseRoll = Math.random() * 100;
+                        const defenseChance = 60;
+                        
+                        if (defenseRoll < defenseChance) {
+                            finalDamage = Math.floor(finalDamage / 2);
+                            defender.counterReady = true;
+                            damageLog = ` (방어 성공! 카운터 준비)`;
+                        } else {
+                            finalDamage = Math.floor(finalDamage * 0.75);
+                            damageLog = ` (부분 방어)`;
+                        }
+                        defender.isDefending = false;
+                    }
+
+                    defender.hp = Math.max(0, defender.hp - finalDamage);
+                    
+                    // Build log message
+                    let logText = '';
+                    const attackType = actionNames[attacker.selectedAction!];
+                    
+                    if (isCounter && isCrit) {
+                        logText = `⚡💥 ${attacker.nickname}의 카운터 크리티컬 ${attackType}! ${finalDamage} 데미지!`;
+                    } else if (isCounter) {
+                        logText = `⚡ ${attacker.nickname}의 카운터 ${attackType}! ${finalDamage} 데미지!`;
+                    } else if (isCrit) {
+                        logText = `💥 ${attacker.nickname}의 크리티컬 ${attackType}! ${finalDamage} 데미지!`;
+                    } else {
+                        logText = `⚔️ ${attacker.nickname}의 ${attackType}! ${finalDamage} 데미지!`;
+                    }
+                    
+                    // Add advantage info
+                    if (attackAdvantage > 1) {
+                        logText += ` (타입 유리!)`;
+                    } else if (attackAdvantage < 1) {
+                        logText += ` (타입 불리)`;
+                    }
+                    
+                    if (elementAdvantage > 1) {
+                        logText += ` (속성 유리!)`;
+                    } else if (elementAdvantage < 1) {
+                        logText += ` (속성 불리)`;
+                    }
+                    
+                    logText += damageLog;
+                    
+                    newState.log.push({ 
+                        type: isCrit ? 'crit' : 'damage', 
+                        text: logText 
+                    });
+                }
+
+                // Check for winner (after both attacks)
+                const deadPlayers = newState.players.filter(p => p.hp <= 0);
+                
+                if (deadPlayers.length === 2) {
+                    // Both died - tie, but lower HP loses
+                    const winner = newState.players.reduce((a, b) => a.hp >= b.hp ? a : b);
+                    newState.winner = winner.id;
+                    newState.gameOver = true;
+                } else if (deadPlayers.length === 1) {
+                    const winner = newState.players.find(p => p.hp > 0)!;
+                    const loser = deadPlayers[0];
+                    newState.winner = winner.id;
+                    newState.gameOver = true;
+                    
+                    newState.log.push({ 
+                        type: 'info', 
+                        text: `🏆 ${winner.nickname} 승리!` 
+                    });
+                    newState.log.push({ 
+                        type: 'info', 
+                        text: `💰 ${loser.weaponName} 판매가 ${loser.weaponSalePrice.toLocaleString()}G 획득!` 
+                    });
+
+                    events.push({
+                        type: 'game_end',
+                        payload: {
+                            winnerId: winner.id,
+                            winnerNickname: winner.nickname,
+                            loserId: loser.id,
+                            loserNickname: loser.nickname,
+                            prizeGold: loser.weaponSalePrice,
+                            loserLostWeapon: true
+                        }
+                    });
+                }
+
+                // If game not over, reset for next round
+                if (!newState.gameOver) {
+                    newState.round++;
+                    newState.phase = 'select';
+                    newState.players.forEach(p => {
+                        p.selectedAction = null;
+                        p.isDefending = false;
+                    });
+                    
+                    newState.log.push({ 
+                        type: 'info', 
+                        text: `--- 라운드 ${newState.round} ---` 
+                    });
+                }
             }
         }
 
-        // Always send state update
         events.push({
             type: 'state_update',
             payload: newState
@@ -302,7 +423,12 @@ export const enhanceGame: GamePlugin = {
     },
 
     getCurrentTurn(state: EnhanceState): string | null {
-        return state.gameOver ? null : state.currentTurn;
+        // In simultaneous selection, all players can act
+        if (state.gameOver) return null;
+        
+        // Return first player who hasn't selected yet
+        const waiting = state.players.find(p => p.selectedAction === null);
+        return waiting?.id || null;
     },
 
     isGameOver(state: EnhanceState): boolean {
@@ -318,10 +444,33 @@ export const enhanceGame: GamePlugin = {
     },
 
     getPublicState(state: EnhanceState): any {
-        return state;
+        // Hide selected actions until both have selected
+        const publicState = JSON.parse(JSON.stringify(state));
+        if (state.phase === 'select') {
+            publicState.players.forEach((p: any) => {
+                p.selectedAction = p.selectedAction ? 'selected' : null;
+            });
+        }
+        return publicState;
     },
 
     getPlayerView(state: EnhanceState, playerId: string): any {
-        return state;
+        // Each player can only see their own selected action
+        // and whether opponent has selected (but not what)
+        const view = JSON.parse(JSON.stringify(state));
+        
+        if (state.phase === 'select') {
+            view.players.forEach((p: any) => {
+                if (p.id !== playerId) {
+                    // Hide opponent's selection
+                    p.selectedAction = p.selectedAction ? 'ready' : null;
+                    // Hide opponent's defending state
+                    p.isDefending = false;
+                    p.counterReady = false;
+                }
+            });
+        }
+        
+        return view;
     }
 };
