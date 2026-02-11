@@ -87,11 +87,23 @@ interface BattlePlayer {
     counterReady: boolean;
 }
 
+interface AnimationEvent {
+    type: 'attack' | 'defend' | 'damage' | 'crit' | 'counter';
+    attackerId: string;
+    defenderId?: string;
+    damage?: number;
+    attackType?: string;
+    isCrit?: boolean;
+    isCounter?: boolean;
+    advantage?: string;  // 'type' | 'element' | 'both' | null
+}
+
 interface EnhanceState {
     players: BattlePlayer[];
     phase: 'select' | 'resolve';  // Both select, then resolve
     round: number;
     log: { type: string; text: string }[];
+    animations: AnimationEvent[];  // For client-side animation
     winner: string | null;
     gameOver: boolean;
     // Prize is loser's weapon sale price
@@ -214,6 +226,7 @@ export const enhanceGame: GamePlugin = {
                 { type: 'info', text: `⚔️ 무기 배틀 시작!` },
                 { type: 'info', text: `🎯 공격 타입을 선택하세요! (강타/빠른공격/정밀타격/방어)` }
             ],
+            animations: [],
             winner: null,
             gameOver: false
         };
@@ -280,6 +293,9 @@ export const enhanceGame: GamePlugin = {
                     text: `🎲 ${p1.nickname}: ${actionNames[p1.selectedAction!]} vs ${p2.nickname}: ${actionNames[p2.selectedAction!]}` 
                 });
 
+                // Clear previous animations
+                newState.animations = [];
+
                 // Process attacks for each player
                 for (const attacker of [p1, p2]) {
                     const defender = attacker === p1 ? p2 : p1;
@@ -289,6 +305,11 @@ export const enhanceGame: GamePlugin = {
                         newState.log.push({ 
                             type: 'info', 
                             text: `🛡️ ${attacker.nickname} 방어 태세!` 
+                        });
+                        newState.animations.push({
+                            type: 'defend',
+                            attackerId: attacker.id,
+                            attackType: 'defend'
                         });
                         continue;
                     }
@@ -359,6 +380,23 @@ export const enhanceGame: GamePlugin = {
                         type: isCrit ? 'crit' : 'damage', 
                         text: logText 
                     });
+
+                    // Add animation event
+                    let advantage: string | undefined = undefined;
+                    if (attackAdvantage > 1 && elementAdvantage > 1) advantage = 'both';
+                    else if (attackAdvantage > 1) advantage = 'type';
+                    else if (elementAdvantage > 1) advantage = 'element';
+
+                    newState.animations.push({
+                        type: isCounter ? 'counter' : (isCrit ? 'crit' : 'attack'),
+                        attackerId: attacker.id,
+                        defenderId: defender.id,
+                        damage: finalDamage,
+                        attackType: attacker.selectedAction!,
+                        isCrit,
+                        isCounter,
+                        advantage
+                    });
                 }
 
                 // Check for winner (after both attacks)
@@ -426,9 +464,13 @@ export const enhanceGame: GamePlugin = {
         // In simultaneous selection, all players can act
         if (state.gameOver) return null;
         
-        // Return first player who hasn't selected yet
-        const waiting = state.players.find(p => p.selectedAction === null);
-        return waiting?.id || null;
+        // In select phase, return any player who hasn't selected
+        if (state.phase === 'select') {
+            const waiting = state.players.find(p => p.selectedAction === null);
+            return waiting?.id || 'waiting';  // Return 'waiting' if all selected, waiting for resolve
+        }
+        
+        return null;  // Resolve phase - no one can act
     },
 
     isGameOver(state: EnhanceState): boolean {
