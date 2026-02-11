@@ -347,6 +347,15 @@ export const enhanceGame: GamePlugin = {
 
                     defender.hp = Math.max(0, defender.hp - finalDamage);
                     
+                    // Lifesteal effect - heal 15% of damage dealt
+                    let lifestealHeal = 0;
+                    if (attacker.weaponElement === 'lifesteal') {
+                        lifestealHeal = Math.floor(finalDamage * 0.15);
+                        const oldHp = attacker.hp;
+                        attacker.hp = Math.min(attacker.maxHp, attacker.hp + lifestealHeal);
+                        lifestealHeal = attacker.hp - oldHp;  // Actual heal amount
+                    }
+                    
                     // Build log message
                     let logText = '';
                     const attackType = actionNames[attacker.selectedAction!];
@@ -372,6 +381,10 @@ export const enhanceGame: GamePlugin = {
                         logText += ` (속성 유리!)`;
                     } else if (elementAdvantage < 1) {
                         logText += ` (속성 불리)`;
+                    }
+                    
+                    if (lifestealHeal > 0) {
+                        logText += ` 🩸+${lifestealHeal} 흡혈!`;
                     }
                     
                     logText += damageLog;
