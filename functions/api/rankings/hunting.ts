@@ -5,11 +5,13 @@ interface Env {
   DB: D1Database;
 }
 
-// 유저 존재 확인 및 생성
-async function ensureUser(DB: D1Database, userId: string) {
-  const existing = await DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+// 유저 존재 확인 및 생성/닉네임 업데이트
+async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+  const existing = await DB.prepare('SELECT id, nickname FROM users WHERE id = ?').bind(userId).first<{id: string, nickname: string}>();
   if (!existing) {
-    await DB.prepare('INSERT OR IGNORE INTO users (id, is_anonymous) VALUES (?, 1)').bind(userId).run();
+    await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)').bind(userId, nickname || null).run();
+  } else if (nickname && nickname !== existing.nickname) {
+    await DB.prepare('UPDATE users SET nickname = ?, updated_at = datetime("now") WHERE id = ?').bind(nickname, userId).run();
   }
 }
 
@@ -18,7 +20,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { DB } = context.env;
   const url = new URL(context.request.url);
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
-  const type = url.searchParams.get('type') || 'kills'; // 'kills' or 'streak'
+  const type = url.searchParams.get('type') || 'kills';
 
   try {
     const orderBy = type === 'streak' 
@@ -50,6 +52,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 interface HuntingRecord {
   userId?: string;
+  nickname?: string;
   kills: number;
   killStreak?: number;
 }
@@ -61,7 +64,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
     const body: HuntingRecord = await context.request.json();
     const userId = body.userId || context.request.headers.get('x-user-id');
-    const { kills, killStreak } = body;
+    const { nickname, kills, killStreak } = body;
 
     if (!userId) {
       return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
@@ -71,22 +74,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ success: false, error: 'Invalid kills count' }, { status: 400 });
     }
 
-    // 유저 존재 확인
-    await ensureUser(DB, userId);
+    // 유저 존재 확인 + 닉네임 업데이트
+    await ensureUser(DB, userId, nickname);
 
-    // UPSERT로 기록 갱신
     const current = await DB.prepare(
       'SELECT total_kills, max_kill_streak FROM rankings WHERE user_id = ?'
     ).bind(userId).first<{ total_kills: number; max_kill_streak: number }>();
 
     if (!current) {
-      // 새 레코드
       await DB.prepare(`
         INSERT INTO rankings (user_id, total_kills, max_kill_streak)
         VALUES (?, ?, ?)
       `).bind(userId, kills, killStreak || 0).run();
     } else {
-      // 기존 기록 갱신
       const newStreak = Math.max(current.max_kill_streak || 0, killStreak || 0);
       await DB.prepare(`
         UPDATE rankings 

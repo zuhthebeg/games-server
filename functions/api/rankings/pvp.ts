@@ -5,11 +5,13 @@ interface Env {
   DB: D1Database;
 }
 
-// 유저 존재 확인 및 생성
-async function ensureUser(DB: D1Database, userId: string) {
-  const existing = await DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+// 유저 존재 확인 및 생성/닉네임 업데이트
+async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+  const existing = await DB.prepare('SELECT id, nickname FROM users WHERE id = ?').bind(userId).first<{id: string, nickname: string}>();
   if (!existing) {
-    await DB.prepare('INSERT OR IGNORE INTO users (id, is_anonymous) VALUES (?, 1)').bind(userId).run();
+    await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)').bind(userId, nickname || null).run();
+  } else if (nickname && nickname !== existing.nickname) {
+    await DB.prepare('UPDATE users SET nickname = ?, updated_at = datetime("now") WHERE id = ?').bind(nickname, userId).run();
   }
 }
 
@@ -50,13 +52,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 interface PvPResult {
   userId?: string;
+  nickname?: string;
   isWin: boolean;
   opponentRating?: number;
 }
 
 // ELO 레이팅 계산
 function calculateElo(myRating: number, opponentRating: number, isWin: boolean): number {
-  const K = 32; // K-factor
+  const K = 32;
   const expectedScore = 1 / (1 + Math.pow(10, (opponentRating - myRating) / 400));
   const actualScore = isWin ? 1 : 0;
   return Math.round(myRating + K * (actualScore - expectedScore));
@@ -69,16 +72,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
     const body: PvPResult = await context.request.json();
     const userId = body.userId || context.request.headers.get('x-user-id');
-    const { isWin, opponentRating = 1000 } = body;
+    const { nickname, isWin, opponentRating = 1000 } = body;
 
     if (!userId) {
       return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
     }
 
-    // 유저 존재 확인
-    await ensureUser(DB, userId);
+    // 유저 존재 확인 + 닉네임 업데이트
+    await ensureUser(DB, userId, nickname);
 
-    // 현재 기록 조회
     const current = await DB.prepare(
       'SELECT pvp_wins, pvp_losses, pvp_rating FROM rankings WHERE user_id = ?'
     ).bind(userId).first<{ pvp_wins: number; pvp_losses: number; pvp_rating: number }>();
@@ -87,13 +89,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const newRating = calculateElo(currentRating, opponentRating, isWin);
 
     if (!current) {
-      // 새 레코드
       await DB.prepare(`
         INSERT INTO rankings (user_id, pvp_wins, pvp_losses, pvp_rating)
         VALUES (?, ?, ?, ?)
       `).bind(userId, isWin ? 1 : 0, isWin ? 0 : 1, newRating).run();
     } else {
-      // 기록 갱신
       if (isWin) {
         await DB.prepare(`
           UPDATE rankings SET pvp_wins = pvp_wins + 1, pvp_rating = ?, updated_at = datetime('now')

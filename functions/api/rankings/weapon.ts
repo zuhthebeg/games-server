@@ -7,17 +7,21 @@ interface Env {
 
 interface WeaponRecord {
   userId: string;
+  nickname?: string;
   level: number;
   name: string;
   grade: string;
   element?: string;
 }
 
-// 유저 존재 확인 및 생성
-async function ensureUser(DB: D1Database, userId: string) {
-  const existing = await DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+// 유저 존재 확인 및 생성/닉네임 업데이트
+async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+  const existing = await DB.prepare('SELECT id, nickname FROM users WHERE id = ?').bind(userId).first<{id: string, nickname: string}>();
   if (!existing) {
-    await DB.prepare('INSERT OR IGNORE INTO users (id, is_anonymous) VALUES (?, 1)').bind(userId).run();
+    await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)').bind(userId, nickname || null).run();
+  } else if (nickname && nickname !== existing.nickname) {
+    // 닉네임이 다르면 업데이트
+    await DB.prepare('UPDATE users SET nickname = ?, updated_at = datetime("now") WHERE id = ?').bind(nickname, userId).run();
   }
 }
 
@@ -26,9 +30,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   try {
     const body: WeaponRecord = await context.request.json();
-    // userId: body에서 가져오거나 헤더에서 폴백
     const userId = body.userId || context.request.headers.get('x-user-id');
-    const { level, name, grade, element } = body;
+    const { nickname, level, name, grade, element } = body;
 
     if (!userId) {
       return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
@@ -38,8 +41,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return Response.json({ success: false, error: 'Missing required fields' }, { status: 400 });
     }
 
-    // 유저 존재 확인
-    await ensureUser(DB, userId);
+    // 유저 존재 확인 + 닉네임 업데이트
+    await ensureUser(DB, userId, nickname);
 
     // 현재 기록 확인
     const current = await DB.prepare(
@@ -48,7 +51,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     // 신기록인 경우만 갱신
     if (!current) {
-      // 새 레코드 생성
       await DB.prepare(`
         INSERT INTO rankings (user_id, best_weapon_level, best_weapon_name, best_weapon_grade, best_weapon_element, best_weapon_achieved_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
@@ -56,7 +58,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
       return Response.json({ success: true, newRecord: true, level });
     } else if (level > current.best_weapon_level) {
-      // 기존 기록 갱신
       await DB.prepare(`
         UPDATE rankings 
         SET best_weapon_level = ?, best_weapon_name = ?, best_weapon_grade = ?, best_weapon_element = ?, best_weapon_achieved_at = datetime('now'), updated_at = datetime('now')
