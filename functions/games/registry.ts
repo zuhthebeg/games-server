@@ -13,6 +13,7 @@ import { gomokuPlugin } from './gomoku';
 import { connect4Plugin } from './connect4';
 import { catanPlugin } from './catan';
 import { enhanceGame } from './enhance';
+import { pvpBattlePlugin } from './pvp-battle';
 
 const registry = new Map<string, GameRegistryEntry>();
 
@@ -69,3 +70,4 @@ registerGame(gomokuPlugin, {});
 registerGame(connect4Plugin, {});
 registerGame(catanPlugin, {});
 registerGame(enhanceGame, {});
+registerGame(pvpBattlePlugin, {});
