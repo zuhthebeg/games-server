@@ -56,10 +56,13 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             ).bind(new Date().toISOString(), roomId).run();
         }
 
-        // Reset room status to waiting
+        // Reset room status to waiting and clear config (remove all_ready_at)
+        const existingConfig = room.config ? JSON.parse(room.config) : {};
+        delete existingConfig.all_ready_at;  // 이거 안지우면 10초 후 방 폭파됨!
+        
         await env.DB.prepare(
-            `UPDATE rooms SET status = 'waiting', state = NULL, started_at = NULL, finished_at = NULL WHERE id = ?`
-        ).bind(roomId).run();
+            `UPDATE rooms SET status = 'waiting', state = NULL, config = ?, started_at = NULL, finished_at = NULL WHERE id = ?`
+        ).bind(JSON.stringify(existingConfig), roomId).run();
 
         // Reset all players' ready status
         await env.DB.prepare(
