@@ -37,7 +37,11 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         if (!isFinished && room.state) {
             try {
                 const state = JSON.parse(room.state);
-                isFinished = state.gameOver === true || state.winner !== null;
+                // Various game-over conditions
+                isFinished = state.gameOver === true || 
+                             state.winner !== null || 
+                             state.winnerId !== null ||  // PvP battle
+                             state.phase === 'ended';    // PvP battle
             } catch (e) {}
         }
         

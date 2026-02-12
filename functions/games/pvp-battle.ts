@@ -295,14 +295,18 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
 
     if (matchResult === 'win') {
       const mult = a1 === 'skill' ? 1.5 : (a1 === 'defense' ? 0.5 : 1.0);
-      p2Damage = Math.floor(p1.weaponDamage * mult * elem1 * awaken1 * bonus1);
+      const isCrit1 = Math.random() < 0.15;  // 15% 크리티컬
+      const critMult1 = isCrit1 ? 1.5 : 1.0;
+      p2Damage = Math.floor(p1.weaponDamage * mult * elem1 * awaken1 * bonus1 * critMult1);
       p2RageGain = 30;
-      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리! → ${p2Damage} 데미지`;
+      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${isCrit1 ? ' 💥크리티컬!' : ''} → ${p2Damage} 데미지`;
     } else if (matchResult === 'lose') {
       const mult = a2 === 'skill' ? 1.5 : (a2 === 'defense' ? 0.5 : 1.0);
-      p1Damage = Math.floor(p2.weaponDamage * mult * elem2 * awaken2 * bonus2);
+      const isCrit2 = Math.random() < 0.15;  // 15% 크리티컬
+      const critMult2 = isCrit2 ? 1.5 : 1.0;
+      p1Damage = Math.floor(p2.weaponDamage * mult * elem2 * awaken2 * bonus2 * critMult2);
       p1RageGain = 30;
-      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리! → ${p1Damage} 데미지`;
+      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${isCrit2 ? ' 💥크리티컬!' : ''} → ${p1Damage} 데미지`;
     } else {
       p1Damage = 5;
       p2Damage = 5;
