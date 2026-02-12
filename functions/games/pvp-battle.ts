@@ -22,12 +22,21 @@ interface PvPPlayer {
   nextDamageBonus: number;  // 절대방어 다음턴 보너스
 }
 
+interface TurnResult {
+  p1Action: string;
+  p2Action: string;
+  p1Damage: number;
+  p2Damage: number;
+  winner: 'p1' | 'p2' | 'draw' | null;
+}
+
 interface PvPState {
   players: PvPPlayer[];
   round: number;
   phase: 'select' | 'resolve' | 'ended';
   log: { text: string; type?: string }[];
   winnerId: string | null;
+  lastTurnResult?: TurnResult;
 }
 
 // 상성: attack > skill > defense > attack
@@ -195,7 +204,8 @@ export const pvpBattlePlugin: GamePlugin = {
       round: state.round,
       phase: state.phase,
       log: state.log.slice(-10),
-      winnerId: state.winnerId
+      winnerId: state.winnerId,
+      lastTurnResult: state.lastTurnResult || null
     };
   },
 
@@ -320,6 +330,15 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
   state.log.push({ text: resultText, type: 'info' });
   if (p1.isAwakened && !wasAwakened1) state.log.push({ text: `⚡ ${p1.nickname} 각성!`, type: 'crit' });
   if (p2.isAwakened && !wasAwakened2) state.log.push({ text: `⚡ ${p2.nickname} 각성!`, type: 'crit' });
+
+  // 턴 결과 저장 (클라이언트 애니메이션용)
+  state.lastTurnResult = {
+    p1Action: a1,
+    p2Action: a2,
+    p1Damage,
+    p2Damage,
+    winner: p2Damage > p1Damage ? 'p1' : (p1Damage > p2Damage ? 'p2' : 'draw')
+  };
 
   // 선택 리셋
   p1.selectedAction = null;
