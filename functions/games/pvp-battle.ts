@@ -61,6 +61,7 @@ const ELEMENT_ADVANTAGE: Record<string, string[]> = {
   holy: ['poison', 'lifesteal'],
   poison: ['lightning'],
   silver: ['lifesteal'],
+  water: ['fire'],
   lifesteal: []
 };
 
@@ -69,6 +70,34 @@ function getElementBonus(attacker: string, defender: string): number {
   if (ELEMENT_ADVANTAGE[attacker]?.includes(defender)) return 1.2;
   if (ELEMENT_ADVANTAGE[defender]?.includes(attacker)) return 0.8;
   return 1.0;
+}
+
+// 🧙 마법 무기 체크
+function isMagicWeapon(weaponType: string): boolean {
+  return weaponType === 'staff' || weaponType === 'wand';
+}
+
+// 🧙 마법 크리티컬 효과 (PvP용)
+// 반환: { extraDamage, healAmount, effectText }
+function getMagicCritEffect(weaponType: string, element: string, baseDamage: number, maxHp: number): { extraDamage: number, healAmount: number, effectText: string } {
+  if (!isMagicWeapon(weaponType)) return { extraDamage: 0, healAmount: 0, effectText: '' };
+  
+  switch (element) {
+    case 'fire':  // 🔥 폭발: +50%
+      return { extraDamage: Math.floor(baseDamage * 0.5), healAmount: 0, effectText: '🔥폭발!' };
+    case 'ice':  // ❄️ 빙결: +30% (PvP에선 빙결 대신 데미지)
+      return { extraDamage: Math.floor(baseDamage * 0.3), healAmount: 0, effectText: '❄️빙결!' };
+    case 'lightning':  // ⚡ 감전: +30%
+      return { extraDamage: Math.floor(baseDamage * 0.3), healAmount: 0, effectText: '⚡감전!' };
+    case 'water':  // 💧 치유: HP 20% 회복
+      return { extraDamage: 0, healAmount: Math.floor(maxHp * 0.2), effectText: '💧치유!' };
+    case 'poison':  // ☠️ 맹독: +40% (PvP에선 DoT 대신 데미지)
+      return { extraDamage: Math.floor(baseDamage * 0.4), healAmount: 0, effectText: '☠️맹독!' };
+    case 'holy':  // ✨ 신성: +50% (PvP에선 즉사 대신 데미지)
+      return { extraDamage: Math.floor(baseDamage * 0.5), healAmount: 0, effectText: '✨신성!' };
+    default:
+      return { extraDamage: 0, healAmount: 0, effectText: '' };
+  }
 }
 
 function checkPatternRead(history: string[]): boolean {
@@ -333,8 +362,20 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
       const p1SuperCrit = p1.weaponGrade === 'mythic' && Math.random() < 0.01;
       const critMult1 = p1Crit ? (p1.weaponCritDamage / 100) : 1.0;
       p2Damage = p1SuperCrit ? p2.hp : Math.floor(baseDmg1 * mult * elem1 * awaken1 * bonus1 * critMult1);
+      
+      // 🧙 마법 무기 크리티컬 효과
+      let magicEffectText1 = '';
+      if (p1Crit && !p1SuperCrit) {
+        const magicEffect = getMagicCritEffect(p1.weaponType, p1.weaponElement, p2Damage, p1.maxHp);
+        p2Damage += magicEffect.extraDamage;
+        if (magicEffect.healAmount > 0) {
+          p1.hp = Math.min(p1.maxHp, p1.hp + magicEffect.healAmount);
+        }
+        magicEffectText1 = magicEffect.effectText;
+      }
+      
       p2RageGain = 30;
-      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${p1SuperCrit ? ` 🌟슈퍼크리티컬!! 즉사!` : (p1Crit ? ` 💥크리티컬(${p1.weaponCritDamage}%)!` : '')} → ${p2Damage} 데미지`;
+      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${p1SuperCrit ? ` 🌟슈퍼크리티컬!! 즉사!` : (p1Crit ? ` 💥크리티컬(${p1.weaponCritDamage}%)!${magicEffectText1}` : '')} → ${p2Damage} 데미지`;
     } else if (matchResult === 'lose') {
       const mult = a2 === 'skill' ? 1.5 : (a2 === 'defense' ? 0.5 : 1.0);
       // 랜덤 데미지 + 크리티컬
@@ -344,8 +385,20 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
       const p2SuperCrit = p2.weaponGrade === 'mythic' && Math.random() < 0.01;
       const critMult2 = p2Crit ? (p2.weaponCritDamage / 100) : 1.0;
       p1Damage = p2SuperCrit ? p1.hp : Math.floor(baseDmg2 * mult * elem2 * awaken2 * bonus2 * critMult2);
+      
+      // 🧙 마법 무기 크리티컬 효과
+      let magicEffectText2 = '';
+      if (p2Crit && !p2SuperCrit) {
+        const magicEffect = getMagicCritEffect(p2.weaponType, p2.weaponElement, p1Damage, p2.maxHp);
+        p1Damage += magicEffect.extraDamage;
+        if (magicEffect.healAmount > 0) {
+          p2.hp = Math.min(p2.maxHp, p2.hp + magicEffect.healAmount);
+        }
+        magicEffectText2 = magicEffect.effectText;
+      }
+      
       p1RageGain = 30;
-      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${p2SuperCrit ? ` 🌟슈퍼크리티컬!! 즉사!` : (p2Crit ? ` 💥크리티컬(${p2.weaponCritDamage}%)!` : '')} → ${p1Damage} 데미지`;
+      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${p2SuperCrit ? ` 🌟슈퍼크리티컬!! 즉사!` : (p2Crit ? ` 💥크리티컬(${p2.weaponCritDamage}%)!${magicEffectText2}` : '')} → ${p1Damage} 데미지`;
     } else {
       // 무승부 - 행동별 다른 처리
       if (a1 === 'attack' && a2 === 'attack') {
