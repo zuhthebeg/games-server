@@ -49,22 +49,23 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 interface HuntingRecord {
-  kills: number;        // 이번에 추가할 킬 수
-  killStreak?: number;  // 현재 연속 킬
+  userId?: string;
+  kills: number;
+  killStreak?: number;
 }
 
 // POST - 기록 갱신
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { DB } = context.env;
-  
-  const userId = context.request.headers.get('x-user-id');
-  if (!userId) {
-    return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
-  }
 
   try {
     const body: HuntingRecord = await context.request.json();
+    const userId = body.userId || context.request.headers.get('x-user-id');
     const { kills, killStreak } = body;
+
+    if (!userId) {
+      return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
+    }
 
     if (typeof kills !== 'number' || kills < 0) {
       return Response.json({ success: false, error: 'Invalid kills count' }, { status: 400 });

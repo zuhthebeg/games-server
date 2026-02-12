@@ -6,6 +6,7 @@ interface Env {
 }
 
 interface WeaponRecord {
+  userId: string;
   level: number;
   name: string;
   grade: string;
@@ -22,16 +23,16 @@ async function ensureUser(DB: D1Database, userId: string) {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { DB } = context.env;
-  
-  // 인증 확인
-  const userId = context.request.headers.get('x-user-id');
-  if (!userId) {
-    return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
-  }
 
   try {
     const body: WeaponRecord = await context.request.json();
+    // userId: body에서 가져오거나 헤더에서 폴백
+    const userId = body.userId || context.request.headers.get('x-user-id');
     const { level, name, grade, element } = body;
+
+    if (!userId) {
+      return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
+    }
 
     if (level === undefined || !name || !grade) {
       return Response.json({ success: false, error: 'Missing required fields' }, { status: 400 });

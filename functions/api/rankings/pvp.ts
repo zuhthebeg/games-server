@@ -49,6 +49,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 interface PvPResult {
+  userId?: string;
   isWin: boolean;
   opponentRating?: number;
 }
@@ -64,15 +65,15 @@ function calculateElo(myRating: number, opponentRating: number, isWin: boolean):
 // POST - 결과 기록
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { DB } = context.env;
-  
-  const userId = context.request.headers.get('x-user-id');
-  if (!userId) {
-    return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
-  }
 
   try {
     const body: PvPResult = await context.request.json();
+    const userId = body.userId || context.request.headers.get('x-user-id');
     const { isWin, opponentRating = 1000 } = body;
+
+    if (!userId) {
+      return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
+    }
 
     // 유저 존재 확인
     await ensureUser(DB, userId);
