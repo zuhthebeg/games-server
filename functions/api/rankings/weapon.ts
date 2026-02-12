@@ -12,6 +12,14 @@ interface WeaponRecord {
   element?: string;
 }
 
+// 유저 존재 확인 및 생성
+async function ensureUser(DB: D1Database, userId: string) {
+  const existing = await DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+  if (!existing) {
+    await DB.prepare('INSERT OR IGNORE INTO users (id, is_anonymous) VALUES (?, 1)').bind(userId).run();
+  }
+}
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { DB } = context.env;
   
@@ -25,9 +33,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const body: WeaponRecord = await context.request.json();
     const { level, name, grade, element } = body;
 
-    if (!level || !name || !grade) {
+    if (level === undefined || !name || !grade) {
       return Response.json({ success: false, error: 'Missing required fields' }, { status: 400 });
     }
+
+    // 유저 존재 확인
+    await ensureUser(DB, userId);
 
     // 현재 기록 확인
     const current = await DB.prepare(

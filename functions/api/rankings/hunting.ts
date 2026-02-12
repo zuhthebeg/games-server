@@ -5,6 +5,14 @@ interface Env {
   DB: D1Database;
 }
 
+// 유저 존재 확인 및 생성
+async function ensureUser(DB: D1Database, userId: string) {
+  const existing = await DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+  if (!existing) {
+    await DB.prepare('INSERT OR IGNORE INTO users (id, is_anonymous) VALUES (?, 1)').bind(userId).run();
+  }
+}
+
 // GET - 랭킹 조회
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { DB } = context.env;
@@ -61,6 +69,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (typeof kills !== 'number' || kills < 0) {
       return Response.json({ success: false, error: 'Invalid kills count' }, { status: 400 });
     }
+
+    // 유저 존재 확인
+    await ensureUser(DB, userId);
 
     // UPSERT로 기록 갱신
     const current = await DB.prepare(

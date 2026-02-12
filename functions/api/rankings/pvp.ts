@@ -5,6 +5,14 @@ interface Env {
   DB: D1Database;
 }
 
+// 유저 존재 확인 및 생성
+async function ensureUser(DB: D1Database, userId: string) {
+  const existing = await DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+  if (!existing) {
+    await DB.prepare('INSERT OR IGNORE INTO users (id, is_anonymous) VALUES (?, 1)').bind(userId).run();
+  }
+}
+
 // GET - 랭킹 조회
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { DB } = context.env;
@@ -65,6 +73,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
     const body: PvPResult = await context.request.json();
     const { isWin, opponentRating = 1000 } = body;
+
+    // 유저 존재 확인
+    await ensureUser(DB, userId);
 
     // 현재 기록 조회
     const current = await DB.prepare(
