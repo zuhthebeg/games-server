@@ -21,6 +21,16 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
     }
 
     try {
+        // Parse request body for playerData
+        let playerData: any = null;
+        try {
+            const body = await request.json() as { playerData?: any };
+            playerData = body.playerData || null;
+            console.log('[rematch.ts] playerData received:', JSON.stringify(playerData));
+        } catch (e) {
+            // No body, that's ok
+        }
+
         // Get room
         const room = await env.DB.prepare(
             'SELECT * FROM rooms WHERE id = ?'
@@ -64,10 +74,19 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             `UPDATE rooms SET status = 'waiting', state = NULL, config = ?, started_at = NULL, finished_at = NULL WHERE id = ?`
         ).bind(JSON.stringify(existingConfig), roomId).run();
 
-        // Reset all players' ready status
+        // Reset all players' ready status (but keep current requester's playerData)
+        // First reset everyone
         await env.DB.prepare(
             `UPDATE room_players SET is_ready = 0, player_state = NULL WHERE room_id = ?`
         ).bind(roomId).run();
+        
+        // Then update the requester's player_state with new weapon data
+        if (playerData) {
+            await env.DB.prepare(
+                `UPDATE room_players SET player_state = ? WHERE room_id = ? AND user_id = ?`
+            ).bind(JSON.stringify(playerData), roomId, user.userId).run();
+            console.log('[rematch.ts] Updated player_state for user:', user.userId);
+        }
 
         // Add event
         await addEvent(env, roomId, 'rematch_ready', user.userId, {});

@@ -11,6 +11,8 @@ interface PvPPlayer {
   hp: number;
   maxHp: number;
   weaponDamage: number;
+  damageMin: number;
+  damageMax: number;
   weaponGrade: string;
   weaponElement: string;
   weaponName: string;
@@ -75,6 +77,13 @@ function checkPatternRead(history: string[]): boolean {
   return last3[0] === last3[1] && last3[1] === last3[2];
 }
 
+// 랜덤 데미지 계산 (사냥과 동일)
+function getRandomDamage(player: PvPPlayer): number {
+  const min = player.damageMin || 5;
+  const max = player.damageMax || 8;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 export const pvpBattlePlugin: GamePlugin = {
   id: 'pvp-battle',
   name: '⚔️ 무기 배틀',
@@ -89,13 +98,19 @@ export const pvpBattlePlugin: GamePlugin = {
       console.log(`[pvp-battle] Player ${p.id} weapon:`, JSON.stringify(weapon));
       
       const level = weapon.level || 0;
-      const gradeMultipliers: Record<string, number> = { 
-        common: 1.0, magic: 1.3, rare: 1.7, legendary: 2.2, unique: 3.0, mythic: 4.0 
-      };
-      const gradeMultiplier = gradeMultipliers[weapon.grade] || 1.0;
-      const baseDamage = 10 + level * 3;
-      const weaponDamage = Math.floor(baseDamage * gradeMultiplier);
-      const maxHp = 100 + level * 10;
+      
+      // 클라이언트가 보낸 계산된 스탯 사용 (사냥과 동일한 공식)
+      // NaN 방어: 숫자 아니면 기본값
+      const rawDamageMin = Number(weapon.damageMin);
+      const rawDamageMax = Number(weapon.damageMax);
+      const rawHp = Number(weapon.hp);
+      
+      const damageMin = isNaN(rawDamageMin) || rawDamageMin <= 0 ? 5 : rawDamageMin;
+      const damageMax = isNaN(rawDamageMax) || rawDamageMax <= 0 ? 8 : rawDamageMax;
+      const weaponDamage = Math.floor((damageMin + damageMax) / 2);
+      const maxHp = isNaN(rawHp) || rawHp <= 0 ? (100 + level * 20) : rawHp;
+      
+      console.log(`[pvp-battle] Player ${p.id} stats: dmg=${damageMin}-${damageMax}, hp=${maxHp}, raw weapon:`, JSON.stringify(weapon));
 
       return {
         id: p.id,
@@ -104,13 +119,15 @@ export const pvpBattlePlugin: GamePlugin = {
         hp: maxHp,
         maxHp,
         weaponDamage,
+        damageMin,
+        damageMax,
         weaponGrade: weapon.grade || 'common',
         weaponElement: weapon.element || 'none',
         weaponName: weapon.name || '무기',
         weaponType: weapon.type || 'sword',
         weaponLevel: level,
-        weaponCritChance: weapon.critChance || Math.min(60, 5 + level * 2),  // 기본값: 5 + 레벨*2
-        weaponCritDamage: weapon.critDamage || 150 + level * 5,
+        weaponCritChance: weapon.critChance || 5,
+        weaponCritDamage: weapon.critDamage || 150,
         rage: 0,
         isAwakened: false,
         actionHistory: [],
@@ -197,18 +214,20 @@ export const pvpBattlePlugin: GamePlugin = {
       players: state.players.map(p => ({
         id: p.id,
         nickname: p.nickname,
-        hp: p.hp,
-        maxHp: p.maxHp,
-        rage: p.rage,
-        isAwakened: p.isAwakened,
-        weaponName: p.weaponName,
-        weaponType: p.weaponType,
-        weaponGrade: p.weaponGrade,
-        weaponElement: p.weaponElement,
-        weaponLevel: p.weaponLevel,
-        weaponDamage: p.weaponDamage,
-        weaponCritChance: p.weaponCritChance,
-        weaponCritDamage: p.weaponCritDamage,
+        hp: p.hp || 100,
+        maxHp: p.maxHp || 100,
+        rage: p.rage || 0,
+        isAwakened: p.isAwakened || false,
+        weaponName: p.weaponName || '무기',
+        weaponType: p.weaponType || 'sword',
+        weaponGrade: p.weaponGrade || 'common',
+        weaponElement: p.weaponElement || 'none',
+        weaponLevel: p.weaponLevel || 0,
+        weaponDamage: p.weaponDamage || 5,
+        damageMin: p.damageMin || 5,
+        damageMax: p.damageMax || 8,
+        weaponCritChance: p.weaponCritChance || 5,
+        weaponCritDamage: p.weaponCritDamage || 150,
         hasSelected: p.selectedAction !== null,
         actionHistory: p.actionHistory.slice(-3)
       })),
@@ -307,26 +326,61 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
 
     if (matchResult === 'win') {
       const mult = a1 === 'skill' ? 1.5 : (a1 === 'defense' ? 0.5 : 1.0);
-      // 무기 크리티컬 확률 사용 (백분율)
+      // 랜덤 데미지 + 크리티컬
+      const baseDmg1 = getRandomDamage(p1);
       p1Crit = Math.random() * 100 < p1.weaponCritChance;
-      const critMult1 = p1Crit ? (p1.weaponCritDamage / 100) : 1.0;  // critDamage는 150% 같은 값
-      p2Damage = Math.floor(p1.weaponDamage * mult * elem1 * awaken1 * bonus1 * critMult1);
+      const critMult1 = p1Crit ? (p1.weaponCritDamage / 100) : 1.0;
+      p2Damage = Math.floor(baseDmg1 * mult * elem1 * awaken1 * bonus1 * critMult1);
       p2RageGain = 30;
       resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${p1Crit ? ` 💥크리티컬(${p1.weaponCritDamage}%)!` : ''} → ${p2Damage} 데미지`;
     } else if (matchResult === 'lose') {
       const mult = a2 === 'skill' ? 1.5 : (a2 === 'defense' ? 0.5 : 1.0);
-      // 무기 크리티컬 확률 사용 (백분율)
+      // 랜덤 데미지 + 크리티컬
+      const baseDmg2 = getRandomDamage(p2);
       p2Crit = Math.random() * 100 < p2.weaponCritChance;
       const critMult2 = p2Crit ? (p2.weaponCritDamage / 100) : 1.0;
-      p1Damage = Math.floor(p2.weaponDamage * mult * elem2 * awaken2 * bonus2 * critMult2);
+      p1Damage = Math.floor(baseDmg2 * mult * elem2 * awaken2 * bonus2 * critMult2);
       p1RageGain = 30;
       resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${p2Crit ? ` 💥크리티컬(${p2.weaponCritDamage}%)!` : ''} → ${p1Damage} 데미지`;
     } else {
-      p1Damage = 5;
-      p2Damage = 5;
-      p1RageGain = 10;
-      p2RageGain = 10;
-      resultText += `무승부! 양쪽 5 데미지`;
+      // 무승부 - 행동별 다른 처리
+      if (a1 === 'attack' && a2 === 'attack') {
+        // 공격 vs 공격: 무기 데미지 차이만큼 (강한 쪽이 약한 쪽에게)
+        const dmg1 = Math.floor(getRandomDamage(p1) * elem1 * awaken1 * bonus1);
+        const dmg2 = Math.floor(getRandomDamage(p2) * elem2 * awaken2 * bonus2);
+        if (dmg1 > dmg2) {
+          p2Damage = dmg1 - dmg2;
+          p2RageGain = 15;
+          resultText += `⚔️ 공격 충돌! ${p1.nickname}의 무기가 더 강력! → ${p2Damage} 데미지`;
+        } else if (dmg2 > dmg1) {
+          p1Damage = dmg2 - dmg1;
+          p1RageGain = 15;
+          resultText += `⚔️ 공격 충돌! ${p2.nickname}의 무기가 더 강력! → ${p1Damage} 데미지`;
+        } else {
+          // 데미지 완전 동일
+          p1RageGain = 10;
+          p2RageGain = 10;
+          resultText += `⚔️ 공격 충돌! 완벽한 균형!`;
+        }
+      } else if (a1 === 'defense' && a2 === 'defense') {
+        // 방어 vs 방어: 데미지 없음
+        p1Damage = 0;
+        p2Damage = 0;
+        p1RageGain = 5;
+        p2RageGain = 5;
+        resultText += `🛡️ 양쪽 방어! 데미지 없음`;
+      } else if (a1 === 'skill' && a2 === 'skill') {
+        // 스킬 vs 스킬: 양쪽 100% 크리티컬!
+        p1Crit = true;
+        p2Crit = true;
+        const critMult1 = p1.weaponCritDamage / 100;
+        const critMult2 = p2.weaponCritDamage / 100;
+        p1Damage = Math.floor(getRandomDamage(p2) * 1.5 * elem2 * awaken2 * bonus2 * critMult2);
+        p2Damage = Math.floor(getRandomDamage(p1) * 1.5 * elem1 * awaken1 * bonus1 * critMult1);
+        p1RageGain = 20;
+        p2RageGain = 20;
+        resultText += `🔮💥 스킬 충돌! 양쪽 크리티컬! ${p1.nickname}: ${p1Damage}, ${p2.nickname}: ${p2Damage}`;
+      }
     }
   }
 
@@ -383,7 +437,7 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
 }
 
 function processUltimate(attacker: PvPPlayer, defender: PvPPlayer, type: string, elem: number, awaken: number, bonus: number): { damage: number; heal?: number; nextBonus?: number; name: string } {
-  const baseDmg = attacker.weaponDamage;
+  const baseDmg = getRandomDamage(attacker);
   switch (type) {
     case 'burst':
       return { damage: Math.floor(baseDmg * 2.0 * elem * awaken * bonus), name: '🔥 필살일격' };
