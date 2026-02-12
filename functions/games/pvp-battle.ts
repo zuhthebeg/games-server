@@ -14,6 +14,7 @@ interface PvPPlayer {
   weaponGrade: string;
   weaponElement: string;
   weaponName: string;
+  weaponType: string;
   weaponLevel: number;
   rage: number;
   isAwakened: boolean;
@@ -102,6 +103,7 @@ export const pvpBattlePlugin: GamePlugin = {
         weaponGrade: weapon.grade || 'common',
         weaponElement: weapon.element || 'none',
         weaponName: weapon.name || '무기',
+        weaponType: weapon.type || 'sword',
         weaponLevel: level,
         rage: 0,
         isAwakened: false,
@@ -194,6 +196,7 @@ export const pvpBattlePlugin: GamePlugin = {
         rage: p.rage,
         isAwakened: p.isAwakened,
         weaponName: p.weaponName,
+        weaponType: p.weaponType,
         weaponGrade: p.weaponGrade,
         weaponElement: p.weaponElement,
         weaponLevel: p.weaponLevel,
