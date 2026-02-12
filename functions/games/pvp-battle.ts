@@ -16,6 +16,8 @@ interface PvPPlayer {
   weaponName: string;
   weaponType: string;
   weaponLevel: number;
+  weaponCritChance: number;
+  weaponCritDamage: number;
   rage: number;
   isAwakened: boolean;
   actionHistory: string[];
@@ -28,6 +30,8 @@ interface TurnResult {
   p2Action: string;
   p1Damage: number;
   p2Damage: number;
+  p1Crit: boolean;
+  p2Crit: boolean;
   winner: 'p1' | 'p2' | 'draw' | null;
 }
 
@@ -105,6 +109,8 @@ export const pvpBattlePlugin: GamePlugin = {
         weaponName: weapon.name || '무기',
         weaponType: weapon.type || 'sword',
         weaponLevel: level,
+        weaponCritChance: weapon.critChance || Math.min(60, 5 + level * 2),  // 기본값: 5 + 레벨*2
+        weaponCritDamage: weapon.critDamage || 150 + level * 5,
         rage: 0,
         isAwakened: false,
         actionHistory: [],
@@ -201,6 +207,8 @@ export const pvpBattlePlugin: GamePlugin = {
         weaponElement: p.weaponElement,
         weaponLevel: p.weaponLevel,
         weaponDamage: p.weaponDamage,
+        weaponCritChance: p.weaponCritChance,
+        weaponCritDamage: p.weaponCritDamage,
         hasSelected: p.selectedAction !== null,
         actionHistory: p.actionHistory.slice(-3)
       })),
@@ -230,6 +238,7 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
 
   let p1Damage = 0, p2Damage = 0;
   let p1RageGain = 0, p2RageGain = 0;
+  let p1Crit = false, p2Crit = false;
   let resultText = '';
 
   const p1Ultimate = a1.startsWith('ultimate_') ? a1.split('_')[1] : null;
@@ -298,18 +307,20 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
 
     if (matchResult === 'win') {
       const mult = a1 === 'skill' ? 1.5 : (a1 === 'defense' ? 0.5 : 1.0);
-      const isCrit1 = Math.random() < 0.15;  // 15% 크리티컬
-      const critMult1 = isCrit1 ? 1.5 : 1.0;
+      // 무기 크리티컬 확률 사용 (백분율)
+      p1Crit = Math.random() * 100 < p1.weaponCritChance;
+      const critMult1 = p1Crit ? (p1.weaponCritDamage / 100) : 1.0;  // critDamage는 150% 같은 값
       p2Damage = Math.floor(p1.weaponDamage * mult * elem1 * awaken1 * bonus1 * critMult1);
       p2RageGain = 30;
-      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${isCrit1 ? ' 💥크리티컬!' : ''} → ${p2Damage} 데미지`;
+      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${p1Crit ? ` 💥크리티컬(${p1.weaponCritDamage}%)!` : ''} → ${p2Damage} 데미지`;
     } else if (matchResult === 'lose') {
       const mult = a2 === 'skill' ? 1.5 : (a2 === 'defense' ? 0.5 : 1.0);
-      const isCrit2 = Math.random() < 0.15;  // 15% 크리티컬
-      const critMult2 = isCrit2 ? 1.5 : 1.0;
+      // 무기 크리티컬 확률 사용 (백분율)
+      p2Crit = Math.random() * 100 < p2.weaponCritChance;
+      const critMult2 = p2Crit ? (p2.weaponCritDamage / 100) : 1.0;
       p1Damage = Math.floor(p2.weaponDamage * mult * elem2 * awaken2 * bonus2 * critMult2);
       p1RageGain = 30;
-      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${isCrit2 ? ' 💥크리티컬!' : ''} → ${p1Damage} 데미지`;
+      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${p2Crit ? ` 💥크리티컬(${p2.weaponCritDamage}%)!` : ''} → ${p1Damage} 데미지`;
     } else {
       p1Damage = 5;
       p2Damage = 5;
@@ -344,6 +355,8 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
     p2Action: a2,
     p1Damage,
     p2Damage,
+    p1Crit,
+    p2Crit,
     winner: p2Damage > p1Damage ? 'p1' : (p1Damage > p2Damage ? 'p2' : 'draw')
   };
 
