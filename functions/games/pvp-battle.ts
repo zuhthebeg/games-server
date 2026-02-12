@@ -69,8 +69,11 @@ export const pvpBattlePlugin: GamePlugin = {
 
   createInitialState(players: Player[], config?: any): PvPState {
     const gamePlayers: PvPPlayer[] = players.map((p, idx) => {
-      // playerData는 room_players.player_state에서 가져옴
-      const weapon = (p as any).weapon || { level: 0, grade: 'common', element: 'none', name: '기본 무기' };
+      // playerData는 room_players.player_state에서 가져옴 (start.ts가 config.playerData에 넣어줌)
+      const playerData = config?.playerData?.[p.id] || {};
+      const weapon = playerData.weapon || config?.weapons?.[p.id] || { level: 0, grade: 'common', element: 'none', name: '기본 무기' };
+      console.log(`[pvp-battle] Player ${p.id} weapon:`, JSON.stringify(weapon));
+      
       const level = weapon.level || 0;
       const gradeMultipliers: Record<string, number> = { 
         common: 1.0, magic: 1.3, rare: 1.7, legendary: 2.2, unique: 3.0, mythic: 4.0 

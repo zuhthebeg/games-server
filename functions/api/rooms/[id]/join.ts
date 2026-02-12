@@ -57,11 +57,23 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         let seat = 0;
         while (takenSeats.has(seat)) seat++;
 
+        // Parse player state from request body (weapon, gold, etc.)
+        let playerState: string | null = null;
+        try {
+            const body = await request.json() as { playerState?: any };
+            if (body.playerState) {
+                playerState = JSON.stringify(body.playerState);
+                console.log('[join.ts] Player state received:', playerState);
+            }
+        } catch (e) {
+            // No body or invalid JSON, that's okay
+        }
+
         // Join room
         const now = new Date().toISOString();
         await env.DB.prepare(
-            'INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at) VALUES (?, ?, ?, 0, ?)'
-        ).bind(roomId, user.userId, seat, now).run();
+            'INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at, player_state) VALUES (?, ?, ?, 0, ?, ?)'
+        ).bind(roomId, user.userId, seat, now, playerState).run();
 
         // Add event
         await addEvent(env, roomId, 'player_joined', user.userId, { seat });
