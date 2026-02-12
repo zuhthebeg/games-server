@@ -30,8 +30,26 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             return errorResponse('Room not found', 404);
         }
 
-        if (room.status !== 'finished') {
+        // Check if game is finished (by status or by game state)
+        let isFinished = room.status === 'finished';
+        
+        // Also check game state's gameOver flag (in case status wasn't updated)
+        if (!isFinished && room.state) {
+            try {
+                const state = JSON.parse(room.state);
+                isFinished = state.gameOver === true || state.winner !== null;
+            } catch (e) {}
+        }
+        
+        if (!isFinished) {
             return errorResponse('Game is not finished yet', 400);
+        }
+        
+        // Update status to finished if it wasn't already
+        if (room.status !== 'finished') {
+            await env.DB.prepare(
+                `UPDATE rooms SET status = 'finished', finished_at = ? WHERE id = ?`
+            ).bind(new Date().toISOString(), roomId).run();
         }
 
         // Reset room status to waiting

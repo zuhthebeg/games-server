@@ -54,9 +54,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         }
         
         // Update nickname
-        await DB.prepare(`
+        console.log('[nickname.ts] Updating nickname for user:', user.id, 'to:', nickname);
+        const updateResult = await DB.prepare(`
             UPDATE users SET nickname = ?, updated_at = datetime('now') WHERE id = ?
         `).bind(nickname, user.id).run();
+        console.log('[nickname.ts] Update result:', updateResult);
         
         return Response.json({
             success: true,

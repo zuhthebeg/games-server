@@ -69,11 +69,13 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         }
 
         // Create initial state
+        console.log('[start.ts] dbPlayers:', dbPlayers.map(p => ({ id: p.user_id, nickname: p.nickname, seat: p.seat })));
         const players: Player[] = dbPlayers.map(p => ({
             id: p.user_id,
             nickname: p.nickname || `Player ${p.seat + 1}`,
             seat: p.seat,
         }));
+        console.log('[start.ts] Created players:', players);
 
         // Merge room config with player data
         const config = room.config ? JSON.parse(room.config) : {};
