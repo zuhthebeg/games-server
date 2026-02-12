@@ -329,19 +329,23 @@ function resolveTurn(state: PvPState): { events: GameEvent[] } {
       // 랜덤 데미지 + 크리티컬
       const baseDmg1 = getRandomDamage(p1);
       p1Crit = Math.random() * 100 < p1.weaponCritChance;
+      // 🌟 신화 무기 슈퍼크리티컬 (1% 확률 즉사)
+      const p1SuperCrit = p1.weaponGrade === 'mythic' && Math.random() < 0.01;
       const critMult1 = p1Crit ? (p1.weaponCritDamage / 100) : 1.0;
-      p2Damage = Math.floor(baseDmg1 * mult * elem1 * awaken1 * bonus1 * critMult1);
+      p2Damage = p1SuperCrit ? p2.hp : Math.floor(baseDmg1 * mult * elem1 * awaken1 * bonus1 * critMult1);
       p2RageGain = 30;
-      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${p1Crit ? ` 💥크리티컬(${p1.weaponCritDamage}%)!` : ''} → ${p2Damage} 데미지`;
+      resultText += `${p1.nickname}의 ${actionNames[a1]} 승리!${p1SuperCrit ? ` 🌟슈퍼크리티컬!! 즉사!` : (p1Crit ? ` 💥크리티컬(${p1.weaponCritDamage}%)!` : '')} → ${p2Damage} 데미지`;
     } else if (matchResult === 'lose') {
       const mult = a2 === 'skill' ? 1.5 : (a2 === 'defense' ? 0.5 : 1.0);
       // 랜덤 데미지 + 크리티컬
       const baseDmg2 = getRandomDamage(p2);
       p2Crit = Math.random() * 100 < p2.weaponCritChance;
+      // 🌟 신화 무기 슈퍼크리티컬 (1% 확률 즉사)
+      const p2SuperCrit = p2.weaponGrade === 'mythic' && Math.random() < 0.01;
       const critMult2 = p2Crit ? (p2.weaponCritDamage / 100) : 1.0;
-      p1Damage = Math.floor(baseDmg2 * mult * elem2 * awaken2 * bonus2 * critMult2);
+      p1Damage = p2SuperCrit ? p1.hp : Math.floor(baseDmg2 * mult * elem2 * awaken2 * bonus2 * critMult2);
       p1RageGain = 30;
-      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${p2Crit ? ` 💥크리티컬(${p2.weaponCritDamage}%)!` : ''} → ${p1Damage} 데미지`;
+      resultText += `${p2.nickname}의 ${actionNames[a2]} 승리!${p2SuperCrit ? ` 🌟슈퍼크리티컬!! 즉사!` : (p2Crit ? ` 💥크리티컬(${p2.weaponCritDamage}%)!` : '')} → ${p1Damage} 데미지`;
     } else {
       // 무승부 - 행동별 다른 처리
       if (a1 === 'attack' && a2 === 'attack') {
