@@ -15,8 +15,8 @@ interface Connect4State {
     eliminated: string[]; // players who can't move
 }
 
-const COLS = 7;
-const ROWS = 6;
+const COLS = 10;
+const ROWS = 9;
 const WIN_COUNT = 4;
 const COLORS = ['red', 'yellow', 'blue'];
 
@@ -98,9 +98,16 @@ export const connect4Plugin: GamePlugin = {
         if (winLine) {
             newState.winner = playerId;
             newState.winLine = winLine;
+            // Count winner's stones
+            let winnerStones = 0;
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (newState.board[r][c] === playerId) winnerStones++;
+                }
+            }
             events.push({
                 type: 'game_end',
-                payload: { winner: playerId, winLine, reason: '4목 완성!' }
+                payload: { winner: playerId, winLine, winnerStones, reason: '4목 완성!' }
             });
         } else if (isBoardFull(newState.board)) {
             newState.winner = 'draw';
@@ -145,13 +152,24 @@ export const connect4Plugin: GamePlugin = {
     },
 
     getPublicState(state: Connect4State): any {
+        // Count stones per player
+        const stoneCounts: Record<string, number> = {};
+        for (const p of state.players) stoneCounts[p.id] = 0;
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (state.board[r][c] && stoneCounts[state.board[r][c]] !== undefined) {
+                    stoneCounts[state.board[r][c]]++;
+                }
+            }
+        }
         return {
             board: state.board,
             currentPlayerIndex: state.currentPlayerIndex,
             players: state.players,
             winner: state.winner,
             winLine: state.winLine,
-            lastMove: state.lastMove
+            lastMove: state.lastMove,
+            stoneCounts
         };
     },
 
@@ -205,5 +223,10 @@ function checkWin(board: (string | null)[][], row: number, col: number, playerId
 }
 
 function isBoardFull(board: (string | null)[][]): boolean {
-    return board[0].every(cell => cell !== null);
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (board[r][c] === null) return false;
+        }
+    }
+    return true;
 }
