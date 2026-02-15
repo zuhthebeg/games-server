@@ -61,18 +61,17 @@ export const connect4Plugin: GamePlugin = {
             return { valid: false, error: '당신의 차례가 아닙니다' };
         }
 
-        if (action.type !== 'drop') {
+        if (action.type !== 'place') {
             return { valid: false, error: '잘못된 액션입니다' };
         }
 
-        const col = action.payload?.col;
-        if (col === undefined || col < 0 || col >= COLS) {
-            return { valid: false, error: '잘못된 열입니다' };
+        const { row, col } = action.payload || {};
+        if (row === undefined || col === undefined || row < 0 || row >= ROWS || col < 0 || col >= COLS) {
+            return { valid: false, error: '잘못된 위치입니다' };
         }
 
-        // Check if column is full
-        if (state.board[0][col] !== null) {
-            return { valid: false, error: '이 열은 가득 찼습니다' };
+        if (state.board[row][col] !== null) {
+            return { valid: false, error: '이미 돌이 있는 위치입니다' };
         }
 
         return { valid: true };
@@ -80,22 +79,16 @@ export const connect4Plugin: GamePlugin = {
 
     applyAction(state: Connect4State, action: GameAction, playerId: string): ActionResult {
         const newState = JSON.parse(JSON.stringify(state)) as Connect4State;
-        const col = action.payload.col;
+        const { row, col } = action.payload;
         const events: GameEvent[] = [];
 
-        // Find the lowest empty row in this column
-        let row = ROWS - 1;
-        while (row >= 0 && newState.board[row][col] !== null) {
-            row--;
-        }
-
-        // Place piece
+        // Place piece directly at the chosen cell
         newState.board[row][col] = playerId;
         newState.lastMove = { row, col };
 
         const player = newState.players.find(p => p.id === playerId);
         events.push({
-            type: 'drop',
+            type: 'place',
             playerId,
             payload: { row, col, color: player?.color }
         });
