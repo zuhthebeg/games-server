@@ -82,7 +82,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       dialogue: '크큭... 감히 이곳에 발을 들이다니.',
       action: 'normal_attack',
       emotion: 'angry',
-      _debug: errMsg
+      _debug: errMsg,
+      _raw: (error as any)?._rawText || null
     }), { headers: CORS_HEADERS });
   }
 };
@@ -158,7 +159,7 @@ ${historyContext}
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.9,
-        maxOutputTokens: 300,
+        maxOutputTokens: 512,
       },
     }),
   });
@@ -171,6 +172,7 @@ ${historyContext}
   const data = await response.json() as any;
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Empty response');
+  console.log('[Boss] Raw Gemini text:', text);
 
   try {
     // JSON 블록 추출 (```json ... ``` 또는 { ... } 매칭)
@@ -191,8 +193,18 @@ ${historyContext}
       goldGift: parsed.goldGift,
       emotion: parsed.emotion || 'angry',
     };
-  } catch {
-    // JSON 파싱 실패 시 텍스트 자체를 대사로
+  } catch (parseErr) {
+    // JSON 파싱 실패 시 텍스트에서 대사 추출 시도
+    const dialogueMatch = text.match(/"dialogue"\s*:\s*"([^"]+)"/);
+    if (dialogueMatch) {
+      const actionMatch = text.match(/"action"\s*:\s*"([^"]+)"/);
+      const emotionMatch = text.match(/"emotion"\s*:\s*"([^"]+)"/);
+      return {
+        dialogue: dialogueMatch[1],
+        action: actionMatch?.[1] || 'normal_attack',
+        emotion: emotionMatch?.[1] || 'angry',
+      };
+    }
     const clean = text.replace(/```[\s\S]*?```/g, '').replace(/[{}"\n]/g, '').trim();
     return { dialogue: clean.substring(0, 100) || '크큭...', action: 'normal_attack', emotion: 'angry' };
   }
