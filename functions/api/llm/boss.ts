@@ -77,10 +77,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   } catch (error) {
     console.error('Boss dialogue error:', error);
     // 에러 시 기본 대사 반환 (게임이 멈추면 안 되니까)
+    const errMsg = error instanceof Error ? error.message : 'unknown';
     return new Response(JSON.stringify({
       dialogue: '크큭... 감히 이곳에 발을 들이다니.',
       action: 'normal_attack',
-      emotion: 'angry'
+      emotion: 'angry',
+      _debug: errMsg
     }), { headers: CORS_HEADERS });
   }
 };
@@ -162,7 +164,8 @@ ${historyContext}
   });
 
   if (!response.ok) {
-    throw new Error(`Gemini ${response.status}`);
+    const errText = await response.text();
+    throw new Error(`Gemini ${response.status}: ${errText.substring(0, 200)}`);
   }
 
   const data = await response.json() as any;
