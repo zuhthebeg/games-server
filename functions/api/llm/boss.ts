@@ -145,7 +145,7 @@ ${history.length > 0 ? '이전:' + history.slice(-3).map(h=>`+${h.player_level},
     }
     const parsed = JSON.parse(jsonStr);
     return {
-      dialogue: parsed.dialogue || '...',
+      dialogue: (parsed.dialogue || '...').replace(/^dialogue:\s*/i, '').trim(),
       action: parsed.action || 'normal_attack',
       skillName: parsed.skillName,
       skillEffect: parsed.skillEffect,
