@@ -157,7 +157,6 @@ ${historyContext}
       generationConfig: {
         temperature: 0.9,
         maxOutputTokens: 300,
-        responseMimeType: 'application/json',
       },
     }),
   });
@@ -171,7 +170,16 @@ ${historyContext}
   if (!text) throw new Error('Empty response');
 
   try {
-    const parsed = JSON.parse(text);
+    // JSON 블록 추출 (```json ... ``` 또는 { ... } 매칭)
+    let jsonStr = text;
+    const codeBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlock) {
+      jsonStr = codeBlock[1].trim();
+    } else {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) jsonStr = jsonMatch[0];
+    }
+    const parsed = JSON.parse(jsonStr);
     return {
       dialogue: parsed.dialogue || '...',
       action: parsed.action || 'normal_attack',
@@ -181,7 +189,9 @@ ${historyContext}
       emotion: parsed.emotion || 'angry',
     };
   } catch {
-    return { dialogue: text.substring(0, 100), action: 'normal_attack', emotion: 'angry' };
+    // JSON 파싱 실패 시 텍스트 자체를 대사로
+    const clean = text.replace(/```[\s\S]*?```/g, '').replace(/[{}"\n]/g, '').trim();
+    return { dialogue: clean.substring(0, 100) || '크큭...', action: 'normal_attack', emotion: 'angry' };
   }
 }
 

@@ -140,3 +140,19 @@ CREATE TABLE IF NOT EXISTS rankings (
 CREATE INDEX IF NOT EXISTS idx_rankings_weapon ON rankings(best_weapon_level DESC);
 CREATE INDEX IF NOT EXISTS idx_rankings_kills ON rankings(total_kills DESC);
 CREATE INDEX IF NOT EXISTS idx_rankings_pvp ON rankings(pvp_rating DESC);
+
+-- 보스 대화 기록 (FIFO 20개)
+CREATE TABLE IF NOT EXISTS boss_encounters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id TEXT NOT NULL,
+    boss_id TEXT NOT NULL,
+    boss_name TEXT,
+    boss_dialogue TEXT,
+    boss_action TEXT,
+    boss_emotion TEXT,
+    player_level INTEGER DEFAULT 0,
+    player_gold INTEGER DEFAULT 0,
+    game_id TEXT DEFAULT 'enhance',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_boss_enc_player ON boss_encounters(player_id, boss_id, created_at DESC);
