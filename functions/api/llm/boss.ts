@@ -192,6 +192,7 @@ ${historyContext}
       skillEffect: parsed.skillEffect,
       goldGift: parsed.goldGift,
       emotion: parsed.emotion || 'angry',
+      _raw: text.substring(0, 300),
     };
   } catch (parseErr) {
     // JSON 파싱 실패 시 텍스트에서 대사 추출 시도
@@ -206,7 +207,7 @@ ${historyContext}
       };
     }
     const clean = text.replace(/```[\s\S]*?```/g, '').replace(/[{}"\n]/g, '').trim();
-    return { dialogue: clean.substring(0, 100) || '크큭...', action: 'normal_attack', emotion: 'angry' };
+    return { dialogue: clean.substring(0, 100) || '크큭...', action: 'normal_attack', emotion: 'angry', _raw: text.substring(0, 300) };
   }
 }
 
