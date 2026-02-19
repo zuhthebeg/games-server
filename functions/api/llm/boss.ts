@@ -142,11 +142,9 @@ ${historyContext}
 ## 특수 스킬 예시
 - 화염숨결, 저주의 손길, 공간왜곡, 영혼흡수, 냉기의 벽, 번개소환 등
 
-반드시 순수 JSON만 출력해라. 코드블록(\`\`\`json) 사용 금지! 마크다운 없이 { 로 시작해서 } 로 끝나는 JSON만 출력:
-{"dialogue":"보스 대사 1-2문장","action":"normal_attack","emotion":"angry"}
-action 옵션: normal_attack, special_skill, taunt, gift, flee
-emotion 옵션: angry, amused, scared, bored, excited
-special_skill이면 skillName, skillEffect 추가. gift면 goldGift:10000 추가.`;
+반드시 순수 JSON만 출력. 코드블록 금지. 대사는 반드시 30자 이내 한 문장!
+{"dialogue":"짧은 대사","action":"normal_attack","emotion":"angry"}
+action: normal_attack/special_skill/taunt/gift/flee. emotion: angry/amused/scared/bored/excited`;
 
   const response = await fetch(GEMINI_URL, {
     method: 'POST',
