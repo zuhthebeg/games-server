@@ -82,8 +82,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       dialogue: '크큭... 감히 이곳에 발을 들이다니.',
       action: 'normal_attack',
       emotion: 'angry',
-      _debug: errMsg,
-      _raw: (error as any)?._rawText || null
+      _debug: errMsg
     }), { headers: CORS_HEADERS });
   }
 };
@@ -134,8 +133,6 @@ ${history.length > 0 ? '이전:' + history.slice(-3).map(h=>`+${h.player_level},
   const data = await response.json() as any;
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Empty response');
-  console.log('[Boss] Raw Gemini text:', text);
-
   try {
     // JSON 블록 추출 (```json ... ``` 또는 { ... } 매칭)
     let jsonStr = text;
@@ -154,7 +151,6 @@ ${history.length > 0 ? '이전:' + history.slice(-3).map(h=>`+${h.player_level},
       skillEffect: parsed.skillEffect,
       goldGift: parsed.goldGift,
       emotion: parsed.emotion || 'angry',
-      _raw: text.substring(0, 300),
     };
   } catch (parseErr) {
     // JSON 파싱 실패 시 텍스트에서 대사 추출 시도
@@ -169,7 +165,7 @@ ${history.length > 0 ? '이전:' + history.slice(-3).map(h=>`+${h.player_level},
       };
     }
     const clean = text.replace(/```[\s\S]*?```/g, '').replace(/[{}"\n]/g, '').trim();
-    return { dialogue: clean.substring(0, 100) || '크큭...', action: 'normal_attack', emotion: 'angry', _raw: text.substring(0, 300) };
+    return { dialogue: clean.substring(0, 100) || '크큭...', action: 'normal_attack', emotion: 'angry' };
   }
 }
 
