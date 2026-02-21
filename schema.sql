@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS rankings (
     best_weapon_name TEXT,
     best_weapon_grade TEXT,
     best_weapon_element TEXT,
+    best_weapon_image TEXT,
     best_weapon_achieved_at TEXT,
     -- 사냥 랭킹
     total_kills INTEGER DEFAULT 0,

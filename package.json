@@ -9,8 +9,8 @@
     "db:prod": "wrangler d1 execute games-relay-db --file=./schema.sql"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0",
     "@cloudflare/workers-types": "^4.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "wrangler": "^4.67.0"
   }
 }

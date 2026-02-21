@@ -19,6 +19,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         r.best_weapon_name,
         r.best_weapon_grade,
         r.best_weapon_element,
+        r.best_weapon_image,
         r.best_weapon_achieved_at
       FROM rankings r
       LEFT JOIN users u ON r.user_id = u.id
