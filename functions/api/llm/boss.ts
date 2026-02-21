@@ -44,6 +44,101 @@ const CORS_HEADERS = {
   'Content-Type': 'application/json',
 };
 
+interface BossPersona {
+  style: string;
+  tone: string;
+  signature: string;
+  favoredActions: string;
+}
+
+const BOSS_PERSONAS: Record<string, BossPersona> = {
+  valakas: {
+    style: '압도적이고 오만한 제왕형 말투',
+    tone: '뜨겁고 위협적, 불길/멸망 어휘 선호',
+    signature: '약자를 벌레 취급, 강자만 인정',
+    favoredActions: 'special_skill, taunt'
+  },
+  antharas: {
+    style: '묵직하고 느린 고대 지룡 말투',
+    tone: '대지, 진동, 무게감 표현',
+    signature: '짧고 단단한 경고',
+    favoredActions: 'normal_attack, taunt'
+  },
+  lindvior: {
+    style: '빠르고 날카로운 사냥꾼형 말투',
+    tone: '바람, 속도, 절단 표현',
+    signature: '비웃음 + 기습 예고',
+    favoredActions: 'special_skill, taunt'
+  },
+  fafurion: {
+    style: '차갑고 침착한 심해 군주 말투',
+    tone: '파도, 압력, 침수 표현',
+    signature: '상대를 천천히 익사시키는 이미지',
+    favoredActions: 'normal_attack, special_skill'
+  },
+  demon_lord: {
+    style: '폭군형 악마 왕',
+    tone: '지배, 복종, 처형 어휘',
+    signature: '명령형 대사',
+    favoredActions: 'taunt, special_skill'
+  },
+  demon_queen: {
+    style: '치명적으로 우아한 여왕형',
+    tone: '유혹 + 조롱을 섞은 냉소',
+    signature: '상대를 장난감 취급',
+    favoredActions: 'taunt, special_skill'
+  },
+  succubus_queen: {
+    style: '유혹적이지만 잔혹한 여왕형',
+    tone: '달콤한 표현 뒤에 살기',
+    signature: '칭찬처럼 들리지만 모욕',
+    favoredActions: 'taunt, gift, special_skill'
+  },
+  incubus: {
+    style: '여유롭고 도발적인 미남형',
+    tone: '비꼬는 농담 + 자신감',
+    signature: '한 수 위라는 태도',
+    favoredActions: 'taunt, normal_attack'
+  },
+  death_knight: {
+    style: '침착한 기사단장형',
+    tone: '의식, 심판, 단죄 어휘',
+    signature: '짧은 판결문 같은 대사',
+    favoredActions: 'normal_attack, special_skill'
+  },
+  lich: {
+    style: '냉소적인 망령 군주',
+    tone: '죽음, 저주, 영혼 수집',
+    signature: '비웃는 듯한 지식인 말투',
+    favoredActions: 'special_skill, taunt'
+  },
+  reaper: {
+    style: '무감정한 사형집행인',
+    tone: '종말, 수확, 마지막 숨',
+    signature: '짧은 사망선고',
+    favoredActions: 'normal_attack, taunt'
+  },
+  dragon: {
+    style: '난폭한 포식자형 드래곤',
+    tone: '불, 송곳니, 찢어발김',
+    signature: '직선적 위협',
+    favoredActions: 'normal_attack, special_skill'
+  },
+  demon: {
+    style: '광폭한 전장 악마',
+    tone: '분노, 파괴, 학살',
+    signature: '호전적 도발',
+    favoredActions: 'normal_attack, taunt'
+  },
+};
+
+const DEFAULT_PERSONA: BossPersona = {
+  style: '위압적인 RPG 보스',
+  tone: '강하고 거친 전투 말투',
+  signature: '플레이어를 낮춰보고 도발',
+  favoredActions: 'normal_attack, taunt'
+};
+
 export const onRequestOptions: PagesFunction = async () => {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 };
@@ -106,11 +201,29 @@ async function generateBossDialogue(
   const playerHasAdvantage = player.playerElement && bossWeaknesses.includes(player.playerElement);
   const playerHasDisadvantage = player.playerElement === 'fire' && player.bossType === 'dragon';
 
+  const persona = BOSS_PERSONAS[player.bossId] || BOSS_PERSONAS[player.bossType || ''] || DEFAULT_PERSONA;
+
   const prompt = `RPG 보스 "${player.bossName}"(${player.bossType||'?'}, 티어${player.bossTier}) 역할. ${encounterCount+1}번째 조우.
 플레이어: ${player.playerWeapon} +${player.playerLevel} ${player.playerGrade}, ${player.playerWeaponType||'sword'}, 속성:${player.playerElement||'무'}, ${player.playerGold}G
 약점:${bossWeaknesses.join(',')||'없음'} ${playerHasAdvantage?'플레이어유리!':''} ${playerHasDisadvantage?'보스유리!':''}
 ${history.length > 0 ? '이전:' + history.slice(-3).map(h=>`+${h.player_level},${h.boss_action}`).join('/') : '첫만남'}
-규칙: 한국어 반말 대사 20자내. 무기/속성/강화에 반응. +0이면 action:gift,goldGift:10000. +7↑이면 긴장. 골드10만↑이면 탐냄.
+
+보스 페르소나:
+- 말투: ${persona.style}
+- 분위기: ${persona.tone}
+- 캐릭터 핵심: ${persona.signature}
+- 선호 행동: ${persona.favoredActions}
+
+규칙:
+- 한국어 반말, 16~28자 짧은 대사
+- 보스 본연의 캐릭터를 유지 (매번 같은 느낌)
+- 무기/속성/강화 단계에 반드시 반응
+- +0이면 action:gift, goldGift:10000
+- +7 이상이면 플레이어를 경계/긴장
+- 골드 10만 이상이면 탐욕 반응
+- action은 normal_attack|special_skill|taunt|gift|flee 중 하나
+- emotion은 angry|amused|scared|bored|excited 중 하나
+
 순수JSON만! {"dialogue":"대사","action":"normal_attack","emotion":"angry"}`;
 
   const response = await fetch(GEMINI_URL, {
