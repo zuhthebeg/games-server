@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS rankings (
     -- 사냥 랭킹
     total_kills INTEGER DEFAULT 0,
     max_kill_streak INTEGER DEFAULT 0,
+    boss_kills INTEGER DEFAULT 0,
     -- PvP 랭킹
     pvp_wins INTEGER DEFAULT 0,
     pvp_losses INTEGER DEFAULT 0,
@@ -139,6 +140,7 @@ CREATE TABLE IF NOT EXISTS rankings (
 );
 CREATE INDEX IF NOT EXISTS idx_rankings_weapon ON rankings(best_weapon_level DESC);
 CREATE INDEX IF NOT EXISTS idx_rankings_kills ON rankings(total_kills DESC);
+CREATE INDEX IF NOT EXISTS idx_rankings_boss_kills ON rankings(boss_kills DESC);
 CREATE INDEX IF NOT EXISTS idx_rankings_pvp ON rankings(pvp_rating DESC);
 
 -- 보스 대화 기록 (FIFO 20개)
