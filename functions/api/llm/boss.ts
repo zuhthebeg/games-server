@@ -203,26 +203,36 @@ async function generateBossDialogue(
 
   const persona = BOSS_PERSONAS[player.bossId] || BOSS_PERSONAS[player.bossType || ''] || DEFAULT_PERSONA;
 
+  const repeatedVisit = encounterCount >= 3;
+  const tooRich = player.playerGold >= 100000;
+  const highLevel = player.playerLevel >= 9;
+  const lowLevel = player.playerLevel <= 2;
+  const comesAgain = encounterCount >= 1;
+
   const prompt = `RPG 보스 "${player.bossName}"(${player.bossType||'?'}, 티어${player.bossTier}) 역할. ${encounterCount+1}번째 조우.
 플레이어: ${player.playerWeapon} +${player.playerLevel} ${player.playerGrade}, ${player.playerWeaponType||'sword'}, 속성:${player.playerElement||'무'}, ${player.playerGold}G
-약점:${bossWeaknesses.join(',')||'없음'} ${playerHasAdvantage?'플레이어유리!':''} ${playerHasDisadvantage?'보스유리!':''}
-${history.length > 0 ? '이전:' + history.slice(-3).map(h=>`+${h.player_level},${h.boss_action}`).join('/') : '첫만남'}
+약점:${bossWeaknesses.join(',')||'없음'} ${playerHasAdvantage?'★플레이어유리':''} ${playerHasDisadvantage?'★보스유리':''}
+${history.length > 0 ? '최근3회:' + history.slice(-3).map(h=>`+${h.player_level}`).join('→') : '첫만남'}
 
 보스 페르소나:
 - 말투: ${persona.style}
 - 분위기: ${persona.tone}
 - 캐릭터 핵심: ${persona.signature}
-- 선호 행동: ${persona.favoredActions}
 
-규칙:
-- 한국어 반말, 16~28자 짧은 대사
-- 보스 본연의 캐릭터를 유지 (매번 같은 느낌)
-- 무기/속성/강화 단계에 반드시 반응
+창의적 대사 방향 (반드시 아래 중 하나 이상 반영):
+${comesAgain ? `- 또 왔냐는 피로감/짜증 ("몇마리째야", "또야", "그만좀 와라", "오늘 몇번째냐")` : ''}
+${highLevel ? `- 강화 수치에 주눅들거나 경계 ("아 +${player.playerLevel}이네... 진짜로?", "그 무기 사기 아님?")` : ''}
+${tooRich ? `- 돈 많은 플레이어 비꼬기 ("골드 ${Math.floor(player.playerGold/10000)}만 있는데 왜 여기서 피흘림", "현질러냐")` : ''}
+${lowLevel ? `- 낮은 강화에 어이없어하기 ("+${player.playerLevel}강으로 나한테...?", "장난해?")` : ''}
+${repeatedVisit ? `- 메타인지 (게임인 걸 안다는 뉘앙스: "얼마나 파밍할거냐", "오늘 몇시간째임", "손가락 안아프냐")` : ''}
+- 트렌디한 인터넷 밈/신조어 허용 ("진심임?", "ㅋㅋ", "레알?", "ㄷㄷ", "어이없네")
+- 뻔한 악당 대사("크큭", "감히", "멸망") 최대한 자제
+
+고정 규칙:
+- 한국어 반말, 16~28자
 - +0이면 action:gift, goldGift:10000
-- +7 이상이면 플레이어를 경계/긴장
-- 골드 10만 이상이면 탐욕 반응
-- action은 normal_attack|special_skill|taunt|gift|flee 중 하나
-- emotion은 angry|amused|scared|bored|excited 중 하나
+- action: normal_attack|special_skill|taunt|gift|flee
+- emotion: angry|amused|scared|bored|excited
 
 순수JSON만! {"dialogue":"대사","action":"normal_attack","emotion":"angry"}`;
 
