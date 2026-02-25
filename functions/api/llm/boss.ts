@@ -174,7 +174,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // 에러 시 기본 대사 반환 (게임이 멈추면 안 되니까)
     const errMsg = error instanceof Error ? error.message : 'unknown';
     return new Response(JSON.stringify({
-      dialogue: '크큭... 감히 이곳에 발을 들이다니.',
+      dialogue: '아 진짜 또야...',
       action: 'normal_attack',
       emotion: 'angry',
       _debug: errMsg
@@ -209,32 +209,33 @@ async function generateBossDialogue(
   const lowLevel = player.playerLevel <= 2;
   const comesAgain = encounterCount >= 1;
 
-  const prompt = `RPG 보스 "${player.bossName}"(${player.bossType||'?'}, 티어${player.bossTier}) 역할. ${encounterCount+1}번째 조우.
-플레이어: ${player.playerWeapon} +${player.playerLevel} ${player.playerGrade}, ${player.playerWeaponType||'sword'}, 속성:${player.playerElement||'무'}, ${player.playerGold}G
-약점:${bossWeaknesses.join(',')||'없음'} ${playerHasAdvantage?'★플레이어유리':''} ${playerHasDisadvantage?'★보스유리':''}
-${history.length > 0 ? '최근3회:' + history.slice(-3).map(h=>`+${h.player_level}`).join('→') : '첫만남'}
+  const prompt = `RPG 보스 "${player.bossName}"(티어${player.bossTier}) 역할극. ${encounterCount+1}번째 조우.
+상황: ${player.playerWeapon} +${player.playerLevel} ${player.playerGrade}, 속성:${player.playerElement||'무'}, 골드:${player.playerGold}G
+${history.length > 0 ? '최근내역: ' + history.slice(-3).map(h=>`+${h.player_level} [${h.boss_action}]`).join('→') : '첫만남'}
+약점:${bossWeaknesses.join(',')||'없음'} ${playerHasAdvantage?'[플레이어 속성유리]':''} ${playerHasDisadvantage?'[보스 속성유리]':''}
 
-보스 페르소나:
-- 말투: ${persona.style}
-- 분위기: ${persona.tone}
-- 캐릭터 핵심: ${persona.signature}
+페르소나: ${persona.style} / ${persona.signature}
 
-창의적 대사 방향 (반드시 아래 중 하나 이상 반영):
-${comesAgain ? `- 또 왔냐는 피로감/짜증 ("몇마리째야", "또야", "그만좀 와라", "오늘 몇번째냐")` : ''}
-${highLevel ? `- 강화 수치에 주눅들거나 경계 ("아 +${player.playerLevel}이네... 진짜로?", "그 무기 사기 아님?")` : ''}
-${tooRich ? `- 돈 많은 플레이어 비꼬기 ("골드 ${Math.floor(player.playerGold/10000)}만 있는데 왜 여기서 피흘림", "현질러냐")` : ''}
-${lowLevel ? `- 낮은 강화에 어이없어하기 ("+${player.playerLevel}강으로 나한테...?", "장난해?")` : ''}
-${repeatedVisit ? `- 메타인지 (게임인 걸 안다는 뉘앙스: "얼마나 파밍할거냐", "오늘 몇시간째임", "손가락 안아프냐")` : ''}
-- 트렌디한 인터넷 밈/신조어 허용 ("진심임?", "ㅋㅋ", "레알?", "ㄷㄷ", "어이없네")
-- 뻔한 악당 대사("크큭", "감히", "멸망") 최대한 자제
+=== 대사 스타일 (핵심!) ===
+이 보스는 맨날 사냥당하는 처지라 피로감이 극심함. 뻔한 악당 대사(크큭/감히/멸망/두려워하라) 완전 금지.
+대신 이런 느낌으로:
+- 귀찮아/지침: "아 진짜 또야", "내새끼들 고만때려", "오늘만 몇번째임"
+- 협박 대신 흥정: "나말고 딴 보스 때려 돈줄게", "그냥 가면 골드 드림", "딜 하나 하자"
+- 현실적 불평: "손가락 안 아프냐 진짜", "이게 직업이냐", "몇시간째 파밍이냐"
+- 낮은강화 무시: "+${player.playerLevel}강이 감히? ㅋ", "장난치냐", "그거 가지고 왔어?"
+- 높은강화 당황: "+${player.playerLevel}이라고? 잠깐만", "야 그 무기 사기 아님?", "진심임?"
+- 돈 많으면 비꼬기: "${Math.floor(player.playerGold/10000)}만골드 있으면서 왜 나한테 옴"
+- 한국어 인터넷 반말 허용: ㅋㅋ, ㅜㅜ, 진짜로?, 레알?, 어이없어, 씁, 하
+${comesAgain ? `- 재방문 피로: "형이라 부를게 제발 그만와", "또 왔냐 진짜"` : ''}
 
-고정 규칙:
-- 한국어 반말, 16~28자
-- +0이면 action:gift, goldGift:10000
+글자 수: 한국어 10~25자 딱 맞춰서. 짧고 찰지게.
+
+규칙:
+- +0강이면 반드시 action:gift, goldGift:10000 (불쌍해서 줌)
 - action: normal_attack|special_skill|taunt|gift|flee
 - emotion: angry|amused|scared|bored|excited
 
-순수JSON만! {"dialogue":"대사","action":"normal_attack","emotion":"angry"}`;
+JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"}`;
 
   const response = await fetch(GEMINI_URL, {
     method: 'POST',
@@ -288,7 +289,7 @@ ${repeatedVisit ? `- 메타인지 (게임인 걸 안다는 뉘앙스: "얼마나
       };
     }
     const clean = text.replace(/```[\s\S]*?```/g, '').replace(/[{}"\n]/g, '').trim();
-    return { dialogue: clean.substring(0, 100) || '크큭...', action: 'normal_attack', emotion: 'angry' };
+    return { dialogue: clean.substring(0, 100) || '...진짜 또야', action: 'normal_attack', emotion: 'bored' };
   }
 }
 
