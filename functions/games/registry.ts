@@ -14,6 +14,7 @@ import { connect4Plugin } from './connect4';
 import { catanPlugin } from './catan';
 import { enhanceGame } from './enhance';
 import { pvpBattlePlugin } from './pvp-battle';
+import { bulletDodgePlugin } from './bulletdodge';
 
 const registry = new Map<string, GameRegistryEntry>();
 
@@ -71,3 +72,4 @@ registerGame(connect4Plugin, {});
 registerGame(catanPlugin, {});
 registerGame(enhanceGame, {});
 registerGame(pvpBattlePlugin, {});
+registerGame(bulletDodgePlugin, {});
