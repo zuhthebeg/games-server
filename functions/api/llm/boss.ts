@@ -14,7 +14,7 @@ interface Env {
 interface BossRequest {
   playerId: string;       // 플레이어 식별자
   bossId: string;         // 보스 몬스터 ID (dragon, demon_lord 등)
-  bossName: string;       // 보스 이름
+  bossName?: string;       // 보스 이름 (optional, falls back to bossId)
   bossTier: number;       // 보스 티어 (4~6)
   playerWeapon: string;   // 무기 이름
   playerLevel: number;    // 강화 단계
@@ -161,9 +161,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       playerElement, playerWeaponType, bossType, gameId, percent, triggerType, stage, score,
     } = body;
 
-    if (!playerId || !bossId || !bossName) {
+    if (!playerId || !bossId) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers: CORS_HEADERS });
     }
+    const effectiveBossName = bossName || bossId;
 
     const effectiveGameId = gameId || 'enhance';
 
@@ -179,7 +180,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       context.env.GEMINI_API_KEY,
       {
         bossId,
-        bossName,
+        bossName: effectiveBossName,
         bossTier,
         playerWeapon,
         playerLevel,
@@ -198,7 +199,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     );
 
     // 3) 기존 encounter 기록 저장
-    await saveEncounter(context.env.DB, playerId, bossId, bossName, bossResponse, playerLevel, playerGold, effectiveGameId);
+    await saveEncounter(context.env.DB, playerId, bossId, effectiveBossName, bossResponse, playerLevel, playerGold, effectiveGameId);
 
     // 4) 크로스게임 히스토리에도 기록 저장
     await saveBossPlayerHistory(
@@ -269,11 +270,16 @@ async function generateBossDialogue(
     ? `${player.percent.toFixed(1).replace(/\.0$/, '')}%`
     : '정보없음';
 
-  const prompt = `RPG 보스 "${player.bossName}"(티어${player.bossTier}) 역할극. ${encounterCount + 1}번째 조우.
-상황: ${player.playerWeapon} +${player.playerLevel} ${player.playerGrade}, 속성:${player.playerElement || '무'}, 골드:${player.playerGold}G
+  const isLinerush = (player.gameId || 'enhance') === 'linerush';
+  const situationLine = isLinerush
+    ? `상황: 땅따먹기 스테이지${player.stage || '?'}, 영역 ${percentText} 점령됨, 목숨${player.playerLevel || '?'}`
+    : `상황: ${player.playerWeapon || '무기없음'} +${player.playerLevel} ${player.playerGrade}, 속성:${player.playerElement || '무'}, 골드:${player.playerGold}G`;
+
+  const prompt = `RPG 보스 "${player.bossName}"(티어${player.bossTier || '?'}) 역할극. ${encounterCount + 1}번째 조우.
+${situationLine}
 게임:${player.gameId || 'enhance'}, 트리거:${triggerType}, 점유율:${percentText}
 ${history.length > 0 ? '최근내역: ' + history.slice(-3).map(h => `+${h.player_level} [${h.boss_action}]`).join('→') : '첫만남'}
-약점:${bossWeaknesses.join(',') || '없음'} ${playerHasAdvantage ? '[플레이어 속성유리]' : ''} ${playerHasDisadvantage ? '[보스 속성유리]' : ''}
+${isLinerush ? '' : `약점:${bossWeaknesses.join(',') || '없음'} ${playerHasAdvantage ? '[플레이어 속성유리]' : ''} ${playerHasDisadvantage ? '[보스 속성유리]' : ''}`}
 
 페르소나: ${personaText}
 
