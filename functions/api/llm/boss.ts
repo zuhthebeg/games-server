@@ -308,48 +308,34 @@ ${triggerType === 'desperate' ? '- desperate 상황: 플레이어가 절박함. 
 
 JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"}`;
 
-  const response = await fetch(GEMINI_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.9,
-        maxOutputTokens: 1024,
-      },
-    }),
-  });
+  // Primary: llm.cocy.io (OpenClaw proxy)
+  let text = '';
+  try {
+    const llmResp = await fetch('https://llm.cocy.io/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'system', content: prompt }] }),
+    });
+    if (llmResp.ok) {
+      const llmData = await llmResp.json() as any;
+      text = llmData?.choices?.[0]?.message?.content || '';
+    }
+  } catch (_) {}
 
-  if (!response.ok) {
-    const errText = await response.text();
-    // Fallback to llm.cocy.io if Gemini fails
-    try {
-      const fallbackResp = await fetch('https://llm.cocy.io/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'system', content: prompt }] }),
-      });
-      if (fallbackResp.ok) {
-        const fbData = await fallbackResp.json() as any;
-        const content = fbData?.choices?.[0]?.message?.content || '';
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return {
-            dialogue: (parsed.dialogue || '...').trim(),
-            action: parsed.action || 'normal_attack',
-            emotion: parsed.emotion || 'bored',
-            goldGift: parsed.goldGift,
-          };
-        }
-        return { dialogue: content.substring(0, 100) || '...', action: 'normal_attack', emotion: 'bored' };
-      }
-    } catch (_) {}
-    throw new Error(`Gemini ${response.status}: ${errText.substring(0, 200)}`);
+  // Fallback: Gemini
+  if (!text) {
+    const response = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
+      }),
+    });
+    if (!response.ok) throw new Error(`Gemini ${response.status}`);
+    const data = await response.json() as any;
+    text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   }
-
-  const data = await response.json() as any;
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Empty response');
   try {
     // JSON 블록 추출 (```json ... ``` 또는 { ... } 매칭)
