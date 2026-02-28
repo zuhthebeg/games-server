@@ -322,6 +322,29 @@ JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"
 
   if (!response.ok) {
     const errText = await response.text();
+    // Fallback to llm.cocy.io if Gemini fails
+    try {
+      const fallbackResp = await fetch('https://llm.cocy.io/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'system', content: prompt }] }),
+      });
+      if (fallbackResp.ok) {
+        const fbData = await fallbackResp.json() as any;
+        const content = fbData?.choices?.[0]?.message?.content || '';
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            dialogue: (parsed.dialogue || '...').trim(),
+            action: parsed.action || 'normal_attack',
+            emotion: parsed.emotion || 'bored',
+            goldGift: parsed.goldGift,
+          };
+        }
+        return { dialogue: content.substring(0, 100) || '...', action: 'normal_attack', emotion: 'bored' };
+      }
+    } catch (_) {}
     throw new Error(`Gemini ${response.status}: ${errText.substring(0, 200)}`);
   }
 
