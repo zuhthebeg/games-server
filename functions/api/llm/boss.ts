@@ -271,7 +271,10 @@ async function generateBossDialogue(
     : '정보없음';
 
   const isLinerush = (player.gameId || 'enhance') === 'linerush';
-  const situationLine = isLinerush
+  const isBlockblast = (player.gameId || 'enhance') === 'blockblast';
+  const situationLine = isBlockblast
+    ? `상황: 블록퍼즐 Lv.${player.stage || '?'}, 보드 ${percentText} 채워짐, 콤보최고 x${player.playerLevel || '?'}, 점수:${player.score || 0}`
+    : isLinerush
     ? `상황: 땅따먹기 스테이지${player.stage || '?'}, 영역 ${percentText} 점령됨, 목숨${player.playerLevel || '?'}`
     : `상황: ${player.playerWeapon || '무기없음'} +${player.playerLevel} ${player.playerGrade}, 속성:${player.playerElement || '무'}, 골드:${player.playerGold}G`;
 
@@ -286,7 +289,13 @@ ${isLinerush ? '' : `약점:${bossWeaknesses.join(',') || '없음'} ${playerHasA
 ${crossGameContext}
 
 === 대사 스타일 (핵심!) ===
-이 보스는 맨날 사냥당하는 처지라 피로감이 극심함. 뻔한 악당 대사(크큭/감히/멸망/두려워하라) 완전 금지.
+\${isBlockblast ? \`이 보스는 "블록 마스터"로, 퍼즐의 신을 자처하는 까칠한 퍼즐 매니아. 플레이어의 배치를 실시간으로 비평함.
+- 콤보 높으면 인정: "x\${player.playerLevel}콤보는 좀 치네", "오 좀 하는구나"
+- 보드 많이 참: "보드 \${percentText}? 정리 좀 해ㅋㅋ", "곧 막히겠네 ㅋ"
+- 점수 높으면 긴장: "\${player.score || 0}점? 잠깐 이거 레알?", "나보다 잘하는거 아니지?"
+- 점수 낮으면 놀림: "이게 최선? ㅋㅋ", "초보세요?"
+- action: scramble(행섞기)|freeze(조작금지2.5초)|bomb(4x4파괴)|taunt(도발만)
+- emotion: amused|bored|scared|excited\` : \`이 보스는 맨날 사냥당하는 처지라 피로감이 극심함.\`} 뻔한 악당 대사(크큭/감히/멸망/두려워하라) 완전 금지.
 대신 이런 느낌으로:
 - 귀찮아/지침: "아 진짜 또야", "내새끼들 고만때려", "오늘만 몇번째임"
 - 협박 대신 흥정: "나말고 딴 보스 때려 돈줄게", "그냥 가면 골드 드림", "딜 하나 하자"
@@ -303,7 +312,7 @@ ${triggerType === 'desperate' ? '- desperate 상황: 플레이어가 절박함. 
 
 규칙:
 - +0강이면 반드시 action:gift, goldGift:10000 (불쌍해서 줌)
-- action: normal_attack|special_skill|taunt|gift|flee
+- action: ${isBlockblast ? 'scramble|freeze|bomb|taunt' : 'normal_attack|special_skill|taunt|gift|flee'}
 - emotion: angry|amused|scared|bored|excited
 
 JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"}`;
