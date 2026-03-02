@@ -13,11 +13,11 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   let rows;
   if (q) {
     rows = await env.DB.prepare(
-      'SELECT id, style_name_ko, style_name_en, length, texture, color, difficulty, gguan_ggyu_score, image_key, view_count, created_at FROM hairstyles WHERE style_name_ko LIKE ? OR style_name_en LIKE ? ORDER BY created_at DESC LIMIT ?'
+      'SELECT id, style_name_ko, style_name_en, length, texture, color, difficulty, gguan_ggyu_score, image_key, view_count, created_at, user_id FROM hairstyles WHERE style_name_ko LIKE ? OR style_name_en LIKE ? ORDER BY created_at DESC LIMIT ?'
     ).bind('%'+q+'%', '%'+q+'%', limit).all();
   } else {
     rows = await env.DB.prepare(
-      'SELECT id, style_name_ko, style_name_en, length, texture, color, difficulty, gguan_ggyu_score, image_key, view_count, created_at FROM hairstyles ORDER BY created_at DESC LIMIT ?'
+      'SELECT id, style_name_ko, style_name_en, length, texture, color, difficulty, gguan_ggyu_score, image_key, view_count, created_at, user_id FROM hairstyles ORDER BY created_at DESC LIMIT ?'
     ).bind(limit).all();
   }
 
