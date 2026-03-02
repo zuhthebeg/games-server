@@ -9,6 +9,10 @@ binding = "DB"
 database_name = "games-relay-db"
 database_id = "7025f89b-3de0-458a-a93a-974eb544e4a1"
 
+[[r2_buckets]]
+binding = "HAIR_BUCKET"
+bucket_name = "hair-gallery"
+
 [vars]
 ENVIRONMENT = "development"
 BASE_URL = "https://cocy.io"
