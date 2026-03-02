@@ -61,8 +61,15 @@ Return ONLY JSON (no fences):
   "salon_keywords": "미용실 주문 멘트 (구체적 기장/레이어/숱 지시)",
   "gguan_ggyu_score": 75,
   "gguan_ggyu_reason": "꾸안꾸 판정 이유 2-3문장",
-  "trend_note": "2026 트렌드 관점 한 줄 코멘트"
-}`;
+  "trend_note": "2026 트렌드 관점 한 줄 코멘트",
+  "is_valid_hair_photo": true,
+  "rejection_reason": null
+}
+
+CRITICAL SAFETY RULES:
+- Set is_valid_hair_photo=false if the image contains: nudity, sexually explicit content, violence, gore, minors in inappropriate context, hate symbols, non-human subjects, memes, or NO visible hair/hairstyle
+- If is_valid_hair_photo=false, set rejection_reason (Korean) and leave all other fields as defaults
+- Only analyze actual photos showing a person's hair/hairstyle`;
 
 export const onRequestOptions: PagesFunction<Env> = async () =>
   new Response(null, { status: 204, headers: CORS });
@@ -111,6 +118,11 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     let analysis: any;
     try { analysis = JSON.parse(content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim()); }
     catch { return new Response(JSON.stringify({ error: 'parse failed', raw: content.substring(0, 500) }), { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
+
+    // Content moderation check
+    if (analysis.is_valid_hair_photo === false) {
+      return new Response(JSON.stringify({ error: 'rejected', reason: analysis.rejection_reason || '헤어스타일 사진이 아닙니다' }), { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } });
+    }
 
     const id = crypto.randomUUID();
     const imageKey = 'hair/' + id + '.jpg';
