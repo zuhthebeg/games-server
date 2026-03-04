@@ -74,6 +74,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     await ensureColumn(DB);
     await ensureUser(DB, userId, body.nickname);
 
+    // 익명 ID → 계정 ID 마이그레이션
+    const migrateFrom = (body as any).migrateFrom;
+    if (migrateFrom && migrateFrom !== userId && String(migrateFrom).startsWith('lr_')) {
+      const anonRow = await DB.prepare(
+        'SELECT linerush_best_stage FROM rankings WHERE user_id = ?'
+      ).bind(migrateFrom).first<{ linerush_best_stage: number }>();
+      if (anonRow?.linerush_best_stage) {
+        // 익명 기록이 계정 기록보다 좋으면 병합
+        await DB.prepare('INSERT OR IGNORE INTO rankings (user_id) VALUES (?)').bind(userId).run();
+        await DB.prepare(`
+          UPDATE rankings SET linerush_best_stage = ?, linerush_updated_at = datetime('now')
+          WHERE user_id = ? AND COALESCE(linerush_best_stage, 0) < ?
+        `).bind(anonRow.linerush_best_stage, userId, anonRow.linerush_best_stage).run();
+        // 익명 기록 삭제
+        await DB.prepare('DELETE FROM rankings WHERE user_id = ?').bind(migrateFrom).run();
+      }
+    }
+
     // INSERT OR IGNORE + UPDATE only if new stage is better
     await DB.prepare('INSERT OR IGNORE INTO rankings (user_id) VALUES (?)').bind(userId).run();
     const updated = await DB.prepare(`
