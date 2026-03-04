@@ -16,13 +16,23 @@ interface WeaponRecord {
 }
 
 // 유저 존재 확인 및 생성/닉네임 업데이트
+function sanitizeNickname(nickname?: string): string | null {
+  if (!nickname) return null;
+  const n = nickname.trim();
+  if (!n) return null;
+  // UTF-8 깨짐(mojibake) 패턴 차단
+  if (/[ìëêãåæ]/.test(n)) return null;
+  return n;
+}
+
 async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+  const safeNick = sanitizeNickname(nickname);
   const existing = await DB.prepare('SELECT id, nickname FROM users WHERE id = ?').bind(userId).first<{id: string, nickname: string}>();
   if (!existing) {
-    await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)').bind(userId, nickname || null).run();
-  } else if (nickname && nickname !== existing.nickname) {
-    // 닉네임이 다르면 업데이트
-    await DB.prepare('UPDATE users SET nickname = ?, updated_at = datetime("now") WHERE id = ?').bind(nickname, userId).run();
+    await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)').bind(userId, safeNick || null).run();
+  } else if (safeNick && safeNick !== existing.nickname) {
+    // 닉네임이 다르면 업데이트 (깨진 문자열은 반영하지 않음)
+    await DB.prepare('UPDATE users SET nickname = ?, updated_at = datetime("now") WHERE id = ?').bind(safeNick, userId).run();
   }
 }
 
