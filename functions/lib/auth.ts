@@ -42,8 +42,15 @@ export async function createJWT(payload: Record<string, any>, secret: string, ex
     const fullPayload = { ...payload, iat: now, exp: now + expiresIn };
     
     const encoder = new TextEncoder();
-    const headerB64 = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-    const payloadB64 = btoa(JSON.stringify(fullPayload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const toBase64Url = (obj: Record<string, any>) => {
+        const json = JSON.stringify(obj);
+        const bytes = new TextEncoder().encode(json);
+        let binary = '';
+        for (const b of bytes) binary += String.fromCharCode(b);
+        return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    };
+    const headerB64 = toBase64Url(header);
+    const payloadB64 = toBase64Url(fullPayload);
     
     const key = await crypto.subtle.importKey(
         'raw', encoder.encode(secret),
