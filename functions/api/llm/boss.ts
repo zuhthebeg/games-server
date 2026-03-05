@@ -9,6 +9,7 @@
 interface Env {
   DB: D1Database;
   GEMINI_API_KEY: string;
+  LLM_SECRET: string;
 }
 
 interface BossRequest {
@@ -178,6 +179,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // 2) Gemini에 보스 대사 요청
     const bossResponse = await generateBossDialogue(
       context.env.GEMINI_API_KEY,
+      context.env.LLM_SECRET || 'choon150622',
       {
         bossId,
         bossName: effectiveBossName,
@@ -230,6 +232,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
 async function generateBossDialogue(
   apiKey: string,
+  llmSecret: string,
   player: {
     bossId: string;
     bossName: string;
@@ -322,7 +325,7 @@ JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"
   try {
     const llmResp = await fetch('https://llm.cocy.io/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${llmSecret}` },
       body: JSON.stringify({ messages: [{ role: 'system', content: prompt }] }),
     });
     if (llmResp.ok) {
