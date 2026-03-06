@@ -31,8 +31,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             is_anonymous: number;
         }>();
         
-        if (!user || !user.password_hash) {
+        if (!user) {
             return Response.json({ error: '이메일 또는 비밀번호가 올바르지 않습니다' }, { status: 401 });
+        }
+        
+        if (!user.password_hash) {
+            return Response.json({ error: '이 계정은 Google로 가입되었습니다. Google 로그인을 이용해주세요.' }, { status: 401 });
         }
         
         // Verify password
