@@ -48,6 +48,25 @@ interface CrossGameHistorySummary {
 
 const GEMINI_URL = 'https://gateway.ai.cloudflare.com/v1/3d0681b782422e56226a0a1df4a0e8b2/travly-ai-gateway/google-ai-studio/v1beta/models/gemini-2.5-flash:generateContent';
 
+// --- 모델 설정 캐싱 ---
+const MODEL_CACHE: Record<string, { primary: string; fallback: string; expiry: number }> = {};
+const CACHE_TTL_MS = 5 * 60 * 1000;
+async function getModelConfig(service: string): Promise<{ primary: string; fallback: string }> {
+  const now = Date.now();
+  const cached = MODEL_CACHE[service];
+  if (cached && now < cached.expiry) return cached;
+  try {
+    const res = await fetch(`https://admin-cocy.pages.dev/api/config/${service}`);
+    if (res.ok) {
+      const data: any = await res.json();
+      const config = { primary: data.primary_model || 'spark', fallback: data.fallback_model || 'haiku', expiry: now + CACHE_TTL_MS };
+      MODEL_CACHE[service] = config;
+      return config;
+    }
+  } catch { /* 기본값 사용 */ }
+  return cached ?? { primary: 'spark', fallback: 'haiku', expiry: 0 };
+}
+
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -320,13 +339,14 @@ ${triggerType === 'desperate' ? '- desperate 상황: 플레이어가 절박함. 
 
 JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"}`;
 
-  // Primary: llm.cocy.io (OpenClaw proxy)
+  // Primary: llm.cocy.io (admin config 기반 모델)
+  const modelConfig = await getModelConfig('game-boss');
   let text = '';
   try {
-    const llmResp = await fetch('https://llm.cocy.io/v1/chat/completions', {
+    const llmResp = await fetch('https://llm.cocy.io/v2/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${llmSecret}` },
-      body: JSON.stringify({ messages: [{ role: 'system', content: prompt }] }),
+      body: JSON.stringify({ model: modelConfig.primary, messages: [{ role: 'system', content: prompt }] }),
     });
     if (llmResp.ok) {
       const llmData = await llmResp.json() as any;
