@@ -67,13 +67,15 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   let reward: { rank_type: string; rank: number; score: number; gold: number } | null = null;
   if (firstVisitToday) {
+    // 가장 최근 시즌(오늘 또는 최근 정산) 보상 확인
     const row = await DB.prepare(`
-      SELECT rank_type, rank, score, gold
+      SELECT rank_type, rank, score, gold, period_date
       FROM rank_reward_log
-      WHERE user_id = ? AND rank_type = ? AND period_date = ?
+      WHERE user_id = ? AND rank_type = ?
       ORDER BY id DESC
       LIMIT 1
-    `).bind(user.id, rankType, today).first<any>();
+    `).bind(user.id, rankType).first<any>();
+    // 아직 못 받은 보상 (오늘 첫 방문이고 보상 로그 있으면 지급)
     if (row) reward = row;
   }
 

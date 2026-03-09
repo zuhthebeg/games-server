@@ -49,19 +49,24 @@ export async function settleIfDue(DB: D1Database): Promise<SettleResult[]> {
   return results;
 }
 
-/** 단일 rank_type 정산 */
+/** 단일 rank_type 정산 — rankings 테이블(화면 기준)으로 직접 정산 */
 async function settleRankType(DB: D1Database, cfg: RankConfig): Promise<SettleResult> {
   const periodDate = todayKST();
 
-  // 마지막 reset 이후 ~ 지금까지 최고 점수 (날짜 무관, 기간 내 최고)
+  // 화면에 보이는 랭킹과 동일한 기준으로 TOP N 조회
+  const scoreCol =
+    cfg.rank_type === 'weapon' ? 'best_weapon_level' :
+    cfg.rank_type === 'hunt'   ? 'total_kills' :
+    cfg.rank_type === 'pvp'    ? 'pvp_rating' : 'best_weapon_level';
+
   const topRows = await DB.prepare(`
-    SELECT user_id, MAX(score) as score
-    FROM rank_daily
-    WHERE rank_type = ? AND date < ?
-    GROUP BY user_id
-    ORDER BY score DESC
+    SELECT r.user_id, r.${scoreCol} as score
+    FROM rankings r
+    INNER JOIN users u ON r.user_id = u.id
+    WHERE u.email IS NOT NULL AND r.${scoreCol} > 0
+    ORDER BY r.${scoreCol} DESC
     LIMIT ?
-  `).bind(cfg.rank_type, periodDate, cfg.top_n).all<{ user_id: string; score: number }>();
+  `).bind(cfg.top_n).all<{ user_id: string; score: number }>();
 
   const winners = topRows.results ?? [];
   const rewarded: { user_id: string; rank: number; score: number }[] = [];
