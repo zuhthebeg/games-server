@@ -124,15 +124,24 @@ async function settleRankType(DB: D1Database, cfg: RankConfig): Promise<SettleRe
     WHERE rank_type = ?
   `).bind(nextReset, cfg.rank_type).run();
 
-  // 시즌 기록 초기화 (정산 후 이번 시즌 활동 기록 리셋)
-  if (cfg.rank_type === 'hunt') {
-    // 사냥: total_kills, boss_kills, max_kill_streak 리셋
-    await DB.prepare(`UPDATE rankings SET total_kills = 0, boss_kills = 0, max_kill_streak = 0, updated_at = datetime('now')`).run();
+  // 명예의 전당 TOP 3 유저 ID (초기화 제외 대상)
+  const hofRows = await DB.prepare(`
+    SELECT user_id FROM hall_of_fame WHERE rank_type = ? ORDER BY best_score DESC LIMIT 3
+  `).bind(cfg.rank_type).all<{ user_id: string }>();
+  const hofIds = (hofRows.results ?? []).map(r => r.user_id);
+  const excludeClause = hofIds.length > 0
+    ? `AND user_id NOT IN (${hofIds.map(() => '?').join(',')})`
+    : '';
+  const excludeBinds = hofIds.length > 0 ? hofIds : [];
+
+  // 시즌 기록 초기화 (명예의 전당 TOP 3 제외)
+  if (cfg.rank_type === 'weapon') {
+    await DB.prepare(`UPDATE rankings SET best_weapon_level = 0, updated_at = datetime('now') WHERE 1=1 ${excludeClause}`).bind(...excludeBinds).run();
+  } else if (cfg.rank_type === 'hunt') {
+    await DB.prepare(`UPDATE rankings SET total_kills = 0, boss_kills = 0, max_kill_streak = 0, updated_at = datetime('now') WHERE 1=1 ${excludeClause}`).bind(...excludeBinds).run();
   } else if (cfg.rank_type === 'pvp') {
-    // PvP: 승/패 리셋, 레이팅은 1000 기준으로 partial 리셋 (급락 방지)
-    await DB.prepare(`UPDATE rankings SET pvp_wins = 0, pvp_losses = 0, pvp_rating = MAX(800, ROUND(pvp_rating * 0.8 + 1000 * 0.2)), updated_at = datetime('now')`).run();
+    await DB.prepare(`UPDATE rankings SET pvp_wins = 0, pvp_losses = 0, pvp_rating = MAX(800, ROUND(pvp_rating * 0.8 + 1000 * 0.2)), updated_at = datetime('now') WHERE 1=1 ${excludeClause}`).bind(...excludeBinds).run();
   }
-  // weapon은 best_weapon_level이 영구 기록이라 초기화 없음
 
   // 이전 rank_daily 데이터 정리 (30일 초과)
   await DB.prepare(`DELETE FROM rank_daily WHERE rank_type = ? AND date < date('now', '-30 days')`).bind(cfg.rank_type).run();
