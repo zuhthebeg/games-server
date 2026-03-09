@@ -81,18 +81,22 @@ async function settleRankType(DB: D1Database, cfg: RankConfig): Promise<SettleRe
     const { user_id, score } = winners[i];
     const rank = i + 1;
 
+    // 순위별 차등 지급: 1위 100%, 2위 90%, 3위 80% ... N위 (110-N*10)%
+    const pct = Math.max(10, 110 - rank * 10);  // 최소 10%
+    const gold = Math.floor(cfg.gold_reward * pct / 100);
+
     // 골드 지급 (user_data)
     await DB.prepare(`
       INSERT INTO user_data (user_id, gold, data, updated_at)
       VALUES (?, ?, '{}', datetime('now'))
       ON CONFLICT(user_id) DO UPDATE SET gold = gold + ?, updated_at = datetime('now')
-    `).bind(user_id, cfg.gold_reward, cfg.gold_reward).run();
+    `).bind(user_id, gold, gold).run();
 
     // 상금 로그
     await DB.prepare(`
       INSERT INTO rank_reward_log (rank_type, user_id, rank, score, gold, period_date)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(cfg.rank_type, user_id, rank, score, cfg.gold_reward, periodDate).run();
+    `).bind(cfg.rank_type, user_id, rank, score, gold, periodDate).run();
 
     // 명예의 전당 갱신 (TOP 3만)
     if (rank <= 3) {
@@ -106,10 +110,10 @@ async function settleRankType(DB: D1Database, cfg: RankConfig): Promise<SettleRe
           total_wins = total_wins + 1,
           total_gold = total_gold + excluded.total_gold,
           updated_at = datetime('now')
-      `).bind(cfg.rank_type, user_id, score, rank, periodDate, cfg.gold_reward).run();
+      `).bind(cfg.rank_type, user_id, score, rank, periodDate, gold).run();
     }
 
-    rewarded.push({ user_id, rank, score });
+    rewarded.push({ user_id, rank, score, gold });
   }
 
   // next_reset_at 갱신
