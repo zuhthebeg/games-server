@@ -1,5 +1,6 @@
 // POST /api/rankings/weapon - 무기 기록 갱신
 import type { D1Database } from '@cloudflare/workers-types';
+import { upsertDailyScore } from './_rank_utils';
 
 interface Env {
   DB: D1Database;
@@ -75,6 +76,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         INSERT INTO rankings (user_id, best_weapon_level, best_weapon_name, best_weapon_grade, best_weapon_element, best_weapon_image, best_weapon_achieved_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
       `).bind(userId, level, name, grade, element || null, image || null).run();
+      await upsertDailyScore(DB, userId, 'weapon', level);
 
       return Response.json({ success: true, newRecord: true, level });
     } else if (level > current.best_weapon_level) {
@@ -83,6 +85,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         SET best_weapon_level = ?, best_weapon_name = ?, best_weapon_grade = ?, best_weapon_element = ?, best_weapon_image = ?, best_weapon_achieved_at = datetime('now'), updated_at = datetime('now')
         WHERE user_id = ?
       `).bind(level, name, grade, element || null, image || null, userId).run();
+      await upsertDailyScore(DB, userId, 'weapon', level);
 
       return Response.json({ success: true, newRecord: true, level, previousBest: current.best_weapon_level });
     }

@@ -4,61 +4,85 @@
  * - 날짜 바뀌면 전 시즌 정산 실행
  * - 내 상금 목록 반환 (팝업용)
  */
-import { CORS, settleIfDue, todayKST } from './_rank_utils';
+import { CORS, settleIfDue, todayKST, RANK_TYPES } from './_rank_utils';
+import type { RankType } from './_rank_utils';
 
 interface Env { DB: D1Database }
+
+async function ensureCheckinTable(DB: D1Database) {
+  await DB.prepare(`
+    CREATE TABLE IF NOT EXISTS rank_checkin (
+      user_id TEXT NOT NULL,
+      rank_type TEXT NOT NULL,
+      check_date TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, rank_type)
+    )
+  `).run();
+}
 
 async function getAuth(request: Request, DB: D1Database) {
   const auth = request.headers.get('Authorization') ?? '';
   const userId = auth.replace('Bearer ', '').trim();
   if (!userId) return null;
-  const user = await DB.prepare('SELECT id, nickname FROM users WHERE id = ?').bind(userId).first<{ id: string; nickname: string }>();
-  return user ?? null;
+  // 로그인 회원 기준 (email 존재)
+  const user = await DB.prepare('SELECT id, nickname, email FROM users WHERE id = ?').bind(userId).first<{ id: string; nickname: string; email: string | null }>();
+  if (!user?.email) return null;
+  return user;
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const { DB } = env;
+  await ensureCheckinTable(DB);
+
+  const url = new URL(request.url);
+  const rankType = (url.searchParams.get('type') || '') as RankType;
+  if (!RANK_TYPES.includes(rankType)) {
+    return Response.json({ settled: false, rewards: [], error: 'invalid type' }, { status: 400, headers: CORS });
+  }
 
   const user = await getAuth(request, DB);
   if (!user) {
-    return Response.json({ settled: false, rewards: [] }, { headers: CORS });
+    return Response.json({ settled: false, rewards: [], reason: 'members_only' }, { headers: CORS });
   }
+
+  // 정산 필요 시 먼저 실행
+  await settleIfDue(DB);
 
   const today = todayKST();
 
-  // 마지막 방문일 확인
-  const userData = await DB.prepare('SELECT updated_at FROM user_data WHERE user_id = ?').bind(user.id).first<{ updated_at: string }>();
-  const lastVisit = userData?.updated_at?.slice(0, 10) ?? '';
+  // 탭별 첫 방문 체크
+  const checkin = await DB.prepare(
+    'SELECT check_date FROM rank_checkin WHERE user_id = ? AND rank_type = ?'
+  ).bind(user.id, rankType).first<{ check_date: string }>();
 
-  let rewards: { rank_type: string; rank: number; score: number; gold: number }[] = [];
-
-  if (lastVisit !== today) {
-    // 날짜 바뀜 → 정산
-    const results = await settleIfDue(DB);
-    for (const r of results) {
-      const mine = r.rewarded.find(w => w.user_id === user.id);
-      if (mine) {
-        // 이 유저에게 지급된 골드 확인
-        const log = await DB.prepare(
-          `SELECT gold FROM rank_reward_log WHERE rank_type = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1`
-        ).bind(r.rank_type, user.id).first<{ gold: number }>();
-        rewards.push({ rank_type: r.rank_type, rank: mine.rank, score: mine.score, gold: log?.gold ?? 0 });
-      }
-    }
-
-    // 방문일 갱신
+  const firstVisitToday = checkin?.check_date !== today;
+  if (firstVisitToday) {
     await DB.prepare(`
-      INSERT INTO user_data (user_id, gold, data, updated_at) VALUES (?, 0, '{}', datetime('now'))
-      ON CONFLICT(user_id) DO UPDATE SET updated_at = datetime('now')
-    `).bind(user.id).run();
+      INSERT INTO rank_checkin (user_id, rank_type, check_date, updated_at)
+      VALUES (?, ?, ?, datetime('now'))
+      ON CONFLICT(user_id, rank_type) DO UPDATE SET check_date = excluded.check_date, updated_at = datetime('now')
+    `).bind(user.id, rankType, today).run();
   }
 
-  // 현재 골드 잔액
+  let reward: { rank_type: string; rank: number; score: number; gold: number } | null = null;
+  if (firstVisitToday) {
+    const row = await DB.prepare(`
+      SELECT rank_type, rank, score, gold
+      FROM rank_reward_log
+      WHERE user_id = ? AND rank_type = ? AND period_date = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).bind(user.id, rankType, today).first<any>();
+    if (row) reward = row;
+  }
+
   const wallet = await DB.prepare('SELECT gold FROM user_data WHERE user_id = ?').bind(user.id).first<{ gold: number }>();
 
   return Response.json({
-    settled: rewards.length > 0,
-    rewards,
+    settled: !!reward,
+    rewards: reward ? [reward] : [],
+    firstVisitToday,
     gold: wallet?.gold ?? 0,
   }, { headers: CORS });
 };

@@ -1,5 +1,6 @@
 // GET/POST /api/rankings/hunting - 사냥 랭킹 조회/갱신
 import type { D1Database } from '@cloudflare/workers-types';
+import { upsertDailyScore } from './_rank_utils';
 
 interface Env {
   DB: D1Database;
@@ -106,11 +107,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       'SELECT total_kills, max_kill_streak, COALESCE(boss_kills, 0) as boss_kills FROM rankings WHERE user_id = ?'
     ).bind(userId).first<{ total_kills: number; max_kill_streak: number; boss_kills: number }>();
 
+    let newTotalKills = kills;
     if (!current) {
       await DB.prepare(`
         INSERT INTO rankings (user_id, total_kills, max_kill_streak, boss_kills)
         VALUES (?, ?, ?, ?)
       `).bind(userId, kills, killStreak || 0, bossKills || 0).run();
+      newTotalKills = kills;
     } else {
       const newStreak = Math.max(current.max_kill_streak || 0, killStreak || 0);
       await DB.prepare(`
@@ -118,9 +121,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         SET total_kills = total_kills + ?, max_kill_streak = ?, boss_kills = COALESCE(boss_kills, 0) + ?, updated_at = datetime('now')
         WHERE user_id = ?
       `).bind(kills, newStreak, bossKills || 0, userId).run();
+      newTotalKills = (current.total_kills || 0) + kills;
     }
 
-    return Response.json({ success: true });
+    await upsertDailyScore(DB, userId, 'hunt', newTotalKills);
+    return Response.json({ success: true, totalKills: newTotalKills });
   } catch (error) {
     console.error('[rankings/hunting] POST Error:', error);
     return Response.json({ success: false, error: 'Failed to update ranking' }, { status: 500 });

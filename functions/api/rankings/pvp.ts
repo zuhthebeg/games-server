@@ -1,5 +1,6 @@
 // GET/POST /api/rankings/pvp - PvP 랭킹 조회/갱신
 import type { D1Database } from '@cloudflare/workers-types';
+import { upsertDailyScore } from './_rank_utils';
 
 interface Env {
   DB: D1Database;
@@ -117,6 +118,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
     }
 
+    await upsertDailyScore(DB, userId, 'pvp', newRating);
     return Response.json({ 
       success: true, 
       newRating,
