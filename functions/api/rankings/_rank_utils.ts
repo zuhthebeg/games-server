@@ -16,6 +16,12 @@ export const CORS = {
 export const RANK_TYPES = ['weapon', 'hunt', 'pvp'] as const;
 export type RankType = typeof RANK_TYPES[number];
 
+/** 로그인 회원인지 확인 (email 있는 유저만 true) */
+export async function isRegisteredUser(DB: D1Database, userId: string): Promise<boolean> {
+  const row = await DB.prepare('SELECT email FROM users WHERE id = ? AND email IS NOT NULL').bind(userId).first<{ email: string }>();
+  return !!row;
+}
+
 /** KST 오늘 날짜 (YYYY-MM-DD) */
 export function todayKST(): string {
   return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);

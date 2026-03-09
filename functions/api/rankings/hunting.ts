@@ -1,6 +1,6 @@
 // GET/POST /api/rankings/hunting - 사냥 랭킹 조회/갱신
 import type { D1Database } from '@cloudflare/workers-types';
-import { upsertDailyScore } from './_rank_utils';
+import { upsertDailyScore, isRegisteredUser } from './_rank_utils';
 
 interface Env {
   DB: D1Database;
@@ -93,6 +93,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     if (!userId) {
       return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
+    }
+
+    if (!(await isRegisteredUser(DB, userId))) {
+      return Response.json({ success: false, error: 'Login required for ranking' }, { status: 403 });
     }
 
     if (typeof kills !== 'number' || kills < 0) {

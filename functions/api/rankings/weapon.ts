@@ -1,6 +1,6 @@
 // POST /api/rankings/weapon - 무기 기록 갱신
 import type { D1Database } from '@cloudflare/workers-types';
-import { upsertDailyScore } from './_rank_utils';
+import { upsertDailyScore, isRegisteredUser } from './_rank_utils';
 
 interface Env {
   DB: D1Database;
@@ -55,6 +55,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     if (!userId) {
       return Response.json({ success: false, error: 'Missing userId' }, { status: 400 });
+    }
+
+    // 익명(게스트)은 랭킹 참여 불가
+    if (!(await isRegisteredUser(DB, userId))) {
+      return Response.json({ success: false, error: 'Login required for ranking' }, { status: 403 });
     }
 
     if (level === undefined || !name || !grade) {
