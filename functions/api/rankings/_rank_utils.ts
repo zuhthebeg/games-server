@@ -88,18 +88,20 @@ async function settleRankType(DB: D1Database, cfg: RankConfig): Promise<SettleRe
       VALUES (?, ?, ?, ?, ?, ?)
     `).bind(cfg.rank_type, user_id, rank, score, cfg.gold_reward, periodDate).run();
 
-    // 명예의 전당 갱신
-    await DB.prepare(`
-      INSERT INTO hall_of_fame (rank_type, user_id, best_score, best_rank, best_date, total_wins, total_gold, updated_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))
-      ON CONFLICT(rank_type, user_id) DO UPDATE SET
-        best_score = CASE WHEN excluded.best_score > best_score THEN excluded.best_score ELSE best_score END,
-        best_rank  = CASE WHEN excluded.best_score > best_score THEN excluded.best_rank ELSE best_rank END,
-        best_date  = CASE WHEN excluded.best_score > best_score THEN excluded.best_date ELSE best_date END,
-        total_wins = total_wins + 1,
-        total_gold = total_gold + excluded.total_gold,
-        updated_at = datetime('now')
-    `).bind(cfg.rank_type, user_id, score, rank, periodDate, cfg.gold_reward).run();
+    // 명예의 전당 갱신 (TOP 3만)
+    if (rank <= 3) {
+      await DB.prepare(`
+        INSERT INTO hall_of_fame (rank_type, user_id, best_score, best_rank, best_date, total_wins, total_gold, updated_at)
+        VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))
+        ON CONFLICT(rank_type, user_id) DO UPDATE SET
+          best_score = CASE WHEN excluded.best_score > best_score THEN excluded.best_score ELSE best_score END,
+          best_rank  = CASE WHEN excluded.best_score > best_score THEN excluded.best_rank ELSE best_rank END,
+          best_date  = CASE WHEN excluded.best_score > best_score THEN excluded.best_date ELSE best_date END,
+          total_wins = total_wins + 1,
+          total_gold = total_gold + excluded.total_gold,
+          updated_at = datetime('now')
+      `).bind(cfg.rank_type, user_id, score, rank, periodDate, cfg.gold_reward).run();
+    }
 
     rewarded.push({ user_id, rank, score });
   }
