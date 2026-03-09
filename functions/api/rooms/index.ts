@@ -94,14 +94,15 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
 
         const { results } = await env.DB.prepare(query).bind(...params).all<DBRoom & { player_count: number }>();
 
-        return jsonResponse(results?.map(r => ({
+        return jsonResponse({ rooms: results?.map(r => ({
             id: r.id,
             gameType: r.game_type,
             status: r.status,
-            playerCount: r.player_count,
-            maxPlayers: r.max_players,
+            player_count: r.player_count,
+            max_players: r.max_players,
+            config: r.config,
             createdAt: r.created_at,
-        })) || []);
+        })) || [] });
     } catch (error) {
         console.error('List rooms error:', error);
         return errorResponse('Failed to list rooms', 500);
