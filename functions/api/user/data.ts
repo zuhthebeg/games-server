@@ -19,11 +19,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
         return errorResponse('Unauthorized', 401);
     }
     
-    // 익명 유저는 서버 저장 불가
-    if (user.isAnonymous) {
-        return jsonResponse({ error: 'anonymous_user', message: 'Login required for cloud sync' }, 400);
-    }
-    
+    // 게스트도 서버 동기화 허용 (autoGuest 방식)
     try {
         const row = await ctx.env.DB.prepare(
             'SELECT gold, data FROM user_data WHERE user_id = ?'
@@ -50,11 +46,7 @@ export const onRequestPut: PagesFunction<Env> = async (ctx) => {
         return errorResponse('Unauthorized', 401);
     }
     
-    // 익명 유저는 서버 저장 불가
-    if (user.isAnonymous) {
-        return jsonResponse({ error: 'anonymous_user', message: 'Login required for cloud sync' }, 400);
-    }
-    
+        // 게스트도 서버 저장 허용
     let body: UserData;
     try {
         body = await ctx.request.json();

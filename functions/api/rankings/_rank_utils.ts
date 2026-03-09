@@ -112,6 +112,16 @@ async function settleRankType(DB: D1Database, cfg: RankConfig): Promise<SettleRe
     WHERE rank_type = ?
   `).bind(nextReset, cfg.rank_type).run();
 
+  // 시즌 기록 초기화 (정산 후 이번 시즌 활동 기록 리셋)
+  if (cfg.rank_type === 'hunt') {
+    // 사냥: total_kills, boss_kills, max_kill_streak 리셋
+    await DB.prepare(`UPDATE rankings SET total_kills = 0, boss_kills = 0, max_kill_streak = 0, updated_at = datetime('now')`).run();
+  } else if (cfg.rank_type === 'pvp') {
+    // PvP: 승/패 리셋, 레이팅은 1000 기준으로 partial 리셋 (급락 방지)
+    await DB.prepare(`UPDATE rankings SET pvp_wins = 0, pvp_losses = 0, pvp_rating = MAX(800, ROUND(pvp_rating * 0.8 + 1000 * 0.2)), updated_at = datetime('now')`).run();
+  }
+  // weapon은 best_weapon_level이 영구 기록이라 초기화 없음
+
   // 이전 rank_daily 데이터 정리 (30일 초과)
   await DB.prepare(`DELETE FROM rank_daily WHERE rank_type = ? AND date < date('now', '-30 days')`).bind(cfg.rank_type).run();
 

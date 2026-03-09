@@ -65,26 +65,20 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     `).bind(user.id, rankType, today).run();
   }
 
-  let reward: { rank_type: string; rank: number; score: number; gold: number } | null = null;
-  if (firstVisitToday) {
-    // 가장 최근 시즌(오늘 또는 최근 정산) 보상 확인
-    const row = await DB.prepare(`
-      SELECT rank_type, rank, score, gold, period_date
-      FROM rank_reward_log
-      WHERE user_id = ? AND rank_type = ?
-      ORDER BY id DESC
-      LIMIT 1
-    `).bind(user.id, rankType).first<any>();
-    // 아직 못 받은 보상 (오늘 첫 방문이고 보상 로그 있으면 지급)
-    if (row) reward = row;
-  }
+  // 최근 보상 로그 — firstVisitToday 관계없이 항상 반환 (클라이언트가 seen 여부 판단)
+  const row = await DB.prepare(`
+    SELECT rank_type, rank, score, gold, period_date
+    FROM rank_reward_log
+    WHERE user_id = ? AND rank_type = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).bind(user.id, rankType).first<any>();
+  const reward = row ?? null;
 
   const wallet = await DB.prepare('SELECT gold FROM user_data WHERE user_id = ?').bind(user.id).first<{ gold: number }>();
 
   return Response.json({
-    settled: !!reward,
-    rewards: reward ? [reward] : [],
-    firstVisitToday,
+    reward,          // 최근 지급 기록 (null이면 보상 없음)
     gold: wallet?.gold ?? 0,
   }, { headers: CORS });
 };
