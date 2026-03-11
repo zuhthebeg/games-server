@@ -330,7 +330,18 @@ ${comesAgain ? '- 재방문 피로: "형이라 부를게 제발 그만와", "또
 ${triggerType === 'greeting' ? '- greeting 상황: 시작 멘트 느낌으로, 전투 선언은 짧게.' : ''}
 ${triggerType === 'desperate' ? '- desperate 상황: 플레이어가 절박함. 이를 비꼬거나 압박하는 톤 강화.' : ''}
 
-글자 수: 한국어 10~25자 딱 맞춰서. 짧고 찰지게.
+=== 대사 예시 (이런 느낌으로, 그대로 쓰지 말것!) ===
+"야 ${player.playerLevel}강 들고 왔어 진짜?"
+"아 또야... 딴데 좀 가 진심"
+"오늘 몇번째냐 출근이냐"
+"그 무기 리콜 안 됐어?"
+"나 오늘 컨디션 안 좋은데"
+"아니 ${Math.floor(player.playerGold / 10000)}만골 있잖아 뽑기를 해"
+"...할말 없다 그냥 와"
+"ㅋㅋ 긴장됨? 안 돼 ㅋ"
+"차라리 낚시게임 해"
+
+글자 수: 한국어 10~30자. 짧고 찰지게. 매번 완전히 다른 문장 창작할 것!
 
 규칙:
 - +0강이면 반드시 action:gift, goldGift:10000 (불쌍해서 줌)
@@ -361,7 +372,7 @@ JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
+        generationConfig: { temperature: 1.2, maxOutputTokens: 1024 },
       }),
     });
     if (!response.ok) throw new Error(`Gemini ${response.status}`);
