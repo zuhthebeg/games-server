@@ -22,5 +22,12 @@ export const onRequest: PagesFunction = async (context) => {
     newResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     newResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Secret');
     
+    // 인증 필요한 엔드포인트 캐시 방지 (CDN 캐시로 인한 401 재전송 방지)
+    const url = new URL(context.request.url);
+    if (url.pathname.startsWith('/api/user/') || url.pathname.startsWith('/api/auth/')) {
+        newResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        newResponse.headers.set('Pragma', 'no-cache');
+    }
+    
     return newResponse;
 };
