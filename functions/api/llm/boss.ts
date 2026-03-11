@@ -343,8 +343,11 @@ ${triggerType === 'desperate' ? '- desperate 상황: 플레이어가 절박함. 
 
 글자 수: 한국어 10~30자. 짧고 찰지게. 매번 완전히 다른 문장 창작할 것!
 
+금지 표현 (절대 쓰지마): 각오하라, 두려워하라, 크크크, 멸망, 심판, 감히, 허접, 자비, 분노, 나의 힘을, 어둠의, 저주
+이런 클리셰 말고 자연스러운 한국어 반말/인터넷체로.
+
 규칙:
-- +0강이면 반드시 action:gift, goldGift:10000 (불쌍해서 줌)
+- +5이하면 반드시 action:gift, goldGift:10000 (불쌍해서 줌, 대사도 동정 느낌으로)
 - action: ${isBlockblast ? 'scramble|freeze|bomb|taunt' : 'normal_attack|special_skill|taunt|gift|flee'}
 - emotion: angry|amused|scared|bored|excited
 
