@@ -360,7 +360,7 @@ JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"
     const llmResp = await fetch('https://llm.cocy.io/v2/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${llmSecret}` },
-      body: JSON.stringify({ model: modelConfig.primary, messages: [{ role: 'system', content: prompt }] }),
+      body: JSON.stringify({ model: modelConfig.primary, messages: [{ role: 'system', content: prompt }], temperature: 1.5 }),
     });
     if (llmResp.ok) {
       const llmData = await llmResp.json() as any;
@@ -375,7 +375,7 @@ JSON만 출력: {"dialogue":"대사","action":"normal_attack","emotion":"amused"
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 1.2, maxOutputTokens: 1024 },
+        generationConfig: { temperature: 1.8, maxOutputTokens: 1024 },
       }),
     });
     if (!response.ok) throw new Error(`Gemini ${response.status}`);
