@@ -381,6 +381,13 @@ export const blackjackPlugin: GamePlugin = {
             return { valid: true };
         }
 
+        if (action.type === 'new_round') {
+            if (state.phase !== 'finished') {
+                return { valid: false, error: '라운드가 끝난 후에만 새 라운드를 시작할 수 있습니다' };
+            }
+            return { valid: true };
+        }
+
         return { valid: false, error: '유효하지 않은 액션입니다' };
     },
 
@@ -410,6 +417,22 @@ export const blackjackPlugin: GamePlugin = {
                 runPostActionPhases(newState, events);
             }
 
+            return { newState, events };
+        }
+
+        // New round: reset for next hand, keep totalWinnings & players
+        if (newState.phase === 'finished' && action.type === 'new_round') {
+            newState.deck = createDeck();
+            newState.dealer = { cards: [], revealed: false };
+            newState.phase = 'betting';
+            newState.currentPlayerIndex = 0;
+            newState.currentHandIndex = 0;
+            for (const p of newState.players) {
+                p.hands = [];
+                p.bet = 0;
+                p.ready = false;
+            }
+            events.push({ type: 'new_round', payload: {} });
             return { newState, events };
         }
 
@@ -527,7 +550,8 @@ export const blackjackPlugin: GamePlugin = {
     },
 
     isGameOver(state: BlackjackState): boolean {
-        return state.phase === 'finished';
+        // Never auto-end room — blackjack supports continuous rounds via new_round action
+        return false;
     },
 
     getResult(state: BlackjackState): GameResult | null {
