@@ -15,6 +15,7 @@ import { catanPlugin } from './catan';
 import { enhanceGame } from './enhance';
 import { pvpBattlePlugin } from './pvp-battle';
 import { bulletDodgePlugin } from './bulletdodge';
+import { blackjackPlugin } from './blackjack';
 
 const registry = new Map<string, GameRegistryEntry>();
 
@@ -73,3 +74,4 @@ registerGame(catanPlugin, {});
 registerGame(enhanceGame, {});
 registerGame(pvpBattlePlugin, {});
 registerGame(bulletDodgePlugin, {});
+registerGame(blackjackPlugin, { minBet: 10, maxBet: 10000 });
