@@ -339,6 +339,13 @@ export const blackjackPlugin: GamePlugin = {
             return { valid: true };
         }
 
+        if (action.type === 'new_round') {
+            if (state.phase !== 'finished') {
+                return { valid: false, error: '라운드가 끝난 후에만 새 라운드를 시작할 수 있습니다' };
+            }
+            return { valid: true };
+        }
+
         if (state.phase !== 'playing') {
             return { valid: false, error: '현재 액션을 수행할 수 없는 단계입니다' };
         }
@@ -377,13 +384,6 @@ export const blackjackPlugin: GamePlugin = {
             }
             if (hand.cards[0].rank !== hand.cards[1].rank) {
                 return { valid: false, error: '같은 숫자/문양의 카드 2장만 스플릿 가능합니다' };
-            }
-            return { valid: true };
-        }
-
-        if (action.type === 'new_round') {
-            if (state.phase !== 'finished') {
-                return { valid: false, error: '라운드가 끝난 후에만 새 라운드를 시작할 수 있습니다' };
             }
             return { valid: true };
         }
