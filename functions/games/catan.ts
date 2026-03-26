@@ -504,82 +504,16 @@ export const catanPlugin: GamePlugin = {
 
         const currentPlayer = state.players[state.currentPlayerIndex];
         
-        // Check if it's player's turn (except for discard)
-        if (action.type !== 'discard' && currentPlayer.id !== playerId) {
-            return { valid: false, error: '당신의 차례가 아닙니다' };
-        }
-
-        switch (action.type) {
-            case 'build_settlement':
-                return validateBuildSettlement(state, playerId, action.payload);
-            case 'build_road':
-                return validateBuildRoad(state, playerId, action.payload);
-            case 'build_city':
-                return validateBuildCity(state, playerId, action.payload);
-            case 'roll_dice':
-                return validateRollDice(state);
-            case 'end_turn':
-                return validateEndTurn(state);
-            case 'buy_dev_card':
-                return validateBuyDevCard(state, playerId);
-            case 'play_dev_card':
-                return validatePlayDevCard(state, playerId, action.payload);
-            case 'move_robber':
-                return validateMoveRobber(state, playerId, action.payload);
-            case 'discard':
-                return validateDiscard(state, playerId, action.payload);
-            case 'trade_bank':
-                return validateTradeBank(state, playerId, action.payload);
-            default:
-                return { valid: false, error: '알 수 없는 액션입니다' };
-        }
+        // Catan uses client-side game logic — server acts as relay
+        // All actions are validated and applied on client; server just broadcasts
+        return { valid: true };
     },
 
     applyAction(state: CatanState, action: GameAction, playerId: string): ActionResult {
+        // Catan uses client-side logic — server just relays actions
+        // State is not managed server-side; return unchanged
         const newState = JSON.parse(JSON.stringify(state)) as CatanState;
-        const events: GameEvent[] = [];
-
-        switch (action.type) {
-            case 'build_settlement':
-                applyBuildSettlement(newState, playerId, action.payload, events);
-                break;
-            case 'build_road':
-                applyBuildRoad(newState, playerId, action.payload, events);
-                break;
-            case 'build_city':
-                applyBuildCity(newState, playerId, action.payload, events);
-                break;
-            case 'roll_dice':
-                applyRollDice(newState, events);
-                break;
-            case 'end_turn':
-                applyEndTurn(newState, events);
-                break;
-            case 'buy_dev_card':
-                applyBuyDevCard(newState, playerId, events);
-                break;
-            case 'play_dev_card':
-                applyPlayDevCard(newState, playerId, action.payload, events);
-                break;
-            case 'move_robber':
-                applyMoveRobber(newState, playerId, action.payload, events);
-                break;
-            case 'discard':
-                applyDiscard(newState, playerId, action.payload, events);
-                break;
-            case 'trade_bank':
-                applyTradeBank(newState, playerId, action.payload, events);
-                break;
-        }
-
-        // Check for winner
-        const winner = checkWinner(newState);
-        if (winner) {
-            newState.winner = winner;
-            newState.turnPhase = 'finished';
-            events.push({ type: 'game_end', payload: { winner } });
-        }
-
+        const events: GameEvent[] = [{ type: action.type, playerId, payload: action.payload || {} }];
         return { newState, events };
     },
 
