@@ -458,7 +458,7 @@ function checkWinner(state: CatanState): string | null {
 export const catanPlugin: GamePlugin = {
     id: 'catan',
     name: '카탄',
-    minPlayers: 3,
+    minPlayers: 2,
     maxPlayers: 4,
 
     createInitialState(players: Player[], config?: any): CatanState {
