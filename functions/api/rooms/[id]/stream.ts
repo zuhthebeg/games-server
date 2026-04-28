@@ -23,6 +23,8 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
     // Get token from query (SSE can't send headers)
     const url = new URL(request.url);
     const token = url.searchParams.get('token');
+    const rawAfter = Number(url.searchParams.get('after') || '0');
+    const afterSeq = Number.isFinite(rawAfter) && rawAfter > 0 ? Math.floor(rawAfter) : 0;
 
     if (!token) {
         return errorResponse('Token required', 401);
@@ -56,8 +58,9 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
         }
     }, 30000);
 
-    // Poll for events
-    let lastSeq = 0;
+    // Poll for events. Clients may pass `after` when reconnecting so old
+    // interactive events (trade proposals, dialogs) are not replayed.
+    let lastSeq = afterSeq;
     const pollInterval = setInterval(async () => {
         try {
             const { results: events } = await env.DB.prepare(
