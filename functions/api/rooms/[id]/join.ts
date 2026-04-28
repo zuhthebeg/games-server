@@ -30,17 +30,23 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             return errorResponse('Room not found', 404);
         }
 
-        if (room.status !== 'waiting') {
-            return errorResponse('Game already started', 400);
-        }
-
-        // Check if already in room
+        // Check if already in room before rejecting started rooms.
+        // During active games a disconnecting player keeps their seat so they can rejoin,
+        // while clients temporarily let AI play that slot.
         const existing = await env.DB.prepare(
             'SELECT * FROM room_players WHERE room_id = ? AND user_id = ?'
         ).bind(roomId, user.userId).first<DBRoomPlayer>();
 
         if (existing) {
+            if (room.status === 'playing') {
+                await addEvent(env, roomId, 'player_joined', user.userId, { seat: existing.seat, rejoined: true });
+                return jsonResponse({ message: 'Rejoined room', seat: existing.seat, rejoined: true });
+            }
             return jsonResponse({ message: 'Already in room', seat: existing.seat });
+        }
+
+        if (room.status !== 'waiting') {
+            return errorResponse('Game already started', 400);
         }
 
         // Count current players

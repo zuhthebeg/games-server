@@ -39,7 +39,14 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             return errorResponse('Not in this room', 400);
         }
 
-        // Remove player
+        // In active games, preserve the membership/seat so the player can rejoin.
+        // Clients receive player_left and temporarily let AI control that slot.
+        if (room.status === 'playing') {
+            await addEvent(env, roomId, 'player_left', user.userId, { seat: player.seat, aiReplacement: true });
+            return jsonResponse({ message: 'Left active room; AI replacement enabled', aiReplacement: true });
+        }
+
+        // Waiting rooms can remove the player normally.
         await env.DB.prepare(
             'DELETE FROM room_players WHERE room_id = ? AND user_id = ?'
         ).bind(roomId, user.userId).run();
