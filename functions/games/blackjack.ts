@@ -26,6 +26,7 @@ interface BlackjackPlayer {
     hands: BlackjackHand[];
     bet: number;
     totalWinnings: number;
+    streak: number;
     ready: boolean;
 }
 
@@ -217,7 +218,7 @@ function settleGame(state: BlackjackState, events: GameEvent[]): void {
                 payout = -hand.bet;
                 result = 'lose';
             } else if (hand.blackjack && !dealerBlackjack) {
-                payout = hand.bet * 1.5;
+                payout = Math.floor(hand.bet * 1.5);
                 result = 'win';
             } else if (dealerBust) {
                 payout = hand.bet;
@@ -246,6 +247,11 @@ function settleGame(state: BlackjackState, events: GameEvent[]): void {
         }
 
         player.totalWinnings += net;
+        if (net > 0) {
+            player.streak += 1;
+        } else if (net < 0) {
+            player.streak = 0;
+        }
     }
 
     state.phase = 'finished';
@@ -256,6 +262,7 @@ function settleGame(state: BlackjackState, events: GameEvent[]): void {
             dealerBust,
             dealerBlackjack,
             results: roundResults,
+            streaks: Object.fromEntries(state.players.map((p) => [p.id, p.streak])),
         },
     });
 }
@@ -302,6 +309,7 @@ export const blackjackPlugin: GamePlugin = {
                 hands: [],
                 bet: 0,
                 totalWinnings: 0,
+                streak: 0,
                 ready: false,
             })),
             dealer: { cards: [], revealed: false },
