@@ -1,7 +1,7 @@
 const fs = require('fs');
 const assert = require('assert');
 
-const src = fs.readFileSync(__dirname + '/blackjack.ts', 'utf8');
+const src = fs.readFileSync(__dirname + '/../functions/games/blackjack.ts', 'utf8');
 
 assert(src.includes('streak: number;'), 'BlackjackPlayer should carry per-player streak');
 assert(src.includes('streak: 0,'), 'new players should start with zero streak');
