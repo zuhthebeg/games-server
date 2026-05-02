@@ -5,6 +5,7 @@
 import type { Env, DBRoom, DBRoomPlayer } from '../../../types';
 import { jsonResponse, errorResponse, getUserFromRequest } from '../../../types';
 import { getGame } from '../../../games/registry';
+import { cleanupStaleRooms } from '../../../lib/room-cleanup';
 import type { Player } from '../../../games/types';
 
 interface PagesContext {
@@ -23,6 +24,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
     }
 
     try {
+        await cleanupStaleRooms(env);
+
         // Get room
         const room = await env.DB.prepare(
             'SELECT * FROM rooms WHERE id = ?'

@@ -6,6 +6,7 @@
 import type { Env, DBRoom } from '../../types';
 import { jsonResponse, errorResponse, getUserFromRequest, generateRoomCode } from '../../types';
 import { getGame, hasGame, listGames } from '../../games/registry';
+import { cleanupStaleRooms } from '../../lib/room-cleanup';
 
 interface PagesContext {
     request: Request;
@@ -21,6 +22,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
     }
 
     try {
+        await cleanupStaleRooms(env);
+
         const body = await request.json() as { gameType: string; config?: any; maxPlayers?: number; isPublic?: boolean; playerState?: any };
         const { gameType, config, maxPlayers, isPublic, playerState } = body;
 
@@ -82,6 +85,8 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
     const status = url.searchParams.get('status') || 'waiting';
 
     try {
+        const cleanup = await cleanupStaleRooms(env);
+
         let query = 'SELECT r.*, COUNT(rp.user_id) as player_count FROM rooms r LEFT JOIN room_players rp ON r.id = rp.room_id WHERE r.status = ?';
         const params: any[] = [status];
 
@@ -94,7 +99,7 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
 
         const { results } = await env.DB.prepare(query).bind(...params).all<DBRoom & { player_count: number }>();
 
-        return jsonResponse({ rooms: results?.map(r => ({
+        return jsonResponse({ cleaned: cleanup.deleted, rooms: results?.map(r => ({
             id: r.id,
             gameType: r.game_type,
             status: r.status,
