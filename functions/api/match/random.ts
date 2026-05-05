@@ -78,8 +78,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             // Join room
             const now = new Date().toISOString();
             await env.DB.prepare(
-                'INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at) VALUES (?, ?, ?, 0, ?)'
-            ).bind(room.id, user.userId, seat, now).run();
+                'INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at, last_seen_at, disconnected_at) VALUES (?, ?, ?, 0, ?, ?, NULL)'
+            ).bind(room.id, user.userId, seat, now, now).run();
 
             // Add event
             await addEvent(env, room.id, 'player_joined', user.userId, { seat, random: true });

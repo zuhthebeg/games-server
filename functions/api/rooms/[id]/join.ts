@@ -41,6 +41,10 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         ).bind(roomId, user.userId).first<DBRoomPlayer>();
 
         if (existing) {
+            const now = new Date().toISOString();
+            await env.DB.prepare(
+                'UPDATE room_players SET last_seen_at = ?, disconnected_at = NULL WHERE room_id = ? AND user_id = ?'
+            ).bind(now, roomId, user.userId).run();
             if (room.status === 'playing') {
                 await addEvent(env, roomId, 'player_joined', user.userId, { seat: existing.seat, rejoined: true });
                 return jsonResponse({ message: 'Rejoined room', seat: existing.seat, rejoined: true });
@@ -81,8 +85,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         // Join room
         const now = new Date().toISOString();
         await env.DB.prepare(
-            'INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at, player_state) VALUES (?, ?, ?, 0, ?, ?)'
-        ).bind(roomId, user.userId, seat, now, playerState).run();
+            'INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at, player_state, last_seen_at, disconnected_at) VALUES (?, ?, ?, 0, ?, ?, ?, NULL)'
+        ).bind(roomId, user.userId, seat, now, playerState, now).run();
 
         // Add event
         await addEvent(env, roomId, 'player_joined', user.userId, { seat });

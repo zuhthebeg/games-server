@@ -5,6 +5,7 @@
 
 import type { Env, DBEvent } from '../../../types';
 import { jsonResponse, errorResponse, getUserFromRequest } from '../../../types';
+import { touchPlayerPresence, markStalePlayers } from '../../../lib/presence';
 
 interface PagesContext {
     request: Request;
@@ -47,6 +48,9 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
                 }
             } catch (e) {}
         }
+
+        await touchPlayerPresence(env, roomId, user.userId);
+        await markStalePlayers(env, roomId);
 
         // Get events after seq
         const { results: events } = await env.DB.prepare(

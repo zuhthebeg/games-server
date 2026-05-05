@@ -61,9 +61,9 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         // Add host as first player with optional player state (weapon, gold, etc.)
         const playerStateJson = playerState ? JSON.stringify(playerState) : null;
         await env.DB.prepare(
-            `INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at, player_state)
-             VALUES (?, ?, 0, 0, ?, ?)`
-        ).bind(roomId, user.userId, now, playerStateJson).run();
+            `INSERT INTO room_players (room_id, user_id, seat, is_ready, joined_at, player_state, last_seen_at, disconnected_at)
+             VALUES (?, ?, 0, 0, ?, ?, ?, NULL)`
+        ).bind(roomId, user.userId, now, playerStateJson, now).run();
 
         return jsonResponse({
             roomId,

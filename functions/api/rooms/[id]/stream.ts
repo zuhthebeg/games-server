@@ -5,6 +5,7 @@
 
 import type { Env, DBEvent } from '../../../types';
 import { errorResponse, parseToken } from '../../../types';
+import { touchPlayerPresence, markStalePlayers } from '../../../lib/presence';
 
 interface PagesContext {
     request: Request;
@@ -41,6 +42,8 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
         return errorResponse('Room not found', 404);
     }
 
+    await touchPlayerPresence(env, roomId, tokenData.userId);
+
     // Create SSE stream
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
@@ -63,6 +66,8 @@ export const onRequestGet = async (context: PagesContext): Promise<Response> => 
     let lastSeq = afterSeq;
     const pollInterval = setInterval(async () => {
         try {
+            await touchPlayerPresence(env, roomId, tokenData.userId);
+            await markStalePlayers(env, roomId);
             const { results: events } = await env.DB.prepare(
                 'SELECT * FROM events WHERE room_id = ? AND seq > ? ORDER BY seq ASC LIMIT 50'
             ).bind(roomId, lastSeq).all<DBEvent>();

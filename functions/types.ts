@@ -35,10 +35,12 @@ export interface DBRoom {
 export interface DBRoomPlayer {
     room_id: string;
     user_id: string;
-    seat: number | null;
+    seat: number;
     is_ready: number;
     player_state: string | null;
     joined_at: string;
+    last_seen_at: string | null;
+    disconnected_at: string | null;
 }
 
 export interface DBEvent {
