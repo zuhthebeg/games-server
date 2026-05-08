@@ -4,6 +4,7 @@
 
 import type { Env, DBRoom, DBRoomPlayer } from '../../../types';
 import { jsonResponse, errorResponse, getUserFromRequest } from '../../../types';
+import { migrateHostIfNeeded } from '../../../lib/presence';
 
 interface PagesContext {
     request: Request;
@@ -42,8 +43,14 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         // In active games, preserve the membership/seat so the player can rejoin.
         // Clients receive player_left and temporarily let AI control that slot.
         if (room.status === 'playing') {
+            await env.DB.prepare(
+                'UPDATE room_players SET disconnected_at = ? WHERE room_id = ? AND user_id = ? AND disconnected_at IS NULL'
+            ).bind(new Date().toISOString(), roomId, user.userId).run();
             await addEvent(env, roomId, 'player_left', user.userId, { seat: player.seat, aiReplacement: true });
-            return jsonResponse({ message: 'Left active room; AI replacement enabled', aiReplacement: true });
+            const newHostId = room.host_id === user.userId
+                ? await migrateHostIfNeeded(env, roomId, user.userId)
+                : null;
+            return jsonResponse({ message: 'Left active room; AI replacement enabled', aiReplacement: true, newHostId });
         }
 
         // Waiting rooms can remove the player normally.
