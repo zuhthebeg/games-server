@@ -70,6 +70,9 @@ registerGame(echoPlugin, { targetScore: 10 });
 registerGame(pokerPlugin, { startingChips: 1000, bigBlind: 20 });
 registerGame(gomokuPlugin, {});
 registerGame(connect4Plugin, {});
+// `catan` was the original internal id. The public game is now `pingtan`,
+// but keep `catan` registered as a compatibility alias for old rooms/clients.
+registerGame({ ...catanPlugin, id: 'pingtan', name: '삥탄' }, {});
 registerGame(catanPlugin, {});
 registerGame(enhanceGame, {});
 registerGame(pvpBattlePlugin, {});
