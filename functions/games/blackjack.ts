@@ -25,6 +25,8 @@ interface BlackjackPlayer {
     seat: number;
     hands: BlackjackHand[];
     bet: number;
+    bankroll: number;
+    bankrupt: boolean;
     totalWinnings: number;
     streak: number;
     ready: boolean;
@@ -34,6 +36,8 @@ interface BlackjackState {
     players: BlackjackPlayer[];
     dealer: { cards: Card[]; revealed: boolean };
     deck: Card[];
+    deckSize: number;
+    reshuffleCount: number;
     phase: 'betting' | 'dealing' | 'playing' | 'dealer_turn' | 'settling' | 'finished';
     currentPlayerIndex: number;
     currentHandIndex: number;
@@ -92,6 +96,7 @@ function isBlackjack(cards: Card[]): boolean {
 function drawCard(state: BlackjackState): Card {
     if (state.deck.length === 0) {
         state.deck = createDeck();
+        state.reshuffleCount += 1;
     }
     const card = state.deck.pop();
     if (!card) {
@@ -247,6 +252,8 @@ function settleGame(state: BlackjackState, events: GameEvent[]): void {
         }
 
         player.totalWinnings += net;
+        player.bankroll = Math.max(0, Math.floor(Number(player.bankroll || 0) + net));
+        player.bankrupt = player.bankroll <= 0;
         if (net > 0) {
             player.streak += 1;
         } else if (net < 0) {
@@ -263,6 +270,8 @@ function settleGame(state: BlackjackState, events: GameEvent[]): void {
             dealerBlackjack,
             results: roundResults,
             streaks: Object.fromEntries(state.players.map((p) => [p.id, p.streak])),
+            bankrolls: Object.fromEntries(state.players.map((p) => [p.id, p.bankroll])),
+            bankruptPlayerIds: state.players.filter((p) => p.bankrupt).map((p) => p.id),
         },
     });
 }
@@ -300,6 +309,7 @@ export const blackjackPlugin: GamePlugin = {
 
     createInitialState(players: Player[], config?: any): BlackjackState {
         const sortedPlayers = [...players].sort((a, b) => a.seat - b.seat);
+        const configuredGold = config?.gold || {};
 
         return {
             players: sortedPlayers.map((p) => ({
@@ -308,12 +318,16 @@ export const blackjackPlugin: GamePlugin = {
                 seat: p.seat,
                 hands: [],
                 bet: 0,
+                bankroll: Math.max(0, Math.floor(Number(configuredGold[p.id] ?? config?.startingGold ?? 1000))),
+                bankrupt: false,
                 totalWinnings: 0,
                 streak: 0,
                 ready: false,
             })),
             dealer: { cards: [], revealed: false },
             deck: createDeck(),
+            deckSize: 52,
+            reshuffleCount: 0,
             phase: 'betting',
             currentPlayerIndex: 0,
             currentHandIndex: 0,
@@ -340,6 +354,9 @@ export const blackjackPlugin: GamePlugin = {
             }
             if (amount < state.config.minBet || amount > state.config.maxBet) {
                 return { valid: false, error: `베팅 금액은 ${state.config.minBet} ~ ${state.config.maxBet} 사이여야 합니다` };
+            }
+            if (player.bankrupt || amount > player.bankroll) {
+                return { valid: false, error: '보유 골드보다 많이 베팅할 수 없습니다' };
             }
             if (player.ready) {
                 return { valid: false, error: '이미 베팅을 완료했습니다' };
@@ -383,6 +400,9 @@ export const blackjackPlugin: GamePlugin = {
             if (hand.doubled) {
                 return { valid: false, error: '이미 더블다운한 핸드입니다' };
             }
+            if (hand.bet > currentPlayer.bankroll - currentPlayer.hands.reduce((sum, h) => sum + Number(h.bet || 0), 0)) {
+                return { valid: false, error: '더블다운할 골드가 부족합니다' };
+            }
             return { valid: true };
         }
 
@@ -392,6 +412,9 @@ export const blackjackPlugin: GamePlugin = {
             }
             if (hand.cards[0].rank !== hand.cards[1].rank) {
                 return { valid: false, error: '같은 숫자/문양의 카드 2장만 스플릿 가능합니다' };
+            }
+            if (hand.bet > currentPlayer.bankroll - currentPlayer.hands.reduce((sum, h) => sum + Number(h.bet || 0), 0)) {
+                return { valid: false, error: '스플릿할 골드가 부족합니다' };
             }
             return { valid: true };
         }
@@ -430,7 +453,11 @@ export const blackjackPlugin: GamePlugin = {
 
         // New round: reset for next hand, keep totalWinnings & players
         if (newState.phase === 'finished' && action.type === 'new_round') {
-            newState.deck = createDeck();
+            const eliminated = newState.players.filter((p) => p.bankrupt || p.bankroll <= 0);
+            newState.players = newState.players.filter((p) => !p.bankrupt && p.bankroll > 0);
+            if (newState.players.length === 0) {
+                return { newState, events: [{ type: 'all_players_bankrupt', payload: { eliminatedPlayerIds: eliminated.map((p) => p.id) } }] };
+            }
             newState.dealer = { cards: [], revealed: false };
             newState.phase = 'betting';
             newState.currentPlayerIndex = 0;
@@ -440,7 +467,14 @@ export const blackjackPlugin: GamePlugin = {
                 p.bet = 0;
                 p.ready = false;
             }
-            events.push({ type: 'new_round', payload: {} });
+            events.push({
+                type: 'new_round',
+                payload: {
+                    eliminatedPlayerIds: eliminated.map((p) => p.id),
+                    deckCount: newState.deck.length,
+                    reshuffleCount: newState.reshuffleCount,
+                },
+            });
             return { newState, events };
         }
 
@@ -593,6 +627,8 @@ export const blackjackPlugin: GamePlugin = {
             currentHandIndex: state.currentHandIndex,
             config: state.config,
             deckCount: state.deck.length,
+            deckSize: state.deckSize,
+            reshuffleCount: state.reshuffleCount,
         };
     },
 
