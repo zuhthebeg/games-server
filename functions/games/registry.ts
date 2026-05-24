@@ -16,6 +16,7 @@ import { enhanceGame } from './enhance';
 import { pvpBattlePlugin } from './pvp-battle';
 import { bulletDodgePlugin } from './bulletdodge';
 import { blackjackPlugin } from './blackjack';
+import { ppingpaePlugin } from './ppingpae';
 
 const registry = new Map<string, GameRegistryEntry>();
 
@@ -78,3 +79,4 @@ registerGame(enhanceGame, {});
 registerGame(pvpBattlePlugin, {});
 registerGame(bulletDodgePlugin, {});
 registerGame(blackjackPlugin, { minBet: 10, maxBet: 10000 });
+registerGame(ppingpaePlugin, { timeLimit: 60, initialHandSize: 14, initialMeldScore: 30 });
