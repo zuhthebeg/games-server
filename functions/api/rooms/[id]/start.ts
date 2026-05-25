@@ -78,6 +78,16 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             nickname: p.nickname || `Player ${p.seat + 1}`,
             seat: p.seat,
         }));
+
+        // Fill remaining slots with AI bots if game supports AI actions
+        if (game.getAIAction && players.length < game.maxPlayers) {
+            const aiBotCount = game.maxPlayers - players.length;
+            for (let i = 0; i < aiBotCount; i++) {
+                players.push({ id: `ai-${i + 1}`, nickname: `AI-${i + 1}`, seat: players.length });
+            }
+            console.log('[start.ts] Added AI bots:', aiBotCount);
+        }
+
         console.log('[start.ts] Created players:', players);
 
         // Merge room config with player data

@@ -70,7 +70,23 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         }
 
         // Apply action
-        const { newState, events } = game.applyAction(state, action, user.userId);
+        let { newState, events } = game.applyAction(state, action, user.userId);
+
+        // Auto-execute AI turns until a real player's turn
+        if (game.getAIAction) {
+            let aiLoop = 0;
+            while (!game.isGameOver(newState) && aiLoop < 10) {
+                const nextId = game.getCurrentTurn(newState);
+                if (!nextId || !nextId.startsWith('ai-')) break;
+                const aiAction = game.getAIAction(newState, nextId);
+                const aiValidation = game.validateAction(newState, aiAction, nextId);
+                if (!aiValidation.valid) break;
+                const aiResult = game.applyAction(newState, aiAction, nextId);
+                newState = aiResult.newState;
+                events = events.concat(aiResult.events);
+                aiLoop++;
+            }
+        }
 
         // Check if game over
         const isGameOver = game.isGameOver(newState);

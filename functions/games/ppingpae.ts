@@ -455,4 +455,9 @@ export const ppingpaePlugin: GamePlugin = {
         if (!current || current.id !== playerId) return null;
         return { type: 'PASS' };
     },
+
+    getAIAction(state: PpingpaeState, _playerId: string): GameAction {
+        // Simple AI: always pass (draw a tile)
+        return { type: 'PASS' };
+    },
 };
