@@ -72,13 +72,14 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         // Apply action
         let { newState, events } = game.applyAction(state, action, user.userId);
 
-        // Auto-execute AI turns until a real player's turn
-        if (game.getAIAction) {
+        // Auto-execute AI turns (players with 'ai-' prefix ID) until a real player's turn
+        {
             let aiLoop = 0;
-            while (!game.isGameOver(newState) && aiLoop < 10) {
+            while (!game.isGameOver(newState) && aiLoop < 20) {
                 const nextId = game.getCurrentTurn(newState);
                 if (!nextId || !nextId.startsWith('ai-')) break;
-                const aiAction = game.getAIAction(newState, nextId);
+                // Use plugin's AI action if available, otherwise default to PASS
+                const aiAction = game.getAIAction?.(newState, nextId) ?? { type: 'PASS' };
                 const aiValidation = game.validateAction(newState, aiAction, nextId);
                 if (!aiValidation.valid) break;
                 const aiResult = game.applyAction(newState, aiAction, nextId);
