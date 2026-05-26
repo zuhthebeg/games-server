@@ -73,26 +73,38 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         let { newState, events } = game.applyAction(state, action, user.userId);
 
         // Auto-execute AI turns (players with 'ai-' prefix ID) until a real player's turn
-        try {
+        {
+            const stateAny = newState as any;
+            const playerIds = stateAny.players?.map((p: any) => p.id) ?? [];
+            console.log(`[ai-turn] start: playerCount=${playerIds.length} ids=${JSON.stringify(playerIds)} nextTurn=${game.getCurrentTurn(newState)}`);
             let aiLoop = 0;
-            const firstNextId = game.getCurrentTurn(newState);
-            console.log(`[ai-turn] after human action: nextId=${firstNextId} gameOver=${game.isGameOver(newState)} players=${JSON.stringify((newState as any).players?.map((p: any) => p.id))}`);
             while (!game.isGameOver(newState) && aiLoop < 20) {
                 const nextId = game.getCurrentTurn(newState);
                 if (!nextId || !nextId.startsWith('ai-')) break;
-                // Use plugin's AI action if available, otherwise default to PASS
-                const aiAction = game.getAIAction?.(newState, nextId) ?? { type: 'PASS' };
-                const aiValidation = game.validateAction(newState, aiAction, nextId);
-                console.log(`[ai-turn] loop ${aiLoop}: playerId=${nextId} action=${aiAction.type} valid=${aiValidation.valid} err=${aiValidation.error}`);
-                if (!aiValidation.valid) break;
-                const aiResult = game.applyAction(newState, aiAction, nextId);
-                newState = aiResult.newState;
-                events = events.concat(aiResult.events);
+                try {
+                    const aiAction = game.getAIAction?.(newState, nextId) ?? { type: 'PASS' };
+                    const aiValidation = game.validateAction(newState, aiAction, nextId);
+                    console.log(`[ai-turn] ${aiLoop} id=${nextId} action=${aiAction.type} valid=${aiValidation.valid}`);
+                    if (!aiValidation.valid) {
+                        // Validation failed: skip this AI turn by directly advancing
+                        const s = JSON.parse(JSON.stringify(newState)) as any;
+                        s.currentTurn = (s.currentTurn + 1) % (s.players?.length || 1);
+                        newState = s;
+                    } else {
+                        const aiResult = game.applyAction(newState, aiAction, nextId);
+                        newState = aiResult.newState;
+                        events = events.concat(aiResult.events);
+                    }
+                } catch (aiErr) {
+                    console.error(`[ai-turn] error id=${nextId}:`, aiErr);
+                    // Fallback: directly advance turn so game doesn't get stuck
+                    const s = JSON.parse(JSON.stringify(newState)) as any;
+                    s.currentTurn = (s.currentTurn + 1) % (s.players?.length || 1);
+                    newState = s;
+                }
                 aiLoop++;
             }
             console.log(`[ai-turn] done: aiLoop=${aiLoop} finalTurn=${game.getCurrentTurn(newState)}`);
-        } catch (aiErr) {
-            console.error('[ai-turn] AI loop error:', aiErr);
         }
 
         // Check if game over
