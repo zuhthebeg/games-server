@@ -51,24 +51,21 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
              ORDER BY rp.seat`
         ).bind(roomId).all<DBRoomPlayer & { nickname: string }>();
 
-        if (!dbPlayers || dbPlayers.length < 2) {
-            return errorResponse('Need at least 2 players', 400);
-        }
-
-        // Check all ready (except host)
-        const notReady = dbPlayers.filter(p => p.user_id !== room.host_id && p.is_ready !== 1);
-        if (notReady.length > 0) {
-            return errorResponse('Not all players are ready', 400);
-        }
-
         // Get game plugin
         const game = getGame(room.game_type);
         if (!game) {
             return errorResponse('Game plugin not found', 500);
         }
 
-        if (dbPlayers.length < game.minPlayers) {
+        // 최소 인원: 플러그인 minPlayers 기준 (CPU 채움 게임은 1도 허용)
+        if (!dbPlayers || dbPlayers.length < game.minPlayers) {
             return errorResponse(`Need at least ${game.minPlayers} players`, 400);
+        }
+
+        // Check all ready (except host)
+        const notReady = dbPlayers.filter(p => p.user_id !== room.host_id && p.is_ready !== 1);
+        if (notReady.length > 0) {
+            return errorResponse('Not all players are ready', 400);
         }
 
         // Create initial state
