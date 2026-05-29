@@ -512,11 +512,24 @@ export const mahjongPlugin: GamePlugin = {
         const p = state.players[seat];
         if (state.phase === 'claim' && state.claimQueue[state.claimIdx]?.seat === seat) {
             const opts = state.claimQueue[state.claimIdx].options;
+            const tile = state.lastDiscard?.tile;
             if (opts.includes('ron')) return { type: 'CLAIM', payload: { what: 'ron' } };
-            // 퐁/깡/치는 보수적으로 일부만
+            if (opts.includes('kan') && Math.random() < 0.6) return { type: 'CLAIM', payload: { what: 'kan' } };
+            if (opts.includes('pon')) {
+                const yk = !!tile && isYakuhai(tile, seat, state.round.windIdx);
+                if (yk || Math.random() < 0.4) return { type: 'CLAIM', payload: { what: 'pon' } };
+            }
+            if (opts.includes('chi') && tile && Math.random() < 0.25) {
+                const co = chiOptions(p.hand, tile);
+                if (co.length) return { type: 'CLAIM', payload: { what: 'chi', tiles: co[0] } };
+            }
             return { type: 'PASS' };
         }
         if (state.phase === 'discard' && state.turn === seat) {
+            const ak = canAnKan(p.hand);
+            if (ak.length > 0 && Math.random() < 0.5) return { type: 'KAN', payload: { kanType: 'an' } };
+            const addK = p.melds.filter(m => m.type === 'pon').map(m => m.tiles[0]).filter(t => p.hand.includes(t));
+            if (addK.length > 0 && Math.random() < 0.5) return { type: 'KAN', payload: { kanType: 'add' } };
             if (canWin(p.hand, p.melds)) return { type: 'TSUMO' };
             return { type: 'DISCARD', payload: { tile: aiDiscard(p.hand) } };
         }

@@ -10,6 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Prepare dist (gitignored; functions bundle from root)
+        run: mkdir -p dist && [ -f dist/index.html ] || printf '<!doctype html><meta charset="utf-8"><title>games-relay</title>' > dist/index.html
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
