@@ -243,8 +243,8 @@ function advanceToDraw(state: MJState, fromSeat: number): void {
 function kanReplace(state: MJState, seat: number): void {
     const p = state.players[seat]; state.flags.isRinshan = true;
     if (state.wall.length > 0) {
-        const d = state.wall.shift()!; p.hand.push(d);
-        if (isFlower(d)) { p.flowers.push(p.hand.pop()!); if (state.wall.length > 0) { const d2 = state.wall.shift()!; p.hand.push(d2); } }
+        p.hand.push(state.wall.shift()!);
+        processFlowers(state, seat); // 보충패가 연속 화패여도 모두 처리
         p.hand = sortHand(p.hand);
     }
 }
