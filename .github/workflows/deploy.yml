@@ -15,4 +15,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 3d0681b782422e56226a0a1df4a0e8b2
-          command: pages deploy ./dist --project-name=games-relay --commit-dirty=true
+          command: pages deploy ./dist --project-name=games-relay --commit-dirty=true --commit-message="ci deploy"
