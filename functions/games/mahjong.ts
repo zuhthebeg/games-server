@@ -152,7 +152,7 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
 }
 
 // ───────── 상태 ─────────
-interface Meld { type: 'chi' | 'pon' | 'minkan' | 'addkan' | 'ankan'; tiles: Tid[]; from: number; }
+interface Meld { type: 'chi' | 'pon' | 'minkan' | 'addkan' | 'ankan'; tiles: Tid[]; from: number; claimed?: Tid; }
 interface MJPlayer { id: string; nickname: string; seat: number; hand: Tid[]; melds: Meld[]; flowers: Tid[]; score: number; seatWind: number; isDealer: boolean; }
 interface ClaimEntry { seat: number; options: string[]; }
 interface MJState {
@@ -282,14 +282,14 @@ function applyClaim(state: MJState, seat: number, what: string, tiles: Tid[] | u
     }
     if (what === 'pon') {
         let rm = 0; for (let i = p.hand.length - 1; i >= 0 && rm < 2; i--) if (p.hand[i] === tile) { p.hand.splice(i, 1); rm++; }
-        p.melds.push({ type: 'pon', tiles: [tile, tile, tile], from });
+        p.melds.push({ type: 'pon', tiles: [tile, tile, tile], from, claimed: tile });
         state.turn = seat; state.phase = 'discard'; state.lastDiscard = null; state.claimQueue = []; state.lastDraw = null;
         events.push({ type: 'pon', playerId: p.id, payload: { tile } });
         return;
     }
     if (what === 'kan') {
         let rm = 0; for (let i = p.hand.length - 1; i >= 0 && rm < 3; i--) if (p.hand[i] === tile) { p.hand.splice(i, 1); rm++; }
-        p.melds.push({ type: 'minkan', tiles: [tile, tile, tile, tile], from });
+        p.melds.push({ type: 'minkan', tiles: [tile, tile, tile, tile], from, claimed: tile });
         kanReplace(state, seat);
         state.turn = seat; state.phase = 'discard'; state.lastDiscard = null; state.claimQueue = [];
         events.push({ type: 'kan', playerId: p.id, payload: { tile } });
@@ -299,7 +299,7 @@ function applyClaim(state: MJState, seat: number, what: string, tiles: Tid[] | u
         const opts = chiOptions(p.hand, tile);
         const chosen = (tiles && opts.find(o => [...o].sort().join() === [...tiles].sort().join())) || opts[0];
         for (const tt of chosen) { if (tt === tile) continue; const i = p.hand.indexOf(tt); if (i >= 0) p.hand.splice(i, 1); }
-        p.melds.push({ type: 'chi', tiles: [...chosen].sort(), from });
+        p.melds.push({ type: 'chi', tiles: [...chosen].sort(), from, claimed: tile });
         state.turn = seat; state.phase = 'discard'; state.lastDiscard = null; state.claimQueue = []; state.lastDraw = null;
         events.push({ type: 'chi', playerId: p.id, payload: { tile } });
         return;
