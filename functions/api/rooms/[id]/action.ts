@@ -72,6 +72,9 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         // Apply action
         let { newState, events } = game.applyAction(state, action, user.userId);
 
+        // 턴 페이싱용: 사람 수 직후 + 각 AI 수 직후의 공개 상태 스냅샷 (클라가 한 수씩 재생)
+        const aiSteps: any[] = [game.getPublicState(newState)];
+
         // Auto-execute AI turns (players with 'ai-' prefix ID) until a real player's turn
         {
             const stateAny = newState as any;
@@ -102,6 +105,7 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
                     s.currentTurn = (s.currentTurn + 1) % (s.players?.length || 1);
                     newState = s;
                 }
+                aiSteps.push(game.getPublicState(newState));  // 이 AI 수 직후 상태
                 aiLoop++;
             }
             console.log(`[ai-turn] done: aiLoop=${aiLoop} finalTurn=${game.getCurrentTurn(newState)}`);
@@ -134,6 +138,7 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             success: true,
             gameState: game.getPublicState(newState),
             myView: game.getPlayerView(newState, user.userId),
+            aiSteps,
             events,
             isGameOver,
             result: isGameOver ? game.getResult(newState) : null,
