@@ -203,6 +203,7 @@ function settleWin(state: MJState, winnerSeat: number, discarderSeat: number, wi
     const res = calcYaku(winner.hand.filter(t => t !== '__win__'), winner.melds, winner.flowers, winTile, winType, winnerSeat, bri(state, winnerSeat));
     const tai = res.total + 5;
     const isDW = winner.seatWind === 0;
+    const pre = state.players.map(p => p.score);  // 판 시작 점수(증감 계산용)
     if (winType === 'tsumo') {
         const U = Math.round((state.config.bet || 100000) / 5);
         for (let p = 0; p < 4; p++) { if (p === winnerSeat) continue; const isDPay = state.players[p].seatWind === 0; const amt = (isDW || isDPay) ? tai * U * 2 : tai * U; state.players[p].score -= amt; winner.score += amt; }
@@ -221,6 +222,9 @@ function settleWin(state: MJState, winnerSeat: number, discarderSeat: number, wi
     (state.result as any).winType = winType;
     (state.result as any).winnerSeat = winnerSeat;
     (state.result as any).winTile = winTile;
+    (state.result as any).discarderSeat = winType === 'ron' ? discarderSeat : -1;
+    (state.result as any).discarderId = winType === 'ron' ? state.players[discarderSeat].id : null;
+    (state.result as any).deltas = Object.fromEntries(state.players.map((p, i) => [p.id, p.score - pre[i]]));
 }
 
 function endDraw(state: MJState): void {
