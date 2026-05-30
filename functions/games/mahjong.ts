@@ -64,6 +64,7 @@ function canWin(hand: Tid[], melds: Meld[]): boolean {
     const needed = 5 - melds.length; if (needed < 0) return false;
     if (needed === 5 && sevenPairs(hand)) return true;
     if (needed === 5 && thirteenOrphans(hand)) return true;
+    hand = [...hand].sort();  // canFormSets는 tiles[0]=최소패(정렬) 전제 → 승리패가 끝에 붙어 정렬 깨지는 것 방지
     const c = countMap(hand);
     for (const t of Object.keys(c)) { if (c[t] >= 2) { const rest = removeN(hand, t, 2); if (canFormSets(rest, needed)) return true; } }
     return false;
