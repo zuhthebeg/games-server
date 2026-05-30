@@ -202,9 +202,9 @@ function settleWin(state: MJState, winnerSeat: number, discarderSeat: number, wi
     const tai = res.total + 5;
     const isDW = winner.seatWind === 0;
     if (winType === 'tsumo') {
-        for (let p = 0; p < 4; p++) { if (p === winnerSeat) continue; const isDPay = state.players[p].seatWind === 0; const amt = (isDW || isDPay) ? tai * 2000 : tai * 1000; state.players[p].score -= amt; winner.score += amt; }
+        for (let p = 0; p < 4; p++) { if (p === winnerSeat) continue; const isDPay = state.players[p].seatWind === 0; const amt = (isDW || isDPay) ? tai * 20000 : tai * 10000; state.players[p].score -= amt; winner.score += amt; }
     } else {
-        const isDPay = state.players[discarderSeat].seatWind === 0; const mult = (isDW || isDPay) ? 2 : 1; const amt = tai * 1000 * mult;
+        const isDPay = state.players[discarderSeat].seatWind === 0; const mult = (isDW || isDPay) ? 2 : 1; const amt = tai * 10000 * mult;
         state.players[discarderSeat].score -= amt; winner.score += amt;
     }
     state.finished = true; state.phase = 'over'; state.winnerId = winner.id;
@@ -345,7 +345,7 @@ export const mahjongPlugin: GamePlugin = {
                 id: pl ? pl.id : `ai-${seat}`,
                 nickname: pl ? pl.nickname : `CPU ${['東', '南', '西', '北'][seat]}`,
                 seat,
-                hand: [], melds: [], flowers: [], score: 50000,
+                hand: [], melds: [], flowers: [], score: 500000,
                 seatWind: (seat - dealer + 4) % 4,
                 isDealer: seat === dealer,
             });
