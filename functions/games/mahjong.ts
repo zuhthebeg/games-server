@@ -80,6 +80,8 @@ function chiOptions(hand: Tid[], disc: Tid): Tid[][] {
 const canPon = (hand: Tid[], tile: Tid) => hand.filter(t => t === tile).length >= 2;
 const canMinKan = (hand: Tid[], tile: Tid) => hand.filter(t => t === tile).length >= 3;
 function canAnKan(hand: Tid[]): Tid[] { const c = countMap(hand); return Object.entries(c).filter(([, n]) => n >= 4).map(([t]) => t); }
+const ALL_TILES: Tid[] = (() => { const a: Tid[] = []; for (const s of ['m', 'p', 's']) for (let n = 1; n <= 9; n++) a.push(s + n); for (let n = 1; n <= 7; n++) a.push('z' + n); return a; })();
+function isTenpai(hand: Tid[], melds: Meld[]): boolean { for (const tt of ALL_TILES) { if (canWin([...hand, tt], melds)) return true; } return false; }
 
 // ───────── 역(台) 계산 ─────────
 function isYakuhai(tile: Tid | null, pidx: number, windIdx: number): boolean { if (!tile) return false; const s = suit(tile), n = num(tile); if (s !== 'z') return false; if (n >= 5) return true; return n === (pidx + 1) || n === (windIdx + 1); }
@@ -458,6 +460,7 @@ export const mahjongPlugin: GamePlugin = {
             players: state.players.map(p => ({
                 id: p.id, nickname: p.nickname, seat: p.seat, seatWind: p.seatWind, isDealer: p.isDealer,
                 handCount: p.hand.length, melds: p.melds, flowers: p.flowers, score: p.score,
+                tenpai: !state.finished && isTenpai(p.hand, p.melds),
             })),
             discards: state.discards,
             turn: state.turn, phase: state.phase,
