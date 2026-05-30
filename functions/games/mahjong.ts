@@ -170,7 +170,7 @@ interface MJState {
     round: { windIdx: number; dealer: number; honba: number };
     flags: { firstDraw: boolean; firstDiscard: boolean; isRinshan: boolean; isHaitei: boolean };
     finished: boolean; winnerId: string | null; result: GameResult | null;
-    config: { timeLimit: number };
+    config: { timeLimit: number; bet: number };
 }
 
 // 반시계: 다음 좌석 = (s-1+4)%4, 카미차(치 가능 상가) = (s+1)%4
@@ -204,9 +204,10 @@ function settleWin(state: MJState, winnerSeat: number, discarderSeat: number, wi
     const tai = res.total + 5;
     const isDW = winner.seatWind === 0;
     if (winType === 'tsumo') {
-        for (let p = 0; p < 4; p++) { if (p === winnerSeat) continue; const isDPay = state.players[p].seatWind === 0; const amt = (isDW || isDPay) ? tai * 20000 : tai * 10000; state.players[p].score -= amt; winner.score += amt; }
+        const U = Math.round((state.config.bet || 100000) / 5);
+        for (let p = 0; p < 4; p++) { if (p === winnerSeat) continue; const isDPay = state.players[p].seatWind === 0; const amt = (isDW || isDPay) ? tai * U * 2 : tai * U; state.players[p].score -= amt; winner.score += amt; }
     } else {
-        const isDPay = state.players[discarderSeat].seatWind === 0; const mult = (isDW || isDPay) ? 2 : 1; const amt = tai * 10000 * mult;
+        const U = Math.round((state.config.bet || 100000) / 5); const isDPay = state.players[discarderSeat].seatWind === 0; const mult = (isDW || isDPay) ? 2 : 1; const amt = tai * U * mult;
         state.players[discarderSeat].score -= amt; winner.score += amt;
     }
     state.finished = true; state.phase = 'over'; state.winnerId = winner.id;
@@ -358,7 +359,7 @@ export const mahjongPlugin: GamePlugin = {
             round: { windIdx: 0, dealer, honba: 0 },
             flags: { firstDraw: true, firstDiscard: true, isRinshan: false, isHaitei: false },
             finished: false, winnerId: null, result: null,
-            config: { timeLimit: config?.timeLimit ?? 20 },
+            config: { timeLimit: config?.timeLimit ?? 20, bet: config?.bet ?? 100000 },
         };
         for (let s = 0; s < 4; s++) { const n = s === dealer ? 17 : 16; state.players[s].hand = state.wall.splice(0, n); }
         for (let s = 0; s < 4; s++) processFlowers(state, s);
