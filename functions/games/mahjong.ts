@@ -126,7 +126,7 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     if (allTiles.every(t => !'zf'.includes(suit(t)))) add('무자', 1);
     if (isConcealed) { const allSeq = sets.every(s => s.type === 'seq'); const hYaku = !!head && isYakuhai(head, pidx, ri.windIdx); const ts = isTwoSided(hand, winTile); if (allSeq && !hYaku && ts) add('핑후', 2); }
     const isTT = sets.length > 0 && sets.every(s => s.type === 'tri') && melds.every(m => ['pon', 'minkan', 'addkan', 'ankan'].includes(m.type)) && (sets.length + melds.length) >= 5;
-    if (isTT) add('또이또이', 7);
+    if (isTT) add('퐁퐁후', 4);  // 碰碰胡
     const concTri = sets.filter(s => s.type === 'tri').length + melds.filter(m => m.type === 'ankan').length;
     if (concTri >= 3) add('삼안커', 2);
     if (concTri >= 4) { remove('삼안커'); add('사안커', 7); }
@@ -138,6 +138,10 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     const winds = ['z1', 'z2', 'z3', 'z4']; const wTri = allTri.filter(t => winds.includes(t)); const wHead = !!head && winds.includes(head);
     if (wTri.length === 3 && wHead) add('소사희', 7);
     if (wTri.length === 4) { remove('소사희'); add('대사희', 14); }
+    // 一氣通貫: 한 색에서 123·456·789
+    { const runStarts = [...sets.filter(s => s.type === 'seq').map(s => s.tile), ...melds.filter(m => m.type === 'chi').map(m => [...m.tiles].sort()[0])]; for (const su of ['m', 'p', 's']) if (runStarts.includes(su + '1') && runStarts.includes(su + '4') && runStarts.includes(su + '7')) { add('일기통관', 2); break; } }
+    // 淸一色 8 / 混一色 4
+    { const numSuits = new Set(allTiles.map(suit).filter(s => 'mps'.includes(s))); const hasHonor = allTiles.some(x => suit(x) === 'z'); if (numSuits.size === 1 && !hasHonor) { remove('무자'); add('청일색', 8); } else if (numSuits.size === 1 && hasHonor) add('혼일색', 4); }
     const anKC = melds.filter(m => m.type === 'ankan').length; const minKC = melds.filter(m => m.type === 'minkan' || m.type === 'addkan').length;
     if (anKC > 0) add('안깡×' + anKC, anKC * 2); if (minKC > 0) add('명깡×' + minKC, minKC);
     if (ri.isRinshan) add('영상개화', 1);
