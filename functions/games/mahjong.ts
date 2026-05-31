@@ -120,8 +120,8 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     if (winType === 'tsumo') add('츠모', 1);
     if (isConcealed) add('멘젠', 1);
     if (isConcealed && winType === 'tsumo') { remove('츠모'); remove('멘젠'); add('멘젠츠모', 3); }
-    if (melds.length >= 4 && winType === 'ron') add('전구인', 2);
     const { head, sets } = decompose(hand, melds);
+    if (sets.length === 0 && winType === 'ron') add('전구인', 2);  // 감춘 몸통 0 = 전부 먹은 패 + 머리만 론
     const allTri = [...sets.filter(s => s.type === 'tri').map(s => s.tile), ...melds.filter(m => ['pon', 'minkan', 'addkan', 'ankan'].includes(m.type)).map(m => m.tiles[0])];
     if (isConcealed) { const allSeq = sets.every(s => s.type === 'seq'); const hYaku = !!head && isYakuhai(head, pidx, ri.windIdx); const ts = isTwoSided(hand, winTile); if (allSeq && !hYaku && ts) add('핑후', 2); }
     const isTT = sets.length > 0 && sets.every(s => s.type === 'tri') && melds.every(m => ['pon', 'minkan', 'addkan', 'ankan'].includes(m.type)) && (sets.length + melds.length) >= 5;
