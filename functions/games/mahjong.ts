@@ -146,7 +146,7 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     if (anKC > 0) add('안깡×' + anKC, anKC * 2); if (minKC > 0) add('명깡×' + minKC, minKC);
     if (ri.isRinshan) add('영상개화', 1);
     if (ri.isHaitei && winType === 'tsumo') add('해저', 1);
-    if (head === winTile && !isTwoSided(hand, winTile)) add('단기대기', 1);
+    { const waits = ALL_TILES.filter(tt => canWin([...hand, tt], melds)); if (waits.length === 1 && head === winTile) add('단기대기', 1); }  // 대기패 1개 + 머리일 때만
     if (flowers.length === 8) return { yaku: [{ name: '화만관', tai: 14 }], total: 14 };
     { const noHonor = allTiles.every(t => !'zf'.includes(suit(t))); if (noHonor && flowers.length === 0) add('무자무화', 2); }  // 둘 다 없을 때만 2台
     const season = flowers.filter(f => num(f) <= 4); const plant = flowers.filter(f => num(f) >= 5);
