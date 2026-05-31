@@ -149,6 +149,7 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     if (head === winTile && !isTwoSided(hand, winTile)) add('단기대기', 1);
     if (flowers.length === 8) return { yaku: [{ name: '화만관', tai: 14 }], total: 14 };
     if (flowers.length === 0) add('무화', 1);
+    { const z = yaku.find(y => y.name === '무자'), hh = yaku.find(y => y.name === '무화'); if (z && hh) { remove('무자'); remove('무화'); add('무자무화', 2); } }
     const season = flowers.filter(f => num(f) <= 4); const plant = flowers.filter(f => num(f) >= 5);
     if (season.length === 4) add('춘하추동', 2); if (plant.length === 4) add('매난국죽', 2);
     const seatF = [[1, 5], [2, 6], [3, 7], [4, 8]][pidx] || [];
@@ -206,7 +207,7 @@ function processFlowers(state: MJState, seat: number): void {
 function settleWin(state: MJState, winnerSeat: number, discarderSeat: number, winTile: Tid, winType: 'tsumo' | 'ron'): void {
     const winner = state.players[winnerSeat];
     const res = calcYaku(winner.hand.filter(t => t !== '__win__'), winner.melds, winner.flowers, winTile, winType, winnerSeat, bri(state, winnerSeat));
-    const tai = res.total + 5;
+    const tai = Math.max(res.total, 1);
     const isDW = winner.seatWind === 0;
     const pre = state.players.map(p => p.score);  // 판 시작 점수(증감 계산용)
     if (winType === 'tsumo') {
