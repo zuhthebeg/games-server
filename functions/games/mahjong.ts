@@ -207,14 +207,15 @@ function processFlowers(state: MJState, seat: number): void {
 function settleWin(state: MJState, winnerSeat: number, discarderSeat: number, winTile: Tid, winType: 'tsumo' | 'ron'): void {
     const winner = state.players[winnerSeat];
     const res = calcYaku(winner.hand.filter(t => t !== '__win__'), winner.melds, winner.flowers, winTile, winType, winnerSeat, bri(state, winnerSeat));
-    const tai = Math.max(res.total, 1);
+    const tai = res.total;          // 표시 台 = 役 합산
+    const payTai = tai + 5;         // 정산 = 役+5 (5台×U = 판돈 기본 포함)
     const isDW = winner.seatWind === 0;
     const pre = state.players.map(p => p.score);  // 판 시작 점수(증감 계산용)
     if (winType === 'tsumo') {
         const U = Math.round((state.config.bet || 100000) / 5);
-        for (let p = 0; p < 4; p++) { if (p === winnerSeat) continue; const isDPay = state.players[p].seatWind === 0; const amt = (isDW || isDPay) ? tai * U * 2 : tai * U; state.players[p].score -= amt; winner.score += amt; }
+        for (let p = 0; p < 4; p++) { if (p === winnerSeat) continue; const isDPay = state.players[p].seatWind === 0; const amt = (isDW || isDPay) ? payTai * U * 2 : payTai * U; state.players[p].score -= amt; winner.score += amt; }
     } else {
-        const U = Math.round((state.config.bet || 100000) / 5); const isDPay = state.players[discarderSeat].seatWind === 0; const mult = (isDW || isDPay) ? 2 : 1; const amt = tai * U * mult;
+        const U = Math.round((state.config.bet || 100000) / 5); const isDPay = state.players[discarderSeat].seatWind === 0; const mult = (isDW || isDPay) ? 2 : 1; const amt = payTai * U * mult;
         state.players[discarderSeat].score -= amt; winner.score += amt;
     }
     state.finished = true; state.phase = 'over'; state.winnerId = winner.id;
