@@ -481,6 +481,7 @@ export const mahjongPlugin: GamePlugin = {
             round: state.round,
             finished: state.finished, winnerId: state.winnerId, result: state.result,
             config: state.config,
+            lastSteps: (state as any).lastSteps, stepGen: (state as any).stepGen,
         };
     },
 

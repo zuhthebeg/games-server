@@ -72,7 +72,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         // Apply action
         let { newState, events } = game.applyAction(state, action, user.userId);
 
-        // 턴 페이싱용: 사람 수 직후 + 각 AI 수 직후의 공개 상태 스냅샷 (클라가 한 수씩 재생)
+        // 턴 페이싱용: 사람 수 직후 + 각 AI 수 직후의 공개 상태 스냅샷 (모든 클라가 한 수씩 재생)
+        try { delete (newState as any).lastSteps; delete (newState as any).stepGen; } catch (_e) {}  // 스냅샷에 이전 스텝열 안 섞이게
         const aiSteps: any[] = [game.getPublicState(newState)];
 
         // Auto-execute AI turns (players with 'ai-' prefix ID) until a real player's turn
@@ -110,6 +111,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             }
             console.log(`[ai-turn] done: aiLoop=${aiLoop} finalTurn=${game.getCurrentTurn(newState)}`);
         }
+        // 스텝열을 상태에 실어 폴링하는 옵저버도 한 수씩 재생 가능하게 (generation으로 중복 방지)
+        try { (newState as any).lastSteps = aiSteps; (newState as any).stepGen = (((state as any).stepGen) || 0) + 1; } catch (_e) {}
 
         // Check if game over
         const isGameOver = game.isGameOver(newState);
