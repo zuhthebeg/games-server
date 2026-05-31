@@ -116,11 +116,12 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     if (ri.firstDraw && ri.isDealer && winType === 'tsumo') { add('천화', 14); return { yaku, total: tai }; }
     if (ri.firstDiscard && !ri.isDealer && winType === 'ron') { add('지화', 14); return { yaku, total: tai }; }
     const isConcealed = melds.filter(m => m.type !== 'ankan').length === 0;
-    const allTiles = [...hand, ...melds.flatMap(m => m.tiles)];
+    const fullHand = [...hand, winTile];  // 승리패 포함 완성 손패
+    const allTiles = [...fullHand, ...melds.flatMap(m => m.tiles)];
     if (winType === 'tsumo') add('츠모', 1);
     if (isConcealed) add('멘젠', 1);
     if (isConcealed && winType === 'tsumo') { remove('츠모'); remove('멘젠'); add('멘젠츠모', 3); }
-    const { head, sets } = decompose(hand, melds);
+    const { head, sets } = decompose(fullHand, melds);
     if (sets.length === 0 && winType === 'ron') add('전구인', 2);  // 감춘 몸통 0 = 전부 먹은 패 + 머리만 론
     const allTri = [...sets.filter(s => s.type === 'tri').map(s => s.tile), ...melds.filter(m => ['pon', 'minkan', 'addkan', 'ankan'].includes(m.type)).map(m => m.tiles[0])];
     if (isConcealed) { const allSeq = sets.every(s => s.type === 'seq'); const hYaku = !!head && isYakuhai(head, pidx, ri.windIdx); const ts = isTwoSided(hand, winTile); if (allSeq && !hYaku && ts) add('핑후', 2); }
