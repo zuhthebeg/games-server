@@ -74,7 +74,8 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
 
         // 턴 페이싱용: 사람 수 직후 + 각 AI 수 직후의 공개 상태 스냅샷 (모든 클라가 한 수씩 재생)
         try { delete (newState as any).lastSteps; delete (newState as any).stepGen; } catch (_e) {}  // 스냅샷에 이전 스텝열 안 섞이게
-        const aiSteps: any[] = [game.getPublicState(newState)];
+        const snap = () => JSON.parse(JSON.stringify(game.getPublicState(newState)));  // 깊은 복사: 이후 변형돼도 이 시점 상태 보존
+        const aiSteps: any[] = [snap()];
 
         // Auto-execute AI turns (players with 'ai-' prefix ID) until a real player's turn
         {
@@ -106,7 +107,7 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
                     s.currentTurn = (s.currentTurn + 1) % (s.players?.length || 1);
                     newState = s;
                 }
-                aiSteps.push(game.getPublicState(newState));  // 이 AI 수 직후 상태
+                aiSteps.push(snap());  // 이 AI 수 직후 상태(깊은 복사)
                 aiLoop++;
             }
             console.log(`[ai-turn] done: aiLoop=${aiLoop} finalTurn=${game.getCurrentTurn(newState)}`);

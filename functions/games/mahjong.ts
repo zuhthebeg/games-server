@@ -123,7 +123,6 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     if (melds.length >= 4 && winType === 'ron') add('전구인', 2);
     const { head, sets } = decompose(hand, melds);
     const allTri = [...sets.filter(s => s.type === 'tri').map(s => s.tile), ...melds.filter(m => ['pon', 'minkan', 'addkan', 'ankan'].includes(m.type)).map(m => m.tiles[0])];
-    if (allTiles.every(t => !'zf'.includes(suit(t)))) add('무자', 1);
     if (isConcealed) { const allSeq = sets.every(s => s.type === 'seq'); const hYaku = !!head && isYakuhai(head, pidx, ri.windIdx); const ts = isTwoSided(hand, winTile); if (allSeq && !hYaku && ts) add('핑후', 2); }
     const isTT = sets.length > 0 && sets.every(s => s.type === 'tri') && melds.every(m => ['pon', 'minkan', 'addkan', 'ankan'].includes(m.type)) && (sets.length + melds.length) >= 5;
     if (isTT) add('퐁퐁후', 4);  // 碰碰胡
@@ -148,8 +147,7 @@ function calcYaku(hand: Tid[], melds: Meld[], flowers: Tid[], winTile: Tid, winT
     if (ri.isHaitei && winType === 'tsumo') add('해저', 1);
     if (head === winTile && !isTwoSided(hand, winTile)) add('단기대기', 1);
     if (flowers.length === 8) return { yaku: [{ name: '화만관', tai: 14 }], total: 14 };
-    if (flowers.length === 0) add('무화', 1);
-    { const z = yaku.find(y => y.name === '무자'), hh = yaku.find(y => y.name === '무화'); if (z && hh) { remove('무자'); remove('무화'); add('무자무화', 2); } }
+    { const noHonor = allTiles.every(t => !'zf'.includes(suit(t))); if (noHonor && flowers.length === 0) add('무자무화', 2); }  // 둘 다 없을 때만 2台
     const season = flowers.filter(f => num(f) <= 4); const plant = flowers.filter(f => num(f) >= 5);
     if (season.length === 4) add('춘하추동', 2); if (plant.length === 4) add('매난국죽', 2);
     const seatF = [[1, 5], [2, 6], [3, 7], [4, 8]][pidx] || [];
