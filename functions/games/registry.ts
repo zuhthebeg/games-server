@@ -18,6 +18,7 @@ import { bulletDodgePlugin } from './bulletdodge';
 import { blackjackPlugin } from './blackjack';
 import { ppingpaePlugin } from './ppingpae';
 import { mahjongPlugin } from './mahjong';
+import { gostopPlugin } from './gostop';
 
 const registry = new Map<string, GameRegistryEntry>();
 
@@ -82,3 +83,4 @@ registerGame(bulletDodgePlugin, {});
 registerGame(blackjackPlugin, { minBet: 10, maxBet: 10000 });
 registerGame(ppingpaePlugin, { timeLimit: 60, initialHandSize: 14, initialMeldScore: 30 });
 registerGame(mahjongPlugin, { timeLimit: 20, bet: 100000 });
+registerGame(gostopPlugin, { timeLimit: 30, bet: 1 });
