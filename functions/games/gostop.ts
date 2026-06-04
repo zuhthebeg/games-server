@@ -25,7 +25,7 @@ interface GostopState {
     table: string[];
     players: GPlayer[];
     currentTurn: number;
-    go: number; goBy: number;
+    go: number; goBy: number; goMin: number;
     shakeMult: number[];
     ppukCount: number[];
     ppukOwner: Record<number, number>;
@@ -146,7 +146,7 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     const willEmpty = (s.table.length - captured.length) === 0 && captured.length > 0;
     const canSteal = s.deck.length > 0;
     let steals = 0; const stags: string[] = []; const stolen: string[] = [];
-    const opp = 1 - seat;
+    const others = s.players.map((_, i) => i).filter(i => i !== seat);
     if (!ppuk) {
         if (bomb) { steals++; stags.push('폭탄'); }
         if (flipSame && beforeM === 2) { steals++; stags.push('따닥'); }
@@ -157,7 +157,7 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     }
     // 캡처 확정
     captured.forEach(id => removeFromTable(s, id));
-    if (canSteal) for (let i = 0; i < steals; i++) { const sp = stealPi(s, opp, seat); if (sp) stolen.push(sp); }
+    if (canSteal) for (let i = 0; i < steals; i++) { for (const o of others) { const sp = stealPi(s, o, seat); if (sp) stolen.push(sp); } }
     pl.cap.push(...captured);
     return { playM, captured, flipId, ppuk, stags, stolen, beforeM, flipSame };
 }
@@ -176,22 +176,26 @@ function bombMonth(s: GostopState, seat: number): number | null {
 }
 
 function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean }) {
-    const loser = 1 - winner; const ls = score(s, s.players[loser].cap); const sc = score(s, s.players[winner].cap);
-    let pt: number; const tags: string[] = [];
-    if (opts?.ppuk3) { pt = 10; tags.push('3뻑'); }
+    const sc = score(s, s.players[winner].cap);
+    let basePt: number; const tags: string[] = [];
+    if (opts?.ppuk3) { basePt = 10; tags.push('3뻑'); }
     else {
-        pt = sc.total; let mult = 1;
-        if (s.go > 0) { const gm = Math.pow(2, Math.max(0, s.go - 1)); mult *= gm; tags.push(s.go + '고'); }
-        if (ls.pi <= 6) { mult *= 2; tags.push('피박'); }
-        if (sc.gw >= 3 && ls.gw === 0) { mult *= 2; tags.push('광박'); }
-        if (s.shakeMult[winner] > 1) { mult *= s.shakeMult[winner]; tags.push('흔들기'); }
-        pt *= mult;
+        basePt = sc.total; let wm = 1;
+        if (s.go > 0) { const gm = Math.pow(2, Math.max(0, s.go - 1)); wm *= gm; tags.push(s.go + '고'); }
+        if (s.shakeMult[winner] > 1) { wm *= s.shakeMult[winner]; tags.push('흔들기'); }
+        basePt *= wm;
     }
-    s.finished = true; s.winnerSeat = winner;
-    s.endReason = (sc.parts.map(p => p[0] + '+' + p[1]).join(' ')) + (tags.length ? ' · ' + tags.join('·') : '') + ` = ${pt}점`;
-    const gold = pt * 10000 * (s.bet || 1);
-    s.scores = {};
-    s.players.forEach((p, i) => { s.scores[p.id] = i === winner ? gold : -gold; });
+    s.finished = true; s.winnerSeat = winner; s.scores = {};
+    let gain = 0;
+    s.players.forEach((p, i) => {
+        if (i === winner) return;
+        const ls = score(s, p.cap); let lm = 1;
+        if (!opts?.ppuk3) { if (ls.pi <= 6) { lm *= 2; tags.push('피박'); } if (sc.gw >= 3 && ls.gw === 0) { lm *= 2; tags.push('광박'); } }
+        const pay = basePt * lm * 10000 * (s.bet || 1);
+        s.scores[p.id] = -pay; gain += pay;
+    });
+    s.scores[s.players[winner].id] = gain;
+    s.endReason = (sc.parts.map(p => p[0] + '+' + p[1]).join(' ')) + (tags.length ? ' · ' + [...new Set(tags)].join('·') : '') + ` = ${basePt}점`;
     s.pending = null;
 }
 
@@ -200,7 +204,7 @@ function afterPlay(s: GostopState, seat: number, prevScore: number, events: Game
     const pl = s.players[seat];
     if (s.ppukCount[seat] >= 3) { settle(s, seat, { ppuk3: true }); events.push({ type: 'win', payload: { seat, reason: s.endReason } }); return; }
     const sc = score(s, pl.cap);
-    if (sc.total >= GO_MIN && sc.total > prevScore && s.deck.length > 0 && pl.hand.length > 0) {
+    if (sc.total >= s.goMin && sc.total > prevScore && s.deck.length > 0 && pl.hand.length > 0) {
         (pl as any)._last = sc.total;
         s.pending = { kind: 'gostop', seat, total: sc.total };
         events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } });
@@ -211,7 +215,7 @@ function afterPlay(s: GostopState, seat: number, prevScore: number, events: Game
     advance(s, events);
 }
 function advance(s: GostopState, events: GameEvent[]) {
-    s.currentTurn = 1 - s.currentTurn;
+    s.currentTurn = (s.currentTurn + 1) % s.players.length;
     if (s.players[s.currentTurn].hand.length === 0) {
         // 다음 차례가 낼 패 없음 → 나가리
         s.finished = true; s.winnerSeat = null; s.endReason = '나가리'; s.scores = {}; s.players.forEach(p => s.scores[p.id] = 0);
@@ -224,20 +228,23 @@ export const gostopPlugin: GamePlugin = {
     id: 'gostop',
     name: '맞고 (화투)',
     minPlayers: 2,
-    maxPlayers: 2,
+    maxPlayers: 4,
 
     createInitialState(players: Player[], config?: any): GostopState {
         const deckCards = shuffle(buildDeck());
         const cardMap: Record<string, Card> = {};
         deckCards.forEach(c => cardMap[c.id] = c);
         const ids = deckCards.map(c => c.id);
-        const table = ids.splice(0, 8);
+        const N = players.length;
+        const handSize = N === 2 ? 10 : N === 3 ? 7 : 6;
+        const tableSize = N === 2 ? 8 : 6;
+        const table = ids.splice(0, tableSize);
         const gp: GPlayer[] = players.map(p => ({ id: p.id, nickname: p.nickname, seat: p.seat, hand: [], cap: [] }));
-        for (let r = 0; r < 10; r++) for (const p of gp) p.hand.push(ids.shift()!);
+        for (let r = 0; r < handSize; r++) for (const p of gp) p.hand.push(ids.shift()!);
         gp.forEach(p => p.hand.sort((a, b) => cardMap[a].m - cardMap[b].m));
         return {
             cardMap, deck: ids, table, players: gp, currentTurn: 0,
-            go: 0, goBy: -1, shakeMult: [1, 1], ppukCount: [0, 0], ppukOwner: {},
+            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {},
             pending: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
             lastEvent: null, config: { timeLimit: config?.timeLimit ?? 30, bet: config?.bet ?? 1 },
         };
