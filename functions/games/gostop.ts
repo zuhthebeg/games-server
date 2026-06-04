@@ -29,6 +29,7 @@ interface GostopState {
     shakeMult: number[];
     ppukCount: number[];
     ppukOwner: Record<number, number>;
+    flipOwed: number[];
     pending: { kind: 'gostop'; seat: number; total: number } | null;
     bet: number;
     finished: boolean;
@@ -184,22 +185,30 @@ function bombMonth(s: GostopState, seat: number): number | null {
     return m ? +m : null;
 }
 
-function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean }) {
+function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean; chongtong?: boolean }) {
     const sc = score(s, s.players[winner].cap);
     let basePt: number; const tags: string[] = [];
     if (opts?.ppuk3) { basePt = 10; tags.push('3뻑'); }
+    else if (opts?.chongtong) { basePt = 10; tags.push('총통'); }
     else {
         basePt = sc.total; let wm = 1;
-        if (s.go > 0) { const gm = Math.pow(2, Math.max(0, s.go - 1)); wm *= gm; tags.push(s.go + '고'); }
+        if (s.goBy === winner && s.go > 0) { basePt += Math.min(s.go, 2); if (s.go >= 3) wm *= Math.pow(2, s.go - 2); tags.push(s.go + '고'); }
         if (s.shakeMult[winner] > 1) { wm *= s.shakeMult[winner]; tags.push('흔들기'); }
         basePt *= wm;
     }
     s.finished = true; s.winnerSeat = winner; s.scores = {};
+    const wyul = s.players[winner].cap.filter(id => cm(s, id).role === 'yul').length;
+    const mungbak = wyul >= 7;
     let gain = 0;
     s.players.forEach((p, i) => {
         if (i === winner) return;
         const ls = score(s, p.cap); let lm = 1;
-        if (!opts?.ppuk3) { if (ls.pi <= 6) { lm *= 2; tags.push('피박'); } if (sc.gw >= 3 && ls.gw === 0) { lm *= 2; tags.push('광박'); } }
+        if (!opts?.ppuk3 && !opts?.chongtong) {
+            if (ls.pi <= 6) { lm *= 2; tags.push('피박'); }
+            if (sc.gw >= 3 && ls.gw === 0) { lm *= 2; tags.push('광박'); }
+            if (mungbak) { lm *= 2; tags.push('멍박'); }
+            if (s.goBy >= 0 && s.goBy === i) { lm *= 2; tags.push('고박'); }
+        }
         const pay = basePt * lm * 10000 * (s.bet || 1);
         s.scores[p.id] = -pay; gain += pay;
     });
@@ -220,17 +229,48 @@ function afterPlay(s: GostopState, seat: number, prevScore: number, events: Game
         return;
     }
     (pl as any)._last = Math.max((pl as any)._last || 0, sc.total);
-    if (bomb && !s.finished) { if (pl.hand.length === 0) { advance(s, events); return; } events.push({ type: 'extra_turn', payload: { seat } }); return; }
+    if (bomb && !s.finished) { s.flipOwed[seat] = (s.flipOwed[seat] || 0) + 2; }
     advance(s, events);
 }
+function flipTurn(s: GostopState, seat: number, events: GameEvent[]) {
+    const pl = s.players[seat];
+    if (!s.deck.length) { if (s.flipOwed) s.flipOwed[seat] = 0; return; }
+    const flipId = s.deck.shift()!; const playM = cm(s, flipId).m;
+    const preM = sameMonth(s, s.table, playM); s.table.push(flipId);
+    let captured: string[] = []; let sweepM: number | null = null;
+    if (preM.length >= 3) { captured = [flipId, ...preM]; sweepM = playM; }
+    else if (preM.length === 2) captured = [flipId, preM.slice().sort((a, b) => cardValue(cm(s, b)) - cardValue(cm(s, a)))[0]];
+    else if (preM.length === 1) captured = [flipId, preM[0]];
+    let steals = 0;
+    if (sweepM != null) { const own = s.ppukOwner[sweepM]; if (own === seat) steals += 2; else steals++; if (own != null) delete s.ppukOwner[sweepM]; }
+    const willEmpty = (s.table.length - captured.length) === 0 && captured.length > 0;
+    if (willEmpty) steals++;
+    captured.forEach(id => removeFromTable(s, id));
+    const others = s.players.map((_, i) => i).filter(i => i !== seat);
+    if (s.deck.length > 0) for (let i = 0; i < steals; i++) for (const o of others) stealPi(s, o, seat);
+    pl.cap.push(...captured);
+    if (s.flipOwed) s.flipOwed[seat]--;
+    events.push({ type: 'flip_turn', playerId: pl.id, payload: { seat, flipId, captured } });
+}
 function advance(s: GostopState, events: GameEvent[]) {
-    s.currentTurn = (s.currentTurn + 1) % s.players.length;
-    if (s.players[s.currentTurn].hand.length === 0) {
-        // 다음 차례가 낼 패 없음 → 나가리
-        s.finished = true; s.winnerSeat = null; s.endReason = '나가리'; s.scores = {}; s.players.forEach(p => s.scores[p.id] = 0);
-        events.push({ type: 'draw', payload: {} }); return;
+    let guard = 0;
+    while (guard++ < 200) {
+        s.currentTurn = (s.currentTurn + 1) % s.players.length;
+        const seat = s.currentTurn; const pl = s.players[seat];
+        if (s.flipOwed && s.flipOwed[seat] > 0) {
+            flipTurn(s, seat, events);
+            if (s.finished) return;
+            const sc = score(s, pl.cap); const prev = (pl as any)._last || 0;
+            if (sc.total >= s.goMin && sc.total > prev && s.deck.length > 0) { (pl as any)._last = sc.total; s.pending = { kind: 'gostop', seat, total: sc.total }; events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } }); return; }
+            (pl as any)._last = Math.max(prev, sc.total);
+            continue; // 뒤집기전용 턴 1회 후 다음(상대) 차례로
+        }
+        if (pl.hand.length === 0) {
+            s.finished = true; s.winnerSeat = null; s.endReason = '나가리'; s.scores = {}; s.players.forEach(p => s.scores[p.id] = 0);
+            events.push({ type: 'draw', payload: {} }); return;
+        }
+        events.push({ type: 'turn', payload: { seat } }); return;
     }
-    events.push({ type: 'turn', payload: { seat: s.currentTurn } });
 }
 
 export const gostopPlugin: GamePlugin = {
@@ -251,12 +291,17 @@ export const gostopPlugin: GamePlugin = {
         const gp: GPlayer[] = players.map(p => ({ id: p.id, nickname: p.nickname, seat: p.seat, hand: [], cap: [] }));
         for (let r = 0; r < handSize; r++) for (const p of gp) p.hand.push(ids.shift()!);
         gp.forEach(p => p.hand.sort((a, b) => cardMap[a].m - cardMap[b].m));
-        return {
+        // 총통: 딜 손패에 같은 월 4장 → 즉시 승
+        let chong = -1;
+        for (let p = 0; p < gp.length; p++) { const c: Record<number, number> = {}; gp[p].hand.forEach(id => { const m = cardMap[id].m; c[m] = (c[m] || 0) + 1; }); if (Object.values(c).some(n => n === 4)) { chong = p; break; } }
+        const st: GostopState = {
             cardMap, deck: ids, table, players: gp, currentTurn: 0,
-            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {},
+            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {}, flipOwed: Array(N).fill(0),
             pending: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
             lastEvent: null, config: { timeLimit: config?.timeLimit ?? 30, bet: config?.bet ?? 1 },
-        };
+        } as GostopState;
+        if (chong >= 0) { st.finished = true; st.winnerSeat = chong; st.endReason = '총통'; const gold = 10 * 10000 * (st.bet || 1); st.scores = {}; let g = 0; st.players.forEach((p, i) => { if (i !== chong) { st.scores[p.id] = -gold; g += gold; } }); st.scores[st.players[chong].id] = g; }
+        return st;
     },
 
     validateAction(state: GostopState, action: GameAction, playerId: string): ValidationResult {
