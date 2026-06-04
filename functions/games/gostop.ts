@@ -29,7 +29,6 @@ interface GostopState {
     shakeMult: number[];
     ppukCount: number[];
     ppukOwner: Record<number, number>;
-    debt: number[][];
     pending: { kind: 'gostop'; seat: number; total: number } | null;
     bet: number;
     finished: boolean;
@@ -77,13 +76,6 @@ function stealPi(s: GostopState, from: number, to: number): string | null {
     if (j < 0) j = src.findIndex(id => cm(s, id).role === 'yul' && cm(s, id).m === 9);
     if (j < 0) return null;
     const id = src.splice(j, 1)[0]; s.players[to].cap.push(id); return id;
-}
-function settleDebt(s: GostopState) {
-    if (!s.debt) return;
-    for (let from = 0; from < s.players.length; from++) for (let to = 0; to < s.players.length; to++) {
-        let guard = 0;
-        while (s.debt[from][to] > 0 && guard++ < 30) { const sp = stealPi(s, from, to); if (!sp) break; s.debt[from][to]--; }
-    }
 }
 
 // ── 점수 (클라와 동일) ──
@@ -174,9 +166,8 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     }
     // 캡처 확정
     captured.forEach(id => removeFromTable(s, id));
-    if (canSteal) for (let i = 0; i < steals; i++) { for (const o of others) { const sp = stealPi(s, o, seat); if (sp) stolen.push(sp); else if (s.debt) s.debt[o][seat]++; } }
+    if (canSteal) for (let i = 0; i < steals; i++) { for (const o of others) { const sp = stealPi(s, o, seat); if (sp) stolen.push(sp); } }
     pl.cap.push(...captured);
-    settleDebt(s);
     return { playM, captured, flipId, ppuk, stags, stolen, beforeM, flipSame };
 }
 
@@ -262,7 +253,7 @@ export const gostopPlugin: GamePlugin = {
         gp.forEach(p => p.hand.sort((a, b) => cardMap[a].m - cardMap[b].m));
         return {
             cardMap, deck: ids, table, players: gp, currentTurn: 0,
-            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {}, debt: Array.from({ length: N }, () => Array(N).fill(0)),
+            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {},
             pending: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
             lastEvent: null, config: { timeLimit: config?.timeLimit ?? 30, bet: config?.bet ?? 1 },
         };
