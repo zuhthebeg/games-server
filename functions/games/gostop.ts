@@ -29,6 +29,7 @@ interface GostopState {
     shakeMult: number[];
     ppukCount: number[];
     ppukOwner: Record<number, number>;
+    debt: number[][];
     pending: { kind: 'gostop'; seat: number; total: number } | null;
     bet: number;
     finished: boolean;
@@ -73,30 +74,46 @@ function stealPi(s: GostopState, from: number, to: number): string | null {
     const src = s.players[from].cap;
     let j = src.findIndex(id => cm(s, id).role === 'pi' && !cm(s, id).ssangpi);
     if (j < 0) j = src.findIndex(id => cm(s, id).role === 'pi');
+    if (j < 0) j = src.findIndex(id => cm(s, id).role === 'yul' && cm(s, id).m === 9);
     if (j < 0) return null;
     const id = src.splice(j, 1)[0]; s.players[to].cap.push(id); return id;
+}
+function settleDebt(s: GostopState) {
+    if (!s.debt) return;
+    for (let from = 0; from < s.players.length; from++) for (let to = 0; to < s.players.length; to++) {
+        let guard = 0;
+        while (s.debt[from][to] > 0 && guard++ < 30) { const sp = stealPi(s, from, to); if (!sp) break; s.debt[from][to]--; }
+    }
 }
 
 // ── 점수 (클라와 동일) ──
 function score(s: GostopState, cap: string[]) {
     const cs = cap.map(id => cm(s, id));
-    const gw = cs.filter(c => c.gwang), yul = cs.filter(c => c.role === 'yul'), tti = cs.filter(c => c.role === 'tti'), pi = cs.filter(c => c.role === 'pi');
-    let total = 0; const parts: [string, number][] = [];
-    const ng = gw.length, hasBi = gw.some(c => c.bigwang); let gp = 0;
-    if (ng >= 5) gp = 15; else if (ng === 4) gp = 4; else if (ng === 3) gp = hasBi ? 2 : 3;
-    if (gp) { total += gp; parts.push(['광 ' + ng + '개', gp]); }
-    const ny = yul.length; let yp = 0; if (ny >= 5) yp = ny - 4;
-    const godori = yul.filter(c => c.godori).length; if (godori >= 3) { yp += 5; parts.push(['고도리', 5]); }
-    if (ny >= 5) parts.push(['끗 ' + ny + '개', ny - 4]); total += yp;
-    const nt = tti.length; let tp = 0; if (nt >= 5) tp += nt - 4;
-    const hong = tti.filter(c => c.tti === 'hong').length, chung = tti.filter(c => c.tti === 'chung').length, cho = tti.filter(c => c.tti === 'cho').length;
-    if (hong >= 3) { tp += 3; parts.push(['홍단', 3]); }
-    if (chung >= 3) { tp += 3; parts.push(['청단', 3]); }
-    if (cho >= 3) { tp += 3; parts.push(['초단', 3]); }
-    if (nt >= 5) parts.push(['띠 ' + nt + '개', nt - 4]); total += tp;
-    const np = pi.reduce((a, c) => a + (c.ssangpi ? 2 : 1), 0); let pp = 0;
-    if (np >= 10) { pp = np - 9; parts.push(['피 ' + np + '장', pp]); } total += pp;
-    return { total, parts, gw: ng, pi: np };
+    const gw = cs.filter(c => c.gwang), tti = cs.filter(c => c.role === 'tti');
+    const yulAll = cs.filter(c => c.role === 'yul'), piAll = cs.filter(c => c.role === 'pi');
+    const kuk = yulAll.find(c => c.m === 9);  // 9월 국진 — 쌍피로도 사용 가능
+    const core = (yul: Card[], pi: Card[]) => {
+        let total = 0; const parts: [string, number][] = [];
+        const ng = gw.length, hasBi = gw.some(c => c.bigwang); let gp = 0;
+        if (ng >= 5) gp = 15; else if (ng === 4) gp = 4; else if (ng === 3) gp = hasBi ? 2 : 3;
+        if (gp) { total += gp; parts.push(['광 ' + ng + '개', gp]); }
+        const ny = yul.length; let yp = 0; if (ny >= 5) yp = ny - 4;
+        const godori = yul.filter(c => c.godori).length; if (godori >= 3) { yp += 5; parts.push(['고도리', 5]); }
+        if (ny >= 5) parts.push(['끗 ' + ny + '개', ny - 4]); total += yp;
+        const nt = tti.length; let tp = 0; if (nt >= 5) tp += nt - 4;
+        const hong = tti.filter(c => c.tti === 'hong').length, chung = tti.filter(c => c.tti === 'chung').length, cho = tti.filter(c => c.tti === 'cho').length;
+        if (hong >= 3) { tp += 3; parts.push(['홍단', 3]); }
+        if (chung >= 3) { tp += 3; parts.push(['청단', 3]); }
+        if (cho >= 3) { tp += 3; parts.push(['초단', 3]); }
+        if (nt >= 5) parts.push(['띠 ' + nt + '개', nt - 4]); total += tp;
+        const np = pi.reduce((a, c) => a + (c.ssangpi ? 2 : 1), 0); let pp = 0;
+        if (np >= 10) { pp = np - 9; parts.push(['피 ' + np + '장', pp]); } total += pp;
+        return { total, parts, gw: ng, pi: np };
+    };
+    if (!kuk) return core(yulAll, piAll);
+    const asYul = core(yulAll, piAll);
+    const asPi = core(yulAll.filter(c => c !== kuk), piAll.concat([{ id: '', m: 9, role: 'pi', gwang: false, bigwang: false, godori: false, tti: null, ssangpi: true, file: '' }]));
+    return asPi.total > asYul.total ? asPi : asYul;
 }
 
 // ── 플레이 해석 (착지→뒤집기→캡처→특수룰), takeTurn 포팅 ──
@@ -157,8 +174,9 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     }
     // 캡처 확정
     captured.forEach(id => removeFromTable(s, id));
-    if (canSteal) for (let i = 0; i < steals; i++) { for (const o of others) { const sp = stealPi(s, o, seat); if (sp) stolen.push(sp); } }
+    if (canSteal) for (let i = 0; i < steals; i++) { for (const o of others) { const sp = stealPi(s, o, seat); if (sp) stolen.push(sp); else if (s.debt) s.debt[o][seat]++; } }
     pl.cap.push(...captured);
+    settleDebt(s);
     return { playM, captured, flipId, ppuk, stags, stolen, beforeM, flipSame };
 }
 
@@ -244,7 +262,7 @@ export const gostopPlugin: GamePlugin = {
         gp.forEach(p => p.hand.sort((a, b) => cardMap[a].m - cardMap[b].m));
         return {
             cardMap, deck: ids, table, players: gp, currentTurn: 0,
-            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {},
+            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {}, debt: Array.from({ length: N }, () => Array(N).fill(0)),
             pending: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
             lastEvent: null, config: { timeLimit: config?.timeLimit ?? 30, bet: config?.bet ?? 1 },
         };
