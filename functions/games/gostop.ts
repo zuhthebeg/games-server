@@ -110,7 +110,7 @@ function score(s: GostopState, cap: string[]) {
 }
 
 // ── 플레이 해석 (착지→뒤집기→캡처→특수룰), takeTurn 포팅 ──
-function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: boolean, pickId?: string) {
+function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: boolean, pickId?: string, shakeDeclared?: boolean) {
     const pl = s.players[seat];
     const playM = cm(s, handIds[0]).m;
     const preM = sameMonth(s, s.table, playM);
@@ -119,9 +119,9 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     // 손패 빼서 바닥에 올림
     handIds.forEach(id => { const i = pl.hand.indexOf(id); if (i >= 0) pl.hand.splice(i, 1); s.table.push(id); });
     // 흔들기 판정 (빼기 전 보유수 = handIds.length는 1, 별도로 체크) — 낸 월을 3장 들고 있었는지: hand+played
-    if (!bomb) {
-        const stillHas = pl.hand.filter(id => cm(s, id).m === playM).length;
-        if ((stillHas + handIds.length) >= 3 && beforeM >= 1 && s.shakeMult[seat] === 1) s.shakeMult[seat] = 2;
+    if (!bomb && shakeDeclared && s.shakeMult[seat] === 1) {
+        const had = pl.hand.filter(id => cm(s, id).m === playM).length + handIds.length;
+        if (had >= 3) s.shakeMult[seat] = 2;
     }
     // 뒤집기
     let flipId: string | null = null;
@@ -357,7 +357,7 @@ export const gostopPlugin: GamePlugin = {
         }
         // PLAY
         const cardId = action.payload.cardId;
-        const r = resolvePlay(s, seat, [cardId], false, action.payload?.pick);
+        const r = resolvePlay(s, seat, [cardId], false, action.payload?.pick, action.payload?.shake === true);
         events.push({ type: 'play', playerId, payload: { cardId, ...r } });
         afterPlay(s, seat, prevScore, events, false);
         return { newState: s, events };
@@ -413,7 +413,9 @@ export const gostopPlugin: GamePlugin = {
         if (state.pending) { if (state.pending.seat === seat) return { type: 'STOP' }; return null; }
         if (state.currentTurn !== seat) return null;
         const b = bombMonth(state, seat); if (b != null) return { type: 'BOMB', payload: { month: b } };
-        return { type: 'PLAY', payload: { cardId: bestPlay(state, seat).cardId } };
+        const cid = bestPlay(state, seat).cardId; const cc = state.cardMap[cid];
+        const shake = state.players[seat].hand.filter(id => state.cardMap[id].m === cc.m).length >= 3 && sameMonth(state, state.table, cc.m).length >= 1;
+        return { type: 'PLAY', payload: { cardId: cid, shake } };
     },
 
     getAIAction(state: GostopState, playerId: string): GameAction {
@@ -424,6 +426,8 @@ export const gostopPlugin: GamePlugin = {
             return goAgain ? { type: 'GO' } : { type: 'STOP' };
         }
         const b = bombMonth(state, seat); if (b != null) return { type: 'BOMB', payload: { month: b } };
-        return { type: 'PLAY', payload: { cardId: bestPlay(state, seat).cardId } };
+        const cid = bestPlay(state, seat).cardId; const cc = state.cardMap[cid];
+        const shake = state.players[seat].hand.filter(id => state.cardMap[id].m === cc.m).length >= 3 && sameMonth(state, state.table, cc.m).length >= 1;
+        return { type: 'PLAY', payload: { cardId: cid, shake } };
     },
 };
