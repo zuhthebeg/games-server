@@ -276,7 +276,7 @@ function advance(s: GostopState, events: GameEvent[]) {
 export const gostopPlugin: GamePlugin = {
     id: 'gostop',
     name: '맞고 (화투)',
-    minPlayers: 2,
+    minPlayers: 1,
     maxPlayers: 4,
 
     createInitialState(players: Player[], config?: any): GostopState {
@@ -284,11 +284,15 @@ export const gostopPlugin: GamePlugin = {
         const cardMap: Record<string, Card> = {};
         deckCards.forEach(c => cardMap[c.id] = c);
         const ids = deckCards.map(c => c.id);
-        const N = players.length;
+        // 빈 좌석 ai-* 로 채움(서버 자동 플레이). want = max(접속자, config.seats|2)
+        const want = Math.min(4, Math.max(players.length, (config?.seats | 0) || 2));
+        const allP: { id: string; nickname: string; seat: number }[] = players.map((p, i) => ({ id: p.id, nickname: p.nickname, seat: i }));
+        for (let seat = players.length; seat < want; seat++) allP.push({ id: `ai-${seat}`, nickname: `🤖 봇${seat}`, seat });
+        const N = allP.length;
         const handSize = N === 2 ? 10 : N === 3 ? 7 : 6;
         const tableSize = N === 2 ? 8 : 6;
         const table = ids.splice(0, tableSize);
-        const gp: GPlayer[] = players.map(p => ({ id: p.id, nickname: p.nickname, seat: p.seat, hand: [], cap: [] }));
+        const gp: GPlayer[] = allP.map(p => ({ id: p.id, nickname: p.nickname, seat: p.seat, hand: [], cap: [] }));
         for (let r = 0; r < handSize; r++) for (const p of gp) p.hand.push(ids.shift()!);
         gp.forEach(p => p.hand.sort((a, b) => cardMap[a].m - cardMap[b].m));
         // 총통: 딜 손패에 같은 월 4장 → 즉시 승
