@@ -228,10 +228,17 @@ function afterPlay(s: GostopState, seat: number, prevScore: number, events: Game
     const pl = s.players[seat];
     if (s.ppukCount[seat] >= 3) { settle(s, seat, { ppuk3: true }); events.push({ type: 'win', payload: { seat, reason: s.endReason } }); return; }
     const sc = score(s, pl.cap);
-    if (sc.total >= s.goMin && sc.total > prevScore && s.deck.length > 0 && pl.hand.length > 0) {
+    if (sc.total >= s.goMin && sc.total > prevScore) {
         (pl as any)._last = sc.total;
-        s.pending = { kind: 'gostop', seat, total: sc.total };
-        events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } });
+        const canGo = s.deck.length > 0 && pl.hand.length > 0;
+        if (canGo) {
+            s.pending = { kind: 'gostop', seat, total: sc.total };
+            events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } });
+            return;
+        }
+        // 더 진행 불가(덱·손패 소진) → 7점 도달 자동 스톱(승리). 나가리 방지
+        settle(s, seat);
+        events.push({ type: 'win', payload: { seat, reason: s.endReason } });
         return;
     }
     (pl as any)._last = Math.max((pl as any)._last || 0, sc.total);
@@ -267,7 +274,11 @@ function advance(s: GostopState, events: GameEvent[]) {
             flipTurn(s, seat, events);
             if (s.finished) return;
             const sc = score(s, pl.cap); const prev = (pl as any)._last || 0;
-            if (sc.total >= s.goMin && sc.total > prev && s.deck.length > 0) { (pl as any)._last = sc.total; s.pending = { kind: 'gostop', seat, total: sc.total }; events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } }); return; }
+            if (sc.total >= s.goMin && sc.total > prev) {
+                (pl as any)._last = sc.total;
+                if (s.deck.length > 0) { s.pending = { kind: 'gostop', seat, total: sc.total }; events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } }); return; }
+                settle(s, seat); events.push({ type: 'win', payload: { seat, reason: s.endReason } }); return;
+            }
             (pl as any)._last = Math.max(prev, sc.total);
             continue; // 뒤집기전용 턴 1회 후 다음(상대) 차례로
         }
