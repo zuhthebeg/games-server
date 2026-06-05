@@ -31,6 +31,7 @@ interface GostopState {
     ppukOwner: Record<number, number>;
     flipOwed: number[];
     pending: { kind: 'gostop'; seat: number; total: number } | null;
+    pendingFlip: { seat: number; flipId: string; candidates: string[]; prevScore: number; bomb: boolean } | null;
     bet: number;
     finished: boolean;
     winnerSeat: number | null;
@@ -110,7 +111,7 @@ function score(s: GostopState, cap: string[]) {
 }
 
 // ── 플레이 해석 (착지→뒤집기→캡처→특수룰), takeTurn 포팅 ──
-function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: boolean, pickId?: string, shakeDeclared?: boolean) {
+function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: boolean, pickId?: string, shakeDeclared?: boolean, isHuman?: boolean) {
     const pl = s.players[seat];
     const playM = cm(s, handIds[0]).m;
     const preM = sameMonth(s, s.table, playM);
@@ -128,7 +129,7 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     if (s.deck.length) { flipId = s.deck.shift()!; s.table.push(flipId); }
     const flipSame = !!(flipId && cm(s, flipId).m === playM);
 
-    let captured: string[] = []; let ppuk = false; let flipSweepM: number | null = null;
+    let captured: string[] = []; let ppuk = false; let flipSweepM: number | null = null; let flipPick: { flipId: string; candidates: string[] } | null = null;
     const inCap = (id: string) => captured.includes(id);
     if (bomb) {
         captured.push(...preM, ...handIds);
@@ -149,7 +150,12 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     if (flipId && !flipSame && !inCap(flipId)) {
         const fm = s.table.filter(id => cm(s, id).m === cm(s, flipId!).m && id !== flipId && !inCap(id));
         if (fm.length >= 3) { captured.push(flipId, ...fm); flipSweepM = cm(s, flipId).m; }
-        else if (fm.length === 2) captured.push(flipId, fm.slice().sort((a, b) => cardValue(cm(s, b)) - cardValue(cm(s, a)))[0]);
+        else if (fm.length === 2) {
+            const sorted = fm.slice().sort((a, b) => cardValue(cm(s, b)) - cardValue(cm(s, a)));
+            const differ = cardValue(cm(s, sorted[0])) !== cardValue(cm(s, sorted[1])) || cm(s, sorted[0]).role !== cm(s, sorted[1]).role || cm(s, sorted[0]).ssangpi !== cm(s, sorted[1]).ssangpi;
+            if (isHuman && differ) flipPick = { flipId: flipId!, candidates: fm.slice() };
+            else captured.push(flipId, sorted[0]);
+        }
         else if (fm.length === 1) captured.push(flipId, fm[0]);
     }
 
@@ -169,7 +175,7 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     captured.forEach(id => removeFromTable(s, id));
     if (canSteal) for (let i = 0; i < steals; i++) { for (const o of others) { const sp = stealPi(s, o, seat); if (sp) stolen.push(sp); } }
     pl.cap.push(...captured);
-    return { playM, captured, flipId, ppuk, stags, stolen, beforeM, flipSame };
+    return { playM, captured, flipId, ppuk, stags, stolen, beforeM, flipSame, flipPick };
 }
 
 function bestPlay(s: GostopState, seat: number): { cardId: string } {
@@ -301,7 +307,7 @@ export const gostopPlugin: GamePlugin = {
         const st: GostopState = {
             cardMap, deck: ids, table, players: gp, currentTurn: 0,
             go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {}, flipOwed: Array(N).fill(0),
-            pending: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
+            pending: null, pendingFlip: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
             lastEvent: null, config: { timeLimit: config?.timeLimit ?? 30, bet: config?.bet ?? 1 },
         } as GostopState;
         if (chong >= 0) { st.finished = true; st.winnerSeat = chong; st.endReason = '총통'; const gold = 10 * 10000 * (st.bet || 1); st.scores = {}; let g = 0; st.players.forEach((p, i) => { if (i !== chong) { st.scores[p.id] = -gold; g += gold; } }); st.scores[st.players[chong].id] = g; }
@@ -312,6 +318,11 @@ export const gostopPlugin: GamePlugin = {
         if (state.finished) return { valid: false, error: '게임 종료됨' };
         const seat = state.players.findIndex(p => p.id === playerId);
         if (seat < 0) return { valid: false, error: '플레이어 없음' };
+        if (state.pendingFlip) {
+            if (state.pendingFlip.seat !== seat) return { valid: false, error: '당신 차례 아님' };
+            if (action.type !== 'FLIPPICK') return { valid: false, error: '먹을 패 선택 필요' };
+            return { valid: true };
+        }
         if (state.pending) {
             if (state.pending.seat !== seat) return { valid: false, error: '당신 차례 아님' };
             if (action.type !== 'GO' && action.type !== 'STOP') return { valid: false, error: '고/스톱 선택 필요' };
@@ -339,6 +350,15 @@ export const gostopPlugin: GamePlugin = {
         const seat = s.players.findIndex(p => p.id === playerId);
         const pl = s.players[seat];
 
+        if (s.pendingFlip && action.type === 'FLIPPICK') {
+            const pf = s.pendingFlip; s.pendingFlip = null;
+            const chosen = (action.payload?.pickId && pf.candidates.includes(action.payload.pickId)) ? action.payload.pickId : pf.candidates.slice().sort((a, b) => cardValue(cm(s, b)) - cardValue(cm(s, a)))[0];
+            s.players[pf.seat].cap.push(pf.flipId, chosen);
+            removeFromTable(s, pf.flipId); removeFromTable(s, chosen);
+            events.push({ type: 'flip_pick', payload: { seat: pf.seat, flipId: pf.flipId, chosen } });
+            afterPlay(s, pf.seat, pf.prevScore, events, pf.bomb);
+            return { newState: s, events };
+        }
         if (s.pending && (action.type === 'GO' || action.type === 'STOP')) {
             const total = s.pending.total; s.pending = null;
             if (action.type === 'GO') { s.go++; s.goBy = seat; events.push({ type: 'go', payload: { seat, go: s.go } }); advance(s, events); }
@@ -357,14 +377,17 @@ export const gostopPlugin: GamePlugin = {
         }
         // PLAY
         const cardId = action.payload.cardId;
-        const r = resolvePlay(s, seat, [cardId], false, action.payload?.pick, action.payload?.shake === true);
+        const isHuman = !pl.id.startsWith('ai-');
+        const r = resolvePlay(s, seat, [cardId], false, action.payload?.pick, action.payload?.shake === true, isHuman);
         events.push({ type: 'play', playerId, payload: { cardId, ...r } });
+        if (r.flipPick) { s.pendingFlip = { seat, flipId: r.flipPick.flipId, candidates: r.flipPick.candidates, prevScore, bomb: false }; return { newState: s, events }; }
         afterPlay(s, seat, prevScore, events, false);
         return { newState: s, events };
     },
 
     getCurrentTurn(state: GostopState): string | null {
         if (state.finished) return null;
+        if (state.pendingFlip) return state.players[state.pendingFlip.seat]?.id || null;
         if (state.pending) return state.players[state.pending.seat]?.id || null;
         return state.players[state.currentTurn]?.id || null;
     },
@@ -388,6 +411,7 @@ export const gostopPlugin: GamePlugin = {
             currentTurn: state.currentTurn,
             go: state.go, goBy: state.goBy,
             pending: state.pending,
+            pendingFlip: state.pendingFlip ? { seat: state.pendingFlip.seat, candidates: state.pendingFlip.candidates.map(id => state.cardMap[id]) } : null,
             finished: state.finished, winnerSeat: state.winnerSeat, scores: state.scores, endReason: state.endReason,
             config: state.config,
         };
@@ -410,6 +434,7 @@ export const gostopPlugin: GamePlugin = {
         if (state.finished) return null;
         const seat = state.players.findIndex(p => p.id === playerId);
         if (seat < 0) return null;
+        if (state.pendingFlip) { if (state.pendingFlip.seat === seat) return { type: 'FLIPPICK', payload: {} }; return null; }
         if (state.pending) { if (state.pending.seat === seat) return { type: 'STOP' }; return null; }
         if (state.currentTurn !== seat) return null;
         const b = bombMonth(state, seat); if (b != null) return { type: 'BOMB', payload: { month: b } };
