@@ -319,6 +319,8 @@ export const ppingpaePlugin: GamePlugin = {
     },
 
     validateAction(state: PpingpaeState, action: GameAction, playerId: string): ValidationResult {
+        // 리액션(이모트): 상태 변경 없는 브로드캐스트 — 턴/종료 무관하게 허용
+        if (action.type === 'REACTION_EMOTE') return { valid: true };
         if (state.finished) return { valid: false, error: '게임이 이미 종료됨' };
         const currentPlayer = state.players[state.currentTurn];
         if (!currentPlayer || currentPlayer.id !== playerId) {
@@ -337,6 +339,8 @@ export const ppingpaePlugin: GamePlugin = {
     applyAction(state: PpingpaeState, action: GameAction, playerId: string): ActionResult {
         const newState = JSON.parse(JSON.stringify(state)) as PpingpaeState;
         const events: GameEvent[] = [];
+        // 리액션: 상태 변경 없이 액션만 브로드캐스트(서버는 action 이벤트로 전 클라에 전달)
+        if (action.type === 'REACTION_EMOTE') return { newState, events };
         const player = newState.players.find(p => p.id === playerId)!;
 
         if (action.type === 'COMPLETE_TURN') {
