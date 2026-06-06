@@ -27,6 +27,7 @@ interface GostopState {
     currentTurn: number;
     go: number; goBy: number; goMin: number;
     shakeMult: number[];
+    ppuk3Mult: number;
     ppukCount: number[];
     ppukOwner: Record<number, number>;
     flipOwed: number[];
@@ -200,6 +201,7 @@ function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean; chongt
         basePt = sc.total; let wm = 1;
         if (s.goBy === winner && s.go > 0) { basePt += Math.min(s.go, 2); if (s.go >= 3) wm *= Math.pow(2, s.go - 2); tags.push(s.go + '고'); }
         if (s.shakeMult[winner] > 1) { wm *= s.shakeMult[winner]; tags.push('흔들기'); }
+        if (s.ppuk3Mult > 1) { wm *= s.ppuk3Mult; tags.push('3뻑'); }   // 3뻑: 그 판 점수 ×2
         basePt *= wm;
     }
     s.finished = true; s.winnerSeat = winner; s.scores = {};
@@ -226,7 +228,8 @@ function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean; chongt
 // 점수 도달 → 고/스톱 대기 or 턴 진행
 function afterPlay(s: GostopState, seat: number, prevScore: number, events: GameEvent[], bomb: boolean) {
     const pl = s.players[seat];
-    if (s.ppukCount[seat] >= 3) { settle(s, seat, { ppuk3: true }); events.push({ type: 'win', payload: { seat, reason: s.endReason } }); return; }
+    // 3뻑 = 즉시 승리가 아니라 그 판 점수 ×2 (계속 진행)
+    if (s.ppukCount[seat] === 3) { s.ppuk3Mult = (s.ppuk3Mult || 1) * 2; events.push({ type: 'ppeok3', payload: { seat } }); }
     const sc = score(s, pl.cap);
     if (sc.total >= s.goMin && sc.total > prevScore) {
         (pl as any)._last = sc.total;
@@ -317,7 +320,7 @@ export const gostopPlugin: GamePlugin = {
         for (let p = 0; p < gp.length; p++) { const c: Record<number, number> = {}; gp[p].hand.forEach(id => { const m = cardMap[id].m; c[m] = (c[m] || 0) + 1; }); if (Object.values(c).some(n => n === 4)) { chong = p; break; } }
         const st: GostopState = {
             cardMap, deck: ids, table, players: gp, currentTurn: 0,
-            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppukCount: Array(N).fill(0), ppukOwner: {}, flipOwed: Array(N).fill(0),
+            go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppuk3Mult: 1, ppukCount: Array(N).fill(0), ppukOwner: {}, flipOwed: Array(N).fill(0),
             pending: null, pendingFlip: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
             lastEvent: null, config: { timeLimit: config?.timeLimit ?? 30, bet: config?.bet ?? 1 },
         } as GostopState;
