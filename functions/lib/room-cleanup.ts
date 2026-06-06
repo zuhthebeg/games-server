@@ -9,6 +9,7 @@ const WAITING_EMPTY_MAX_MS = 5 * 60 * 1000;
 const WAITING_SOLO_MAX_MS = 30 * 60 * 1000;
 const WAITING_ANY_MAX_MS = 6 * 60 * 60 * 1000;
 const PLAYING_SOLO_MAX_MS = 6 * 60 * 60 * 1000;
+const PLAYING_ANY_MAX_MS = 6 * 60 * 60 * 1000;   // 2명+ 'playing' 좀비방도 6h 지나면 정리
 const FINISHED_MAX_MS = 24 * 60 * 60 * 1000;
 
 function isoBefore(msAgo: number, now = Date.now()): string {
@@ -24,6 +25,7 @@ export async function cleanupStaleRooms(env: Env, now = Date.now()): Promise<Roo
     const waitingSoloCutoff = isoBefore(WAITING_SOLO_MAX_MS, now);
     const waitingAnyCutoff = isoBefore(WAITING_ANY_MAX_MS, now);
     const playingSoloCutoff = isoBefore(PLAYING_SOLO_MAX_MS, now);
+    const playingAnyCutoff = isoBefore(PLAYING_ANY_MAX_MS, now);
     const finishedCutoff = isoBefore(FINISHED_MAX_MS, now);
 
     const { results } = await env.DB.prepare(`
@@ -36,6 +38,7 @@ export async function cleanupStaleRooms(env: Env, now = Date.now()): Promise<Roo
             OR (r.status = 'waiting' AND player_count <= 1 AND r.created_at < ?)
             OR (r.status = 'waiting' AND r.created_at < ?)
             OR (r.status = 'playing' AND player_count <= 1 AND COALESCE(r.started_at, r.created_at) < ?)
+            OR (r.status = 'playing' AND COALESCE(r.started_at, r.created_at) < ?)
             OR (r.status = 'finished' AND COALESCE(r.finished_at, r.created_at) < ?)
         ORDER BY r.created_at ASC
         LIMIT 100
@@ -44,6 +47,7 @@ export async function cleanupStaleRooms(env: Env, now = Date.now()): Promise<Roo
         waitingSoloCutoff,
         waitingAnyCutoff,
         playingSoloCutoff,
+        playingAnyCutoff,
         finishedCutoff
     ).all<{ id: string; player_count: number }>();
 
