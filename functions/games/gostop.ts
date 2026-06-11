@@ -74,9 +74,8 @@ function cardValue(c: Card): number { return c.gwang ? 4 : c.ssangpi ? 3 : c.rol
 function removeFromTable(s: GostopState, id: string) { const i = s.table.indexOf(id); if (i >= 0) s.table.splice(i, 1); }
 function stealPi(s: GostopState, from: number, to: number): string | null {
     const src = s.players[from].cap;
-    let j = src.findIndex(id => cm(s, id).role === 'pi' && !cm(s, id).ssangpi);
-    if (j < 0) j = src.findIndex(id => cm(s, id).role === 'pi');
-    if (j < 0) j = src.findIndex(id => cm(s, id).role === 'yul' && cm(s, id).m === 9);
+    // 쌍피(우산·오동)·국진 보호 — 단피만 뺏김 (클라 싱글과 동일 룰)
+    const j = src.findIndex(id => cm(s, id).role === 'pi' && !cm(s, id).ssangpi);
     if (j < 0) return null;
     const id = src.splice(j, 1)[0]; s.players[to].cap.push(id); return id;
 }
