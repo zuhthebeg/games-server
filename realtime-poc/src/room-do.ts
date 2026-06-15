@@ -1,10 +1,13 @@
-// RoomDO — 방 1개 = 인스턴스 1개. Hibernatable WebSocket으로 소켓을 들고,
-// 들어온 메시지를 직렬 처리해 seq 붙여 전원에게 broadcast.
+// RoomDO — 방 1개 = 인스턴스 1개. Hibernatable WebSocket + 고스톱 server-authoritative.
 //
-// [배관 체크포인트 단계] 아직 게임 로직(applyAction) 없음.
-//   - 지금: 메시지 = "이벤트"로 취급, seq 부여 후 전원 broadcast(직렬·순서보장 증명).
-//   - 다음: webSocketMessage 안에서 gostop applyAction(state, action, user) 호출 →
-//           newState 메모리 갱신 + events broadcast + 스냅샷. (seam은 이미 여기.)
+// 핵심: 한 방의 모든 메시지를 이 DO 하나가 "한 번에 하나씩" 직렬 처리(동시 경합 없음).
+//   start  → gostop.createInitialState(딜링) → 각 소켓에 본인 getPlayerView
+//   action → validateAction(턴 가드 포함) → applyAction → events broadcast + 각자 view 갱신
+//   (재)connect → 진행 중이면 본인 view 즉시 전송
+//   빈 좌석은 ai-* 봇 → DO가 getAIAction으로 자동 플레이
+//
+// 게임 로직(applyAction 등)은 기존 plugin을 그대로 import = 재사용(0 수정).
+import { gostopPlugin } from '../../functions/games/gostop';
 
 interface Env {}
 
@@ -18,14 +21,9 @@ export class RoomDO {
   }
 
   async fetch(req: Request): Promise<Response> {
-    // 비-WS 요청: 헬스/상태
     if (req.headers.get('Upgrade') !== 'websocket') {
-      const seq = (await this.ctx.storage.get<number>('seq')) ?? 0;
-      return Response.json({
-        ok: true,
-        seq,
-        connections: this.ctx.getWebSockets().length,
-      });
+      const game = await this.ctx.storage.get('game');
+      return Response.json({ ok: true, started: !!game, connections: this.ctx.getWebSockets().length });
     }
 
     const url = new URL(req.url);
@@ -34,48 +32,118 @@ export class RoomDO {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-
-    // Hibernation API: 메시지 없을 때 잠들어도 연결 유지(=idle 비용 0)
     this.ctx.acceptWebSocket(server, [user]);
 
-    const seq = (await this.ctx.storage.get<number>('seq')) ?? 0;
-    const connections = this.ctx.getWebSockets().length;
-    server.send(JSON.stringify({ type: 'connected', user, seq, connections }));
-    this.broadcast(
-      JSON.stringify({ type: 'presence', event: 'join', user, connections }),
-      server,
-    );
+    const game = await this.ctx.storage.get<any>('game');
+    server.send(JSON.stringify({ type: 'connected', user, started: !!game, connections: this.ctx.getWebSockets().length }));
+    // 재연결: 진행 중이면 본인 시점 상태 즉시 복원
+    if (game) server.send(JSON.stringify({ type: 'state', view: gostopPlugin.getPlayerView(game, user) }));
+    this.broadcast(JSON.stringify({ type: 'presence', event: 'join', user, connections: this.ctx.getWebSockets().length }), server);
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // 한 방의 모든 메시지는 이 DO 하나가 "한 번에 하나씩" 처리 → 동시 경합 없음(직렬화).
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const user = (this.ctx.getTags(ws)[0] as string) || 'anon';
-    let data: unknown;
+    let msg: any;
     try {
-      data = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message));
+      msg = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message));
     } catch {
-      data = { raw: String(message) };
+      return;
     }
 
-    let seq = (await this.ctx.storage.get<number>('seq')) ?? 0;
-    seq += 1;
-    await this.ctx.storage.put('seq', seq);
+    if (msg?.type === 'start') return this.handleStart(msg.config);
+    if (msg?.type === 'action') return this.handleAction(user, msg.action, ws);
+  }
 
-    // [seam] 여기서 나중에 gostop applyAction 호출로 교체.
-    // 지금은 들어온 메시지를 그대로 이벤트화해 전원 broadcast(발신자 포함 → 정본 seq 수신).
-    this.broadcast(JSON.stringify({ type: 'event', seq, from: user, payload: data }));
+  async handleStart(config: any): Promise<void> {
+    let game = await this.ctx.storage.get<any>('game');
+    if (game) {
+      await this.pushViews(game); // 이미 시작됨 → 뷰만 재전송(멱등)
+      return;
+    }
+    // 접속한 소켓들로 로스터 구성(유저 중복 제거, 좌석=순서)
+    const seen = new Set<string>();
+    const players: { id: string; nickname: string; seat: number }[] = [];
+    for (const s of this.ctx.getWebSockets()) {
+      const u = this.ctx.getTags(s)[0] as string;
+      if (!u || seen.has(u)) continue;
+      seen.add(u);
+      players.push({ id: u, nickname: u, seat: players.length });
+    }
+    if (players.length === 0) return;
+
+    game = gostopPlugin.createInitialState(players as any, config || {});
+    await this.ctx.storage.put('game', game);
+    this.broadcast(JSON.stringify({ type: 'started', players: players.map((p) => p.id) }));
+    await this.pushViews(game);
+    await this.runAI(game);
+  }
+
+  async handleAction(user: string, action: any, ws: WebSocket): Promise<void> {
+    let game = await this.ctx.storage.get<any>('game');
+    if (!game) {
+      ws.send(JSON.stringify({ type: 'error', error: '게임 미시작' }));
+      return;
+    }
+    const v = gostopPlugin.validateAction(game, action, user);
+    if (!v.valid) {
+      // 턴 가드 등 거절 — 발신자에게만 (상태 변경 0)
+      ws.send(JSON.stringify({ type: 'error', error: v.error || 'invalid', action }));
+      return;
+    }
+    const res = gostopPlugin.applyAction(game, action, user);
+    game = res.newState;
+    await this.ctx.storage.put('game', game);
+    this.broadcastEvents(res.events);
+    await this.pushViews(game);
+    await this.runAI(game);
+  }
+
+  // 빈 좌석(ai-*)이 현재 행동자면 DO가 자동 플레이. 무한루프 방지 가드.
+  async runAI(game: any): Promise<void> {
+    let guard = 0;
+    while (guard++ < 60 && !gostopPlugin.isGameOver(game)) {
+      const turnId = gostopPlugin.getCurrentTurn(game);
+      if (!turnId || !String(turnId).startsWith('ai-')) break;
+      const aiAction = gostopPlugin.getAIAction!(game, turnId);
+      const v = gostopPlugin.validateAction(game, aiAction, turnId);
+      if (!v.valid) break;
+      const res = gostopPlugin.applyAction(game, aiAction, turnId);
+      game = res.newState;
+      await this.ctx.storage.put('game', game);
+      this.broadcastEvents(res.events);
+      await this.pushViews(game);
+    }
+  }
+
+  // 각 소켓에 "본인 시점" 상태 — 고스톱 손패 프라이버시 보장
+  async pushViews(game: any): Promise<void> {
+    for (const s of this.ctx.getWebSockets()) {
+      const u = this.ctx.getTags(s)[0] as string;
+      if (!u) continue;
+      try {
+        s.send(JSON.stringify({ type: 'state', view: gostopPlugin.getPlayerView(game, u) }));
+      } catch {
+        /* 끊긴 소켓 */
+      }
+    }
+  }
+
+  async broadcastEvents(events: any[]): Promise<void> {
+    if (!events?.length) return;
+    let seq = (await this.ctx.storage.get<number>('seq')) ?? 0;
+    for (const ev of events) {
+      seq += 1;
+      this.broadcast(JSON.stringify({ type: 'event', seq, event: ev }));
+    }
+    await this.ctx.storage.put('seq', seq);
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
     const user = (this.ctx.getTags(ws)[0] as string) || 'anon';
-    // 닫히는 소켓 제외한 현재 수
     const remaining = this.ctx.getWebSockets().filter((s) => s !== ws).length;
-    this.broadcast(
-      JSON.stringify({ type: 'presence', event: 'leave', user, connections: remaining }),
-      ws,
-    );
+    this.broadcast(JSON.stringify({ type: 'presence', event: 'leave', user, connections: remaining }), ws);
   }
 
   broadcast(msg: string, except?: WebSocket): void {
@@ -84,7 +152,7 @@ export class RoomDO {
       try {
         ws.send(msg);
       } catch {
-        /* 끊긴 소켓 무시 */
+        /* ignore */
       }
     }
   }
