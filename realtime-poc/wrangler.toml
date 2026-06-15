@@ -1,0 +1,15 @@
+# relay-do-poc — Durable Object + WebSocket PoC (격리: relay.cocy.io/games-relay와 무관)
+name = "relay-do-poc"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+account_id = "3d0681b782422e56226a0a1df4a0e8b2"
+
+# 방 1개 = RoomDO 인스턴스 1개
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "RoomDO"
+
+# SQLite 백엔드 DO (Workers Free 플랜에서 사용 가능한 유일한 종류)
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]

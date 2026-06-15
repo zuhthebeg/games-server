@@ -78,6 +78,13 @@
 - **Phase 0 산출물**: `RoomDO` PoC + 부하 실측 수치 1장(4명/10명 지연·안정성·duration).
 - 그 수치를 보고 Phase 1 진행 여부 결정. (수치가 안 나오면 대안 B = Colyseus on VPS 재검토.)
 
+## 8. 진행 로그 (갱신)
+
+- **PoC 타깃 = 고스톱(gostop)으로 확정** (echo 아님). 이유: 제일 많이 함+애니 끊김 실고통(효용감), 그리고 이미 server-authoritative(PLAY/BOMB/FLIPPICK/GO/STOP 전부 applyAction) + pingtan식 클라권위 함정 없음 → "게임로직 0수정" 테제를 진짜 게임에서 증명. **테스트 기준 = 실제 2인 멀티**(4→10 부하는 나중).
+- **⚠️ 클라권위 상호작용 서버승격 (재사용 예외)**: pingtan(catan) **거래**는 `TRADE_ACCEPT`가 클라 브로드캐스트 + 클라가 `applyTradeSwap` 직접 실행 → 서버 심판 없음 → "둘 다 수락" 버그 + 위조 가능. 순수 턴제(고스톱 등)는 그대로지만, 거래류는 DO 이관 시 **서버 권위 액션으로 승격**(pendingTrade{open} + 첫 수락만 성사) 필요. REACTION_EMOTE류도 점검.
+- **✅ Phase 0 배관 체크포인트 통과 (2026-06-15)**: 격리 워커 `relay-do-poc`(`realtime-poc/`) 배포 → `wss://relay-do-poc.zuhejbeg.workers.dev/room/:id`. 2소켓(alice/bob) 연결·순서있는 broadcast(seq 1·2)·presence join/leave 실측 OK. RoomDO = Hibernatable WS + `getWebSockets()` broadcast + seq를 ctx.storage에. **게임 로직은 아직 없음**(메시지=이벤트로 broadcast하는 seam만).
+- **다음 = gostop applyAction 이관**: `webSocketMessage`의 seam에서 gostop `applyAction(state, action, user)` 호출 → newState 메모리 + events broadcast + 스냅샷. 접속 시 현재 state 전송(재연결). 턴 소유권 가드 확인/추가.
+
 ## 부록 — 검토한 대안
 
 - **WebRTC (CF 시그널링만)**: 기각. 턴제·server-authoritative에 안 맞음(P2P는 권위 모델 폐기 + 호스트 마이그레이션, 또는 서버 노드가 WebRTC 스택을 말해야 해 복잡도 폭증). TURN 폴백은 대역폭 과금. 지연이 병목이 아닌 우리 게임엔 손해.
