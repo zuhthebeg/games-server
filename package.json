@@ -6,10 +6,15 @@
     "dev": "wrangler pages dev ./dist --d1=DB",
     "deploy": "wrangler pages deploy ./dist",
     "db:local": "wrangler d1 execute games-relay-db --local --file=./schema.sql",
-    "db:prod": "wrangler d1 execute games-relay-db --file=./schema.sql"
+    "db:prod": "wrangler d1 execute games-relay-db --file=./schema.sql",
+    "test": "node tests/gostop-fullgame-e2e.test.cjs && node tests/gostop-do-transport.test.cjs",
+    "test:gostop": "node tests/gostop-fullgame-e2e.test.cjs",
+    "test:gostop-do": "node tests/gostop-do-transport.test.cjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",
+    "esbuild": "^0.27.0",
+    "miniflare": "^4.20260302.0",
     "typescript": "^5.0.0",
     "wrangler": "^4.67.0"
   }
