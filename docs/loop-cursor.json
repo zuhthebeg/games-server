@@ -1,0 +1,26 @@
+{
+  "_doc": "멀티 마이그레이션 루프의 재개 커서. 어느 세션이든 이 파일부터 읽고 loop-migration-plan.md의 RESUME PROTOCOL을 실행한다. 매 청크 끝에 갱신.",
+  "active": false,
+  "loop": "multi-migration",
+  "current": {
+    "game": "gostop",
+    "step": "await-cocy-realdevice",
+    "blockedOn": "human",
+    "note": "do-v7 리뷰 pass(Claude 서브에이전트). cocy 실기기 한 판 확인 대기 = 최종 게이트"
+  },
+  "next": "gostop 실기기 OK → multiplayer.js 공용 승격(backlog 2번) 착수",
+  "lastCommit": { "games": "26e43a0", "games-server": "70cc1f9" },
+  "pendingFixes": [
+    "do-v7 🟡1: settle 숨김 타이머 매직넘버(500ms) → mpFly 비행 끝 콜백에 묶기",
+    "do-v7 🟡2: flipTurn 빈 덱 가드가 owed 통째로 0 소멸 → return으로 변경",
+    "do-v7 🟡3: 3인 owed 턴순서 미검증 → 다인전 포팅 때 테스트 추가"
+  ],
+  "usageGate": {
+    "signal": "session_status Context %",
+    "startChunkBelowPct": 60,
+    "smallChunkOnlyPct": [60, 72],
+    "hardStopPct": 72,
+    "note": "쿼터 failover는 cursor가 방어. context %가 다음 초기화 예고 신호."
+  },
+  "updated": "2026-06-17T00:55:00+09:00"
+}
