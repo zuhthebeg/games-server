@@ -1,14 +1,15 @@
 {
   "_doc": "멀티 마이그레이션 루프의 재개 커서. 어느 세션이든 이 파일부터 읽고 loop-migration-plan.md의 RESUME PROTOCOL을 실행한다. 매 청크 끝에 갱신.",
-  "active": false,
+  "active": true,
   "loop": "multi-migration",
   "current": {
-    "game": "gostop",
-    "step": "await-cocy-realdevice",
-    "blockedOn": "human",
-    "note": "do-v7 리뷰 pass(Claude 서브에이전트). cocy 실기기 한 판 확인 대기 = 최종 게이트"
+    "game": "multiplayer.js-승격",
+    "step": "scope-done → 실제 lib 코드 대기(GO 윈도우)",
+    "blockedOn": "usage-gate-SLOW",
+    "note": "분류 청크 완료: do-ws-promotion-scope.md. gostop WS client 표면이 옛 MultiplayerClient와 동일 → 트랜스포트만 교체 가능. 다음 청크=MultiplayerWSClient를 lib에 추가."
   },
-  "next": "gostop 실기기 OK → multiplayer.js 공용 승격(backlog 2번) 착수",
+  "next": "GO 윈도우(5h 리셋 04:59 후): do-ws-promotion-scope.md §승격순서 1번 — MultiplayerWSClient를 lib/multiplayer.js에 추가(공개표면 옛클래스와 동일)",
+  "resumeAfter": "2026-06-17T04:59:59+09:00 (5h 윈도우 리셋, 그때 GO 예상)",
   "lastCommit": { "games": "26e43a0", "games-server": "70cc1f9" },
   "pendingFixes": [
     "do-v7 🟡1: settle 숨김 타이머 매직넘버(500ms) → mpFly 비행 끝 콜백에 묶기",
