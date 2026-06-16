@@ -4,13 +4,13 @@
   "loop": "multi-migration",
   "current": {
     "game": "multiplayer.js-승격",
-    "step": "scope-done → 실제 lib 코드 대기(GO 윈도우)",
-    "blockedOn": "usage-gate-SLOW",
-    "note": "분류 청크 완료: do-ws-promotion-scope.md. gostop WS client 표면이 옛 MultiplayerClient와 동일 → 트랜스포트만 교체 가능. 다음 청크=MultiplayerWSClient를 lib에 추가."
+    "step": "WSClient draft 완료(Sonnet, Opus리뷰 pass) → 다음=대기실 핸드오프+gostop swap+Layer2 테스트",
+    "blockedOn": null,
+    "note": "§승격순서 1번 DONE: MultiplayerWSClient를 lib/multiplayer.js 493-712 additive 추가(커밋 games 6a33f85, 미푸시). 구조검증 통과(삭제0/충돌0/표면일치)."
   },
-  "next": "GO 윈도우(5h 리셋 04:59 후): do-ws-promotion-scope.md §승격순서 1번 — MultiplayerWSClient를 lib/multiplayer.js에 추가(공개표면 옛클래스와 동일)",
-  "resumeAfter": "2026-06-17T04:59:59+09:00 (5h 윈도우 리셋, 그때 GO 예상)",
-  "lastCommit": { "games": "26e43a0", "games-server": "70cc1f9" },
+  "next": "§승격순서 2~4: (Sonnet) MultiplayerUI→WS 핸드오프 분기 + gostop 인라인 startWS 제거→lib 사용 + Layer2 WS 테스트. (Opus) 리뷰. ⚠️배포/캐시버스트는 cocy 확인 전 금지.",
+  "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
+  "lastCommit": { "games": "6a33f85 (미푸시)", "games-server": "1c25e2f" },
   "pendingFixes": [
     "do-v7 🟡1: settle 숨김 타이머 매직넘버(500ms) → mpFly 비행 끝 콜백에 묶기",
     "do-v7 🟡2: flipTurn 빈 덱 가드가 owed 통째로 0 소멸 → return으로 변경",

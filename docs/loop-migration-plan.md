@@ -32,8 +32,12 @@
 
 ## Maker / Reviewer 계약
 
-**Maker** = Claude(Opus). 포팅 + 테스트 작성 + 자가 `npm test`. 고치는 책임.
-**Reviewer** = 다른 에이전트(가능하면 gemini/gpt 계열, 같은 계열이면 self-bias 경고). 읽기전용, 고치지 않고 지적만.
+**모델 분배(2026-06-17 cocy 지시):** Sonnet은 별도 사용량 레인(5h 윈도우에 가볍게 실리고 Opus 주간캡 안 건드림). 단순/기계적 청크 = **Sonnet Maker**(`Agent model:sonnet`), 판단·blast-radius·리뷰 = **Opus**. Opus 5h가 SLOW여도 멈추지 말고 기계적 청크를 Sonnet으로 돌려 전진. STOP은 Opus·Sonnet 둘 다 조일 때만.
+- Sonnet 적합: 스펙 명확한 additive 코드, 테스트 스캐폴드, 단일 게임 트랜스포트 교체, 문서/정리
+- Opus 전담: 공용 lib 설계 결정, 배포 게이트, 인코딩/인증, 디버깅, Sonnet 산출물 리뷰
+
+**Maker** = Sonnet(기본) 또는 Opus(설계난이도 높을 때). 포팅 + 테스트 작성 + 자가 `npm test`.
+**Reviewer** = Opus(현재 gemini/gpt 소진). 읽기전용, 구조검증(additive/충돌/표면일치) + 핵심 로직만. 같은 계열 self-bias 유의.
 
 Reviewer 입력 계약:
 - diff (해당 게임 client + 필요시 server plugin)
