@@ -4,10 +4,12 @@
   "loop": "multi-migration",
   "current": {
     "game": "multiplayer.js-승격",
-    "step": "WSClient draft 완료(Sonnet, Opus리뷰 pass) → 다음=대기실 핸드오프+gostop swap+Layer2 테스트",
-    "blockedOn": null,
-    "note": "§승격순서 1번 DONE: MultiplayerWSClient를 lib/multiplayer.js 493-712 additive 추가(커밋 games 6a33f85, 미푸시). 구조검증 통과(삭제0/충돌0/표면일치)."
+    "step": "WSClient + Layer2 테스트 DONE → 다음=gostop swap(또는 신규 게임 첫 소비자)",
+    "blockedOn": "checkpoint-decision",
+    "note": "gostop done. §1 WSClient(games 6a33f85 미푸시) + §3 Layer2 테스트(gs a4a461a, 8/8) 완료. 전체스위트 회귀0. 다음은 gostop 인라인→lib swap인데 cocy 재테스트 재유발 → 체크포인트."
   },
+  "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
+  "nextDecision": "gostop swap(검증된 게임에 새 코드경로, 재테스트 필요) vs 신규 단순게임(gomoku/connect4) 첫 소비자로 lib 검증. 후자가 gostop 안 건드려 더 안전.",
   "next": "§승격순서 2~4: (Sonnet) MultiplayerUI→WS 핸드오프 분기 + gostop 인라인 startWS 제거→lib 사용 + Layer2 WS 테스트. (Opus) 리뷰. ⚠️배포/캐시버스트는 cocy 확인 전 금지.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
   "lastCommit": { "games": "6a33f85 (미푸시)", "games-server": "1c25e2f" },
