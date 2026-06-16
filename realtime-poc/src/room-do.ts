@@ -28,11 +28,13 @@ export class RoomDO {
 
     const url = new URL(req.url);
     const user = (url.searchParams.get('u') || 'anon').slice(0, 40);
+    const nick = (url.searchParams.get('n') || user).slice(0, 24);
 
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-    this.ctx.acceptWebSocket(server, [user]);
+    // tags[0]=user id(로스터/뷰 키), tags[1]=표시 닉네임. hibernation 넘어도 유지됨.
+    this.ctx.acceptWebSocket(server, [user, nick]);
 
     const game = await this.ctx.storage.get<any>('game');
     server.send(JSON.stringify({ type: 'connected', user, started: !!game, connections: this.ctx.getWebSockets().length }));
@@ -66,10 +68,11 @@ export class RoomDO {
     const seen = new Set<string>();
     const players: { id: string; nickname: string; seat: number }[] = [];
     for (const s of this.ctx.getWebSockets()) {
-      const u = this.ctx.getTags(s)[0] as string;
+      const tags = this.ctx.getTags(s);
+      const u = tags[0] as string;
       if (!u || seen.has(u)) continue;
       seen.add(u);
-      players.push({ id: u, nickname: u, seat: players.length });
+      players.push({ id: u, nickname: (tags[1] as string) || u, seat: players.length });
     }
     if (players.length === 0) return;
 

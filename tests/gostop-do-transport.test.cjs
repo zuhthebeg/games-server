@@ -66,8 +66,9 @@ function wsClient(socket) {
   };
 }
 
-async function connect(mf, room, user) {
-  const res = await mf.dispatchFetch(`http://localhost/room/${room}?u=${user}`, {
+async function connect(mf, room, user, nick) {
+  const q = `u=${encodeURIComponent(user)}` + (nick ? `&n=${encodeURIComponent(nick)}` : '');
+  const res = await mf.dispatchFetch(`http://localhost/room/${room}?${q}`, {
     headers: { Upgrade: 'websocket' },
   });
   assert.strictEqual(res.status, 101, `WS upgrade failed for ${user}: status ${res.status}`);
@@ -90,12 +91,12 @@ async function run() {
   try {
     const room = 'e2e-room-1';
 
-    // 1) two clients connect
-    const p0 = await connect(mf, room, 'p0');
+    // 1) two clients connect (with display nicknames via ?n=)
+    const p0 = await connect(mf, room, 'p0', '코코');
     const c0 = await p0.waitFor((m) => m.type === 'connected', 'p0 connected');
     assert.strictEqual(c0.started, false, 'fresh room should not be started');
 
-    const p1 = await connect(mf, room, 'p1');
+    const p1 = await connect(mf, room, 'p1', '상대');
     await p1.waitFor((m) => m.type === 'connected', 'p1 connected');
     // p0 should observe presence join → connections == 2 at some point
     const pres = await p0.waitFor((m) => m.type === 'presence' && m.connections === 2, 'p0 sees 2 connections');
@@ -113,6 +114,14 @@ async function run() {
     assert.strictEqual(v1.myHand.length, 10, `2P deal: p1 should hold 10, got ${v1.myHand.length}`);
     passed++;
     console.log('  ✓ start deals 10 cards to each over the wire');
+
+    // 2b) display nicknames (?n=) flow into the roster — not the raw user id
+    const p0inV1 = v1.players.find((p) => p.id === 'p0');
+    const p1inV0 = v0.players.find((p) => p.id === 'p1');
+    assert(p0inV1 && p0inV1.nickname === '코코', `opponent nickname should be '코코', got '${p0inV1 && p0inV1.nickname}'`);
+    assert(p1inV0 && p1inV0.nickname === '상대', `opponent nickname should be '상대', got '${p1inV0 && p1inV0.nickname}'`);
+    passed++;
+    console.log('  ✓ display nicknames flow over the wire (not raw user id)');
 
     // 3) hand privacy over the wire
     for (const [v, me] of [[v0, 'p0'], [v1, 'p1']]) {
@@ -165,23 +174,37 @@ async function run() {
     passed++;
     console.log('  ✓ event stream delivers play-juice contract (cardId·stags·stolen·captured)');
 
-    // 7) reconnect restores current state immediately
+    // 7) reconnect with the SAME id restores the SAME seat + hand (not spectator).
+    //    Production bug was the client minting a NEW random id per load → seat=-1 spectator.
+    const p1Seat = v1.mySeat;
     p1.close();
     await new Promise((r) => setTimeout(r, 50));
-    const p1b = await connect(mf, room, 'p1');
+    const p1b = await connect(mf, room, 'p1', '상대');
     await p1b.waitFor((m) => m.type === 'connected' && m.started === true, 'reconnect connected(started)');
-    const restored = await p1b.waitFor((m) => m.type === 'state', 'reconnect state');
-    assert(restored.view && restored.view.mySeat >= 0, 'reconnect should restore p1 view with a seat');
+    const restored = (await p1b.waitFor((m) => m.type === 'state', 'reconnect state')).view;
+    assert.strictEqual(restored.mySeat, p1Seat, `reconnect (same id) must keep seat ${p1Seat}, got ${restored.mySeat}`);
+    assert(restored.myHand.length > 0, `reconnect must restore p1's hand (spectator bug), got ${restored.myHand.length} cards`);
     passed++;
-    console.log('  ✓ reconnect restores in-progress state for returning player');
+    console.log(`  ✓ reconnect (same id) keeps seat ${p1Seat} + hand (no spectator)`);
+
+    // 7b) a DIFFERENT id joining mid-game is a spectator (seat -1) — this is exactly
+    //     what the client used to do by accident; persisting the id is the fix.
+    const ghost = await connect(mf, room, 'p-ghost', '뜨내기');
+    await ghost.waitFor((m) => m.type === 'connected', 'ghost connected');
+    const ghostView = (await ghost.waitFor((m) => m.type === 'state', 'ghost state')).view;
+    assert.strictEqual(ghostView.mySeat, -1, `unknown id should be a spectator (seat -1), got ${ghostView.mySeat}`);
+    assert.strictEqual(ghostView.myHand.length, 0, 'spectator should hold no cards');
+    ghost.close();
+    passed++;
+    console.log('  ✓ unknown id = spectator (seat -1) — confirms why persisting the id matters');
 
     p0.close(); p1b.close();
   } finally {
     await mf.dispose();
   }
 
-  console.log(`\n✅ gostop DO transport E2E: ${passed}/7 wire checks passed`);
-  if (passed !== 7) process.exit(1);
+  console.log(`\n✅ gostop DO transport E2E: ${passed}/9 wire checks passed`);
+  if (passed !== 9) process.exit(1);
 }
 
 run().catch((e) => { console.error('\n❌ DO transport E2E failed:\n', e); process.exit(1); });
