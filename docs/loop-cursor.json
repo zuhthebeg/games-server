@@ -10,11 +10,11 @@
   },
   "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
   "nextDecision": "서버 generic 완료 → 신규 게임은 클라만 포팅하면 DO/WS 탐. 다음 청크=gomoku 클라 ?relay=do 경로 추가(MultiplayerWSClient, gameType:gomoku) + 실기기. 그 후 connect4(동형).",
-  "next": "§승격순서 2~4: (Sonnet) MultiplayerUI→WS 핸드오프 분기 + gostop 인라인 startWS 제거→lib 사용 + Layer2 WS 테스트. (Opus) 리뷰. ⚠️배포/캐시버스트는 cocy 확인 전 금지.",
+  "next": "gomoku 클라 DO 경로(?relay=do IIFE): MultiplayerWSClient(gameType:gomoku) 직접 배선 + 최소 로비. ⚠️위험=gomoku 클라는 REST MultiplayerUI state shape(state.gameState.board/players/currentPlayer/winner/status)에 묶임 → DO getPlayerView 뷰와 shape 매칭 확인 필수(서버스모크로 못잡음, 브라우저/실기기 렌더 검증). gomoku 플러그인 getPlayerView 반환형 먼저 확인 후 updateFromState에 맞추거나 어댑터.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
   "lastCommit": {
-    "games": "(곧 push)",
-    "games-server": "(곧 commit)",
+    "games": "1f9e12d (pushed, Pages)",
+    "games-server": "a3b1226 (pushed)",
     "worker": "relay-do-poc ver 3f980043 배포됨"
   },
   "pendingFixes": [
