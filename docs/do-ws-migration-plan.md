@@ -84,6 +84,7 @@
 - **⚠️ 클라권위 상호작용 서버승격 (재사용 예외)**: pingtan(catan) **거래**는 `TRADE_ACCEPT`가 클라 브로드캐스트 + 클라가 `applyTradeSwap` 직접 실행 → 서버 심판 없음 → "둘 다 수락" 버그 + 위조 가능. 순수 턴제(고스톱 등)는 그대로지만, 거래류는 DO 이관 시 **서버 권위 액션으로 승격**(pendingTrade{open} + 첫 수락만 성사) 필요. REACTION_EMOTE류도 점검.
 - **✅ Phase 0 배관 체크포인트 통과 (2026-06-15)**: 격리 워커 `relay-do-poc`(`realtime-poc/`) 배포 → `wss://relay-do-poc.zuhejbeg.workers.dev/room/:id`. 2소켓(alice/bob) 연결·순서있는 broadcast(seq 1·2)·presence join/leave 실측 OK. RoomDO = Hibernatable WS + `getWebSockets()` broadcast + seq를 ctx.storage에. **게임 로직은 아직 없음**(메시지=이벤트로 broadcast하는 seam만).
 - **다음 = gostop applyAction 이관**: `webSocketMessage`의 seam에서 gostop `applyAction(state, action, user)` 호출 → newState 메모리 + events broadcast + 스냅샷. 접속 시 현재 state 전송(재연결). 턴 소유권 가드 확인/추가.
+- **✅ gostop 클라 이관 + 실플레이 디버그 (2026-06-16)**: 한 판 종료까지 플레이 OK·반응속도 개선 확인. 실플레이에서 드러난 클라층 버그 전부 수정·배포 — 사운드/voice 이벤트 구동, 거슬리는 반복음 제거, 결과창 버튼, **영속 uid로 재접속 좌석복원(관전모드 버그)**, 닉네임 `?n=`, 먹은 패 fly 애니(스냅샷 diff 복원). 자동 회귀: `tests/gostop-*` Layer1(엔진 200판)+Layer2(WS 9/9). **이 과정에서 나온 게임-공통 클라 패턴/함정 → [`do-ws-client-playbook.md`](./do-ws-client-playbook.md)** (전 게임 DO 전환 시 참고). 성능 양호 → cocy 전 멀티게임 DO 전환 예정.
 
 ## 부록 — 검토한 대안
 
