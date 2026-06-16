@@ -98,7 +98,7 @@ export class RoomDO {
     const res = gostopPlugin.applyAction(game, action, user);
     game = res.newState;
     await this.ctx.storage.put('game', game);
-    this.broadcastEvents(res.events);
+    await this.broadcastEvents(res.events);  // events BEFORE state — client captures DOM coords before re-render
     await this.pushViews(game);
     await this.runAI(game);
   }
@@ -115,7 +115,7 @@ export class RoomDO {
       const res = gostopPlugin.applyAction(game, aiAction, turnId);
       game = res.newState;
       await this.ctx.storage.put('game', game);
-      this.broadcastEvents(res.events);
+      await this.broadcastEvents(res.events);  // events BEFORE state
       await this.pushViews(game);
     }
   }

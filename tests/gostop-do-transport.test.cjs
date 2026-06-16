@@ -39,15 +39,18 @@ function wsClient(socket) {
   socket.accept();
   const queue = [];
   const waiters = [];
+  const arrivals = []; // raw arrival order (type, or 'event:<subtype>') — for ordering assertions
   socket.addEventListener('message', (e) => {
     let msg;
     try { msg = JSON.parse(e.data); } catch { msg = { type: 'raw', data: e.data }; }
+    arrivals.push(msg.type === 'event' && msg.event ? 'event:' + msg.event.type : msg.type);
     const idx = waiters.findIndex((w) => w.pred(msg));
     if (idx >= 0) { const w = waiters.splice(idx, 1)[0]; clearTimeout(w.timer); w.resolve(msg); }
     else queue.push(msg);
   });
   return {
     socket,
+    arrivals,
     send: (obj) => socket.send(JSON.stringify(obj)),
     // wait for next message matching pred (checks already-queued first)
     waitFor(pred, label = 'message', ms = 4000) {
@@ -146,6 +149,8 @@ async function run() {
 
     // 5) on-turn PLAY round-trips → new state broadcast to both
     const onView = v0.isMyTurn ? v0 : v1;
+    const onTurnClient = onTurn; // capture arrival order on the actor's socket
+    const arrLenBefore = onTurnClient.arrivals.length;
     onTurn.send({ type: 'action', action: { type: 'PLAY', payload: { cardId: onView.myHand[0].id } } });
     // both clients should receive a fresh state (or a pending/flip prompt) and NO error
     const ns0 = await p0.waitFor((m) => m.type === 'state', 'p0 post-play state');
@@ -161,6 +166,19 @@ async function run() {
     assert(progressed, `on-turn PLAY did not progress state: hand=${playedView.myHand.length}`);
     passed++;
     console.log('  ✓ on-turn PLAY round-trips and progresses state');
+
+    // 5b) ORDERING (teleport-anim fix): the 'play' event must arrive BEFORE the post-play 'state'.
+    //     The client captures DOM card coords on the event, then re-renders on state. If state
+    //     lands first, cards are already moved → fly animation has nothing to grab ("순간이동").
+    await new Promise((r) => setTimeout(r, 50)); // let any trailing AI/flip messages settle
+    const since = onTurnClient.arrivals.slice(arrLenBefore);
+    const evIdx = since.indexOf('event:play');
+    const stIdx = since.indexOf('state');
+    assert(evIdx >= 0, `expected a play event after PLAY; arrivals=${JSON.stringify(since)}`);
+    assert(stIdx >= 0, `expected a state after PLAY; arrivals=${JSON.stringify(since)}`);
+    assert(evIdx < stIdx, `play event must precede post-play state (teleport fix); arrivals=${JSON.stringify(since)}`);
+    passed++;
+    console.log(`  ✓ play event arrives BEFORE post-play state (anim coords survive) [${since.join(',')}]`);
 
     // 6b) event stream carries the juice contract the client (mpOnEvent) depends on:
     //     a 'play' event with payload.cardId + stags[] + stolen[] + captured[].
@@ -203,8 +221,8 @@ async function run() {
     await mf.dispose();
   }
 
-  console.log(`\n✅ gostop DO transport E2E: ${passed}/9 wire checks passed`);
-  if (passed !== 9) process.exit(1);
+  console.log(`\n✅ gostop DO transport E2E: ${passed}/10 wire checks passed`);
+  if (passed !== 10) process.exit(1);
 }
 
 run().catch((e) => { console.error('\n❌ DO transport E2E failed:\n', e); process.exit(1); });

@@ -265,7 +265,7 @@ function flipTurn(s: GostopState, seat: number, events: GameEvent[]) {
     if (s.deck.length > 0) for (let i = 0; i < steals; i++) for (const o of others) stealPi(s, o, seat);
     pl.cap.push(...captured);
     if (s.flipOwed) s.flipOwed[seat]--;
-    events.push({ type: 'flip_turn', playerId: pl.id, payload: { seat, flipId, captured } });
+    events.push({ type: 'flip_turn', playerId: pl.id, payload: { seat, flipId, captured, flipCard: s.cardMap[flipId] } });
 }
 function advance(s: GostopState, events: GameEvent[]) {
     let guard = 0;
@@ -384,7 +384,7 @@ export const gostopPlugin: GamePlugin = {
             const m = +action.payload.month;
             const three: string[] = pl.hand.filter(x => s.cardMap[x].m === m).slice(0, 3);
             const r = resolvePlay(s, seat, three, true);
-            events.push({ type: 'play', playerId, payload: { bomb: true, ...r } });
+            events.push({ type: 'play', playerId, payload: { bomb: true, ...r, flipCard: r.flipId ? s.cardMap[r.flipId] : null } });
             afterPlay(s, seat, prevScore, events, true);
             return { newState: s, events };
         }
@@ -392,7 +392,7 @@ export const gostopPlugin: GamePlugin = {
         const cardId = action.payload.cardId;
         const isHuman = !pl.id.startsWith('ai-');
         const r = resolvePlay(s, seat, [cardId], false, action.payload?.pick, action.payload?.shake === true, isHuman);
-        events.push({ type: 'play', playerId, payload: { cardId, ...r } });
+        events.push({ type: 'play', playerId, payload: { cardId, ...r, flipCard: r.flipId ? s.cardMap[r.flipId] : null } });
         if (r.flipPick) { s.pendingFlip = { seat, flipId: r.flipPick.flipId, candidates: r.flipPick.candidates, prevScore, bomb: false }; return { newState: s, events }; }
         afterPlay(s, seat, prevScore, events, false);
         return { newState: s, events };
