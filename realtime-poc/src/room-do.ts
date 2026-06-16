@@ -37,9 +37,10 @@ export class RoomDO {
     this.ctx.acceptWebSocket(server, [user, nick]);
 
     const game = await this.ctx.storage.get<any>('game');
-    server.send(JSON.stringify({ type: 'connected', user, started: !!game, connections: this.ctx.getWebSockets().length }));
-    // 재연결: 진행 중이면 본인 시점 상태 즉시 복원
-    if (game) server.send(JSON.stringify({ type: 'state', view: gostopPlugin.getPlayerView(game, user) }));
+    const live = game && !game.finished; // 끝난 게임은 좀비 — 재시작 대기 상태로 취급(로비 노출)
+    server.send(JSON.stringify({ type: 'connected', user, started: !!live, connections: this.ctx.getWebSockets().length }));
+    // 재연결: 진행 중이면 본인 시점 상태 즉시 복원(끝난 게임은 복원하지 않음 → 새 판 시작 가능)
+    if (live) server.send(JSON.stringify({ type: 'state', view: gostopPlugin.getPlayerView(game, user) }));
     this.broadcast(JSON.stringify({ type: 'presence', event: 'join', user, connections: this.ctx.getWebSockets().length }), server);
 
     return new Response(null, { status: 101, webSocket: client });
@@ -60,10 +61,12 @@ export class RoomDO {
 
   async handleStart(config: any): Promise<void> {
     let game = await this.ctx.storage.get<any>('game');
-    if (game) {
-      await this.pushViews(game); // 이미 시작됨 → 뷰만 재전송(멱등)
+    if (game && !game.finished) {
+      await this.pushViews(game); // 진행 중 → 뷰만 재전송(멱등)
       return;
     }
+    // 끝난 게임(좀비)이 남아 있으면 새 판으로 리셋. seq도 초기화.
+    if (game && game.finished) { await this.ctx.storage.delete('game'); await this.ctx.storage.put('seq', 0); game = null; }
     // 접속한 소켓들로 로스터 구성(유저 중복 제거, 좌석=순서)
     const seen = new Set<string>();
     const players: { id: string; nickname: string; seat: number }[] = [];
