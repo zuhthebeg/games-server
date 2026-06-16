@@ -153,7 +153,19 @@ async function run() {
     passed++;
     console.log('  ✓ on-turn PLAY round-trips and progresses state');
 
-    // 6) reconnect restores current state immediately
+    // 6b) event stream carries the juice contract the client (mpOnEvent) depends on:
+    //     a 'play' event with payload.cardId + stags[] + stolen[] + captured[].
+    const playEv = await p0.waitFor((m) => m.type === 'event' && m.event && m.event.type === 'play', 'play event', 4000);
+    const pe = playEv.event;
+    assert(typeof playEv.seq === 'number', 'event message carries a seq');
+    assert(pe.payload && pe.payload.cardId, 'play event has cardId');
+    assert(Array.isArray(pe.payload.stags), 'play event has stags[] (voice triggers)');
+    assert(Array.isArray(pe.payload.stolen), 'play event has stolen[] (피뺏기)');
+    assert(Array.isArray(pe.payload.captured), 'play event has captured[] (take sound)');
+    passed++;
+    console.log('  ✓ event stream delivers play-juice contract (cardId·stags·stolen·captured)');
+
+    // 7) reconnect restores current state immediately
     p1.close();
     await new Promise((r) => setTimeout(r, 50));
     const p1b = await connect(mf, room, 'p1');
@@ -168,8 +180,8 @@ async function run() {
     await mf.dispose();
   }
 
-  console.log(`\n✅ gostop DO transport E2E: ${passed}/6 wire checks passed`);
-  if (passed !== 6) process.exit(1);
+  console.log(`\n✅ gostop DO transport E2E: ${passed}/7 wire checks passed`);
+  if (passed !== 7) process.exit(1);
 }
 
 run().catch((e) => { console.error('\n❌ DO transport E2E failed:\n', e); process.exit(1); });
