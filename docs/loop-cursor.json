@@ -4,15 +4,18 @@
   "loop": "multi-migration",
   "current": {
     "game": "multiplayer.js-승격",
-    "step": "WSClient + Layer2 테스트 DONE → 다음=gostop swap(또는 신규 게임 첫 소비자)",
-    "blockedOn": "checkpoint-decision",
-    "note": "gostop done. §1 WSClient(games 6a33f85 미푸시) + §3 Layer2 테스트(gs a4a461a, 8/8) 완료. 전체스위트 회귀0. 다음은 gostop 인라인→lib swap인데 cocy 재테스트 재유발 → 체크포인트."
+    "step": "gostop swap DONE(코드+테스트+커밋) → Reviewer 검토중 → cocy 배포승인 대기",
+    "blockedOn": "review+deploy-approval",
+    "note": "gostop ?relay=do 인라인 startWS→lib MultiplayerWSClient 승격. onOpen 콜백 lib 추가(패리티). multiplayer.js ?v=20260617a 범프. do-v8. games HEAD cc9da1a 미푸시(배포=cocy확인). WS 프로토콜 테스트 9/9, IIFE 구문 OK, 잔존 인라인WS 0."
   },
   "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
-  "nextDecision": "gostop swap(검증된 게임에 새 코드경로, 재테스트 필요) vs 신규 단순게임(gomoku/connect4) 첫 소비자로 lib 검증. 후자가 gostop 안 건드려 더 안전.",
+  "nextDecision": "Reviewer pass + cocy 배포승인 → games push(Pages 자동배포) → 실기기 do-v8 한 판 → reviewed. 그 다음 poker(카드렌더 재활용) 또는 gomoku(순수턴제).",
   "next": "§승격순서 2~4: (Sonnet) MultiplayerUI→WS 핸드오프 분기 + gostop 인라인 startWS 제거→lib 사용 + Layer2 WS 테스트. (Opus) 리뷰. ⚠️배포/캐시버스트는 cocy 확인 전 금지.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
-  "lastCommit": { "games": "6a33f85 (미푸시)", "games-server": "1c25e2f" },
+  "lastCommit": {
+    "games": "cc9da1a (미푸시, ahead 3)",
+    "games-server": "1c25e2f"
+  },
   "pendingFixes": [
     "do-v7 🟡1: settle 숨김 타이머 매직넘버(500ms) → mpFly 비행 끝 콜백에 묶기",
     "do-v7 🟡2: flipTurn 빈 덱 가드가 owed 통째로 0 소멸 → return으로 변경",
@@ -24,5 +27,5 @@
     "rule": "GO(5h<70%)=정상청크 / SLOW(70~90%)=작은청크만+리셋까지 보수 / STOP(>=90% or 7day>=95%)=flush+리셋대기",
     "note": "Claude Code /usage 탭과 동일 숫자. 리셋 시각(resets_at)까지 나옴. context %는 압축 트리거일 뿐 게이트 아님."
   },
-  "updated": "2026-06-17T00:55:00+09:00"
+  "updated": "2026-06-17T02:30:00+09:00"
 }
