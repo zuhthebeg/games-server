@@ -267,28 +267,23 @@ function flipTurn(s: GostopState, seat: number, events: GameEvent[]) {
     if (s.flipOwed) s.flipOwed[seat]--;
     events.push({ type: 'flip_turn', playerId: pl.id, payload: { seat, flipId, captured, flipCard: s.cardMap[flipId] } });
 }
+// 턴은 항상 교대한다(싱글 모델). 폭탄 뒤집기탄(flipOwed)은 자동 실행하지 않는다 —
+// 폭탄 친 사람의 "자기 차례" 액션(FLIP)으로 처리. 사람은 선택적(패 내기 vs 뒤집기), AI는 getAIAction이 FLIP 선택.
+function canAct(s: GostopState, seat: number): boolean {
+    if (s.players[seat].hand.length > 0) return true;
+    return !!(s.flipOwed && s.flipOwed[seat] > 0 && s.deck.length > 0); // 손패 없어도 남은 뒤집기탄 있으면 행동 가능
+}
 function advance(s: GostopState, events: GameEvent[]) {
     let guard = 0;
     while (guard++ < 200) {
         s.currentTurn = (s.currentTurn + 1) % s.players.length;
-        const seat = s.currentTurn; const pl = s.players[seat];
-        if (s.flipOwed && s.flipOwed[seat] > 0) {
-            flipTurn(s, seat, events);
-            if (s.finished) return;
-            const sc = score(s, pl.cap); const prev = (pl as any)._last || 0;
-            if (sc.total >= s.goMin && sc.total > prev) {
-                (pl as any)._last = sc.total;
-                if (s.deck.length > 0) { s.pending = { kind: 'gostop', seat, total: sc.total }; events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } }); return; }
-                settle(s, seat); events.push({ type: 'win', payload: { seat, reason: s.endReason } }); return;
-            }
-            (pl as any)._last = Math.max(prev, sc.total);
-            continue; // 뒤집기전용 턴 1회 후 다음(상대) 차례로
-        }
-        if (pl.hand.length === 0) {
+        const seat = s.currentTurn;
+        if (canAct(s, seat)) { events.push({ type: 'turn', payload: { seat } }); return; }
+        // 이 좌석은 이번 턴에 둘 게 없음 → 아무도 둘 수 없으면 나가리, 아니면 다음 좌석으로
+        if (!s.players.some((_, i) => canAct(s, i))) {
             s.finished = true; s.winnerSeat = null; s.endReason = '나가리'; s.scores = {}; s.players.forEach(p => s.scores[p.id] = 0);
             events.push({ type: 'draw', payload: {} }); return;
         }
-        events.push({ type: 'turn', payload: { seat } }); return;
     }
 }
 
@@ -354,6 +349,11 @@ export const gostopPlugin: GamePlugin = {
             if (cnt < 3 || sameMonth(state, state.table, m).length < 1) return { valid: false, error: '폭탄 불가' };
             return { valid: true };
         }
+        if (action.type === 'FLIP') { // 폭탄 뒤집기탄 사용(자기 차례, 선택적)
+            if (!state.flipOwed || state.flipOwed[seat] <= 0) return { valid: false, error: '뒤집기탄 없음' };
+            if (state.deck.length <= 0) return { valid: false, error: '더미 없음' };
+            return { valid: true };
+        }
         return { valid: false, error: '알 수 없는 액션' };
     },
 
@@ -380,6 +380,19 @@ export const gostopPlugin: GamePlugin = {
         }
 
         const prevScore = (pl as any)._last || 0;
+        if (action.type === 'FLIP') { // 폭탄 뒤집기탄: 더미 1장 뒤집어 판정 1회 후 턴 교대(owed 1 소진은 flipTurn 내부)
+            flipTurn(s, seat, events);
+            if (s.finished) return { newState: s, events };
+            const sc = score(s, pl.cap);
+            if (sc.total >= s.goMin && sc.total > prevScore) {
+                (pl as any)._last = sc.total;
+                if (s.deck.length > 0 || canAct(s, seat)) { s.pending = { kind: 'gostop', seat, total: sc.total }; events.push({ type: 'gostop_choice', playerId: pl.id, payload: { seat, total: sc.total, go: s.go } }); return { newState: s, events }; }
+                settle(s, seat); events.push({ type: 'win', payload: { seat, reason: s.endReason } }); return { newState: s, events };
+            }
+            (pl as any)._last = Math.max(prevScore, sc.total);
+            advance(s, events);
+            return { newState: s, events };
+        }
         if (action.type === 'BOMB') {
             const m = +action.payload.month;
             const three: string[] = pl.hand.filter(x => s.cardMap[x].m === m).slice(0, 3);
@@ -439,6 +452,7 @@ export const gostopPlugin: GamePlugin = {
             mySeat: seat,
             myHand: me ? me.hand.map(id => state.cardMap[id]) : [],
             myScore: sc,
+            myFlipOwed: me && state.flipOwed ? (state.flipOwed[seat] || 0) : 0,
             isMyTurn: state.pending ? state.pending.seat === seat : state.currentTurn === seat,
         };
     },
@@ -450,6 +464,7 @@ export const gostopPlugin: GamePlugin = {
         if (state.pendingFlip) { if (state.pendingFlip.seat === seat) return { type: 'FLIPPICK', payload: {} }; return null; }
         if (state.pending) { if (state.pending.seat === seat) return { type: 'STOP' }; return null; }
         if (state.currentTurn !== seat) return null;
+        if (state.flipOwed && state.flipOwed[seat] > 0 && state.deck.length > 0) return { type: 'FLIP' }; // 뒤집기탄 우선
         const b = bombMonth(state, seat); if (b != null) return { type: 'BOMB', payload: { month: b } };
         const cid = bestPlay(state, seat).cardId; const cc = state.cardMap[cid];
         const shake = state.players[seat].hand.filter(id => state.cardMap[id].m === cc.m).length >= 3 && sameMonth(state, state.table, cc.m).length >= 1;
@@ -463,6 +478,7 @@ export const gostopPlugin: GamePlugin = {
             const goAgain = state.pending.total < 5 && state.deck.length > 6 && Math.random() < 0.55;
             return goAgain ? { type: 'GO' } : { type: 'STOP' };
         }
+        if (state.flipOwed && state.flipOwed[seat] > 0 && state.deck.length > 0) return { type: 'FLIP' }; // 뒤집기탄 우선(싱글 CPU와 동일)
         const b = bombMonth(state, seat); if (b != null) return { type: 'BOMB', payload: { month: b } };
         const cid = bestPlay(state, seat).cardId; const cc = state.cardMap[cid];
         const shake = state.players[seat].hand.filter(id => state.cardMap[id].m === cc.m).length >= 3 && sameMonth(state, state.table, cc.m).length >= 1;
