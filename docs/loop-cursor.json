@@ -16,11 +16,10 @@
     "do-v7 🟡3: 3인 owed 턴순서 미검증 → 다인전 포팅 때 테스트 추가"
   ],
   "usageGate": {
-    "signal": "session_status Context %",
-    "startChunkBelowPct": 60,
-    "smallChunkOnlyPct": [60, 72],
-    "hardStopPct": 72,
-    "note": "쿼터 failover는 cursor가 방어. context %가 다음 초기화 예고 신호."
+    "signal": "scripts/claude-usage.sh --gate (Anthropic OAuth usage 5h 윈도우)",
+    "source": "/home/cocy/.openclaw/workspace/scripts/claude-usage.sh",
+    "rule": "GO(5h<70%)=정상청크 / SLOW(70~90%)=작은청크만+리셋까지 보수 / STOP(>=90% or 7day>=95%)=flush+리셋대기",
+    "note": "Claude Code /usage 탭과 동일 숫자. 리셋 시각(resets_at)까지 나옴. context %는 압축 트리거일 뿐 게이트 아님."
   },
   "updated": "2026-06-17T00:55:00+09:00"
 }
