@@ -3,18 +3,19 @@
   "active": true,
   "loop": "multi-migration",
   "current": {
-    "game": "multiplayer.js-승격",
-    "step": "gostop swap DONE(코드+테스트+커밋) → Reviewer 검토중 → cocy 배포승인 대기",
-    "blockedOn": "review+deploy-approval",
-    "note": "gostop ?relay=do 인라인 startWS→lib MultiplayerWSClient 승격. onOpen 콜백 lib 추가(패리티). multiplayer.js ?v=20260617a 범프. do-v8. games HEAD cc9da1a 미푸시(배포=cocy확인). WS 프로토콜 테스트 9/9, IIFE 구문 OK, 잔존 인라인WS 0."
+    "game": "multiplayer.js-승격(서버측)",
+    "step": "DO 워커 일반화 DONE — room-do.ts gostop 하드코딩→getGame(gameType) registry 선택. 라이브 배포+스모크 검증",
+    "blockedOn": null,
+    "note": "room-do.ts: gostopPlugin 하드코딩 제거→registry getGame/getDefaultConfig. gameType=WS ?g= (미지정→gostop 하위호환). runAI는 getAIAction 없으면 스킵(PvP). lib URL에 &g= 추가, gostop ?v=20260617b. 워커 배포(ver 3f980043)+라이브 WS 스모크: gostop(하위호환)·gomoku(generic) 둘 다 started+state, err 0. tsc 새 에러 0."
   },
   "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
-  "nextDecision": "Reviewer pass + cocy 배포승인 → games push(Pages 자동배포) → 실기기 do-v8 한 판 → reviewed. 그 다음 poker(카드렌더 재활용) 또는 gomoku(순수턴제).",
+  "nextDecision": "서버 generic 완료 → 신규 게임은 클라만 포팅하면 DO/WS 탐. 다음 청크=gomoku 클라 ?relay=do 경로 추가(MultiplayerWSClient, gameType:gomoku) + 실기기. 그 후 connect4(동형).",
   "next": "§승격순서 2~4: (Sonnet) MultiplayerUI→WS 핸드오프 분기 + gostop 인라인 startWS 제거→lib 사용 + Layer2 WS 테스트. (Opus) 리뷰. ⚠️배포/캐시버스트는 cocy 확인 전 금지.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
   "lastCommit": {
-    "games": "cc9da1a (미푸시, ahead 3)",
-    "games-server": "1c25e2f"
+    "games": "(곧 push)",
+    "games-server": "(곧 commit)",
+    "worker": "relay-do-poc ver 3f980043 배포됨"
   },
   "pendingFixes": [
     "do-v7 🟡1: settle 숨김 타이머 매직넘버(500ms) → mpFly 비행 끝 콜백에 묶기",
@@ -27,5 +28,5 @@
     "rule": "GO(5h<70%)=정상청크 / SLOW(70~90%)=작은청크만+리셋까지 보수 / STOP(>=90% or 7day>=95%)=flush+리셋대기",
     "note": "Claude Code /usage 탭과 동일 숫자. 리셋 시각(resets_at)까지 나옴. context %는 압축 트리거일 뿐 게이트 아님."
   },
-  "updated": "2026-06-17T02:30:00+09:00"
+  "updated": "2026-06-17T08:05:00+09:00"
 }
