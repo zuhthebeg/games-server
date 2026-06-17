@@ -111,6 +111,13 @@ export class RoomDO {
       players.push({ id: u, nickname: (tags[1] as string) || u, seat: players.length });
     }
     if (players.length === 0) return;
+    // minPlayers 미달이면 시작 거부 — 1인 게임(gostop/mahjong/blackjack=AI패딩)은 통과,
+    // 2인 PvP(pvp-battle/catan 등)는 상대 접속 전 시작을 막아 'players:Array(1)' 깨진 판 방지.
+    const minP = plugin.minPlayers || 1;
+    if (players.length < minP) {
+      this.broadcast(JSON.stringify({ type: 'start_rejected', reason: 'need_more_players', need: minP, have: players.length }));
+      return;
+    }
 
     // 게임별 기본 config + 클라 전달 config 병합(클라 우선)
     const gameType = (await this.ctx.storage.get<string>('gameType')) || DEFAULT_GAME;
