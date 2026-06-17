@@ -60,8 +60,7 @@ Reviewer 출력(구조화):
 | 게임 | plugin | status | deps | 비고 |
 |---|---|---|---|---|
 | gostop | gostop.ts | **reference (진행중 do-v7)** | — | 안정화 끝나면 승격 기준점 |
-| **multiplayer.js 승격** | lib | todo | gostop reviewed | DO/WS+uid+닉+재접속을 공용 트랜스포트로. 공개 시그니처 유지 |
-| poker | poker.ts | todo | 승격 | 카드 렌더 재활용 |
+| **multiplayer.js 승격** | lib | todo | gostop reviewed | DO/WS+uid+닉+재접속을 공용 트랜스포트로. 공개 시그니처 유지 | poker.ts | todo | 승격 | 카드 렌더 재활용 |
 | mahjong | mahjong.ts | todo | 승격 | 헤더 예약(56px) 주의 |
 | blackjack | blackjack.ts | todo | 승격 | |
 | ppingpae | ppingpae.ts | todo | 승격 | SharedWallet init 확인 |
