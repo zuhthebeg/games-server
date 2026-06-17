@@ -176,7 +176,15 @@ export const connect4Plugin: GamePlugin = {
     getPlayerView(state: Connect4State, playerId: string): any {
         const me = state.players.find(p => p.id === playerId);
         const current = state.players[state.currentPlayerIndex];
+        // 완전정보 게임 → 공개상태 전체 포함(DO 트랜스포트는 view만 싣는다 → 보드까지 있어야 렌더 가능).
         return {
+            board: state.board,
+            currentPlayerIndex: state.currentPlayerIndex,
+            players: state.players,
+            winner: state.winner,
+            winLine: state.winLine,
+            lastMove: state.lastMove,
+            status: state.winner ? 'finished' : 'playing',
             myColor: me?.color,
             isMyTurn: current?.id === playerId && !state.winner
         };
