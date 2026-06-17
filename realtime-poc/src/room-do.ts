@@ -11,7 +11,9 @@
 import { getGame, getDefaultConfig } from '../../functions/games/registry';
 import type { GamePlugin } from '../../functions/games/types';
 
-interface Env {}
+interface Env {
+  COORD: DurableObjectNamespace; // 레지스트리(메트릭/방목록/매칭) 보고용
+}
 
 const DEFAULT_GAME = 'gostop'; // ?g= 미지정 구버전 gostop 클라 하위호환
 const AI_MOVE_DELAY_MS = 850;  // AI 자동수 사이 페이싱 — 순삭 방지(마작/고스톱 등). 한 수 두기 전 대기.
@@ -43,6 +45,9 @@ export class RoomDO {
     const url = new URL(req.url);
     const user = (url.searchParams.get('u') || 'anon').slice(0, 40);
     const nick = (url.searchParams.get('n') || user).slice(0, 24);
+    // 방 id를 경로(/room/:id)에서 캡처해 저장 — 코디네이터 보고에 필요(DO는 자기 이름을 모름).
+    const ridM = url.pathname.match(/\/room\/([A-Za-z0-9_-]{1,64})/);
+    if (ridM && !(await this.ctx.storage.get<string>('roomId'))) await this.ctx.storage.put('roomId', ridM[1]);
     // gameType 고정: 한 방의 정체성. 최초 연결 때 ?g= 로 정해지고 이후 불변.
     const reqGame = (url.searchParams.get('g') || '').slice(0, 32);
     let gameType = await this.ctx.storage.get<string>('gameType');
@@ -71,6 +76,7 @@ export class RoomDO {
     if (live && plugin) server.send(JSON.stringify({ type: 'state', view: plugin.getPlayerView(game, user) }));
     this.broadcast(JSON.stringify({ type: 'presence', event: 'join', user, connections: this.ctx.getWebSockets().length }), server);
     await this.broadcastRoster(); // 로비 명단 갱신(이름+ready)
+    await this.reportToCoord('update'); // 레지스트리에 방 등장/인원 보고
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -123,6 +129,26 @@ export class RoomDO {
       connections: this.ctx.getWebSockets().length,
       started: !!(game && !game.finished),
     }));
+  }
+
+  // 코디네이터(레지스트리)에 방 상태 보고 — best-effort, 실패해도 방 동작엔 영향 없음.
+  // event: 'update'(상태갱신) | 'create'(시작, created++) | 'finish'(종료, finished++) | 'empty'(방 제거)
+  async reportToCoord(event: string): Promise<void> {
+    try {
+      const roomId = await this.ctx.storage.get<string>('roomId');
+      if (!roomId || !this.env?.COORD) return;
+      const gameType = (await this.ctx.storage.get<string>('gameType')) || DEFAULT_GAME;
+      const plugin = getGame(gameType);
+      const game = await this.ctx.storage.get<any>('game');
+      const body = {
+        roomId, gameType, event,
+        players: this.rosterPlayers().length,
+        max: (plugin && plugin.maxPlayers) || 2,
+        started: !!(game && !game.finished),
+      };
+      const stub = this.env.COORD.get(this.env.COORD.idFromName('global'));
+      await stub.fetch('https://coord/report', { method: 'POST', body: JSON.stringify(body) });
+    } catch {}
   }
 
   async handleReady(user: string, ready: boolean): Promise<void> {
@@ -184,6 +210,7 @@ export class RoomDO {
     await this.ctx.storage.put('ready', {}); // 새 판 시작 → ready 초기화(재대결 로비 깨끗하게)
     this.broadcast(JSON.stringify({ type: 'started', players: players.map((p) => p.id) }));
     await this.pushViews(game, plugin);
+    await this.reportToCoord('create'); // 레지스트리: 판 시작(created++ , started=true)
     await this.runAI(game, plugin);
   }
 
@@ -205,6 +232,7 @@ export class RoomDO {
     await this.ctx.storage.put('game', game);
     await this.broadcastEvents(res.events);  // events BEFORE state — client captures DOM coords before re-render
     await this.pushViews(game, plugin);
+    if (plugin.isGameOver(game)) await this.reportToCoord('finish'); // 레지스트리: 판 종료(finished++)
     await this.runAI(game, plugin);
   }
 
@@ -260,6 +288,7 @@ export class RoomDO {
     const map = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
     if (map[user]) { delete map[user]; await this.ctx.storage.put('ready', map); }
     await this.broadcastRoster();
+    await this.reportToCoord('update'); // 레지스트리: 인원 변동 반영
     // 방이 비면 좀비 정리 예약 — ZOMBIE_TTL 후 아무도 안 돌아오면 storage 전체 삭제.
     if (remaining === 0) {
       try { await this.ctx.storage.setAlarm(Date.now() + ZOMBIE_TTL_MS); } catch {}
@@ -270,6 +299,7 @@ export class RoomDO {
   // 그 사이 누가 재접속했으면 fetch()에서 deleteAlarm 했으므로 여기 안 옴.
   async alarm(): Promise<void> {
     if (this.ctx.getWebSockets().length > 0) return; // 누가 돌아옴 → 보존
+    await this.reportToCoord('empty'); // 레지스트리에서 방 제거(deleteAll 전에 roomId 읽어야 함)
     await this.ctx.storage.deleteAll();
   }
 

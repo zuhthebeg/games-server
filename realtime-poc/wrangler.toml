@@ -9,7 +9,16 @@ account_id = "3d0681b782422e56226a0a1df4a0e8b2"
 name = "ROOM"
 class_name = "RoomDO"
 
+# 싱글톤 레지스트리(idFromName('global')) — 어드민 메트릭/방목록/빠른매칭
+[[durable_objects.bindings]]
+name = "COORD"
+class_name = "CoordinatorDO"
+
 # SQLite 백엔드 DO (Workers Free 플랜에서 사용 가능한 유일한 종류)
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CoordinatorDO"]
