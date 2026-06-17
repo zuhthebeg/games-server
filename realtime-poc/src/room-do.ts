@@ -15,6 +15,7 @@ interface Env {}
 
 const DEFAULT_GAME = 'gostop'; // ?g= 미지정 구버전 gostop 클라 하위호환
 const AI_MOVE_DELAY_MS = 850;  // AI 자동수 사이 페이싱 — 순삭 방지(마작/고스톱 등). 한 수 두기 전 대기.
+const ZOMBIE_TTL_MS = 90_000;  // 방이 빈 뒤 이 시간 지나도 아무도 안 오면 storage 정리(좀비방).
 
 export class RoomDO {
   ctx: DurableObjectState;
@@ -57,12 +58,16 @@ export class RoomDO {
     // tags[0]=user id(로스터/뷰 키), tags[1]=표시 닉네임. hibernation 넘어도 유지됨.
     this.ctx.acceptWebSocket(server, [user, nick]);
 
+    // 누군가 들어왔으니 빈 방 정리 예약을 취소.
+    try { await this.ctx.storage.deleteAlarm(); } catch {}
+
     const game = await this.ctx.storage.get<any>('game');
     const live = game && !game.finished; // 끝난 게임은 좀비 — 재시작 대기 상태로 취급(로비 노출)
     server.send(JSON.stringify({ type: 'connected', user, started: !!live, connections: this.ctx.getWebSockets().length }));
     // 재연결: 진행 중이면 본인 시점 상태 즉시 복원(끝난 게임은 복원하지 않음 → 새 판 시작 가능)
     if (live && plugin) server.send(JSON.stringify({ type: 'state', view: plugin.getPlayerView(game, user) }));
     this.broadcast(JSON.stringify({ type: 'presence', event: 'join', user, connections: this.ctx.getWebSockets().length }), server);
+    await this.broadcastRoster(); // 로비 명단 갱신(이름+ready)
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -77,8 +82,45 @@ export class RoomDO {
     }
 
     if (msg?.type === 'profile') return this.handleProfile(user, msg.data);
+    if (msg?.type === 'ready') return this.handleReady(user, !!msg.ready);
+    if (msg?.type === 'roster') return void (await this.broadcastRoster()); // 클라가 명단 새로고침 요청
     if (msg?.type === 'start') return this.handleStart(msg.config);
     if (msg?.type === 'action') return this.handleAction(user, msg.action, ws);
+  }
+
+  // ===== 로비: 명단(roster) + 준비(ready) =====
+  // 현재 연결된 소켓에서 유저 중복 제거(최초 순서=좌석). 끊긴 유저는 자동 제외.
+  rosterPlayers(): { user: string; nick: string }[] {
+    const seen = new Set<string>();
+    const out: { user: string; nick: string }[] = [];
+    for (const s of this.ctx.getWebSockets()) {
+      const tags = this.ctx.getTags(s);
+      const u = tags[0] as string;
+      if (!u || seen.has(u)) continue;
+      seen.add(u);
+      out.push({ user: u, nick: (tags[1] as string) || u });
+    }
+    return out;
+  }
+
+  async broadcastRoster(): Promise<void> {
+    const ready = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
+    const players = this.rosterPlayers().map(p => ({ ...p, ready: !!ready[p.user] }));
+    const game = await this.ctx.storage.get<any>('game');
+    this.broadcast(JSON.stringify({
+      type: 'roster',
+      players,
+      hostUser: players[0]?.user || null, // 좌석0 = 호스트(시작 버튼 권한)
+      connections: this.ctx.getWebSockets().length,
+      started: !!(game && !game.finished),
+    }));
+  }
+
+  async handleReady(user: string, ready: boolean): Promise<void> {
+    const map = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
+    if (ready) map[user] = true; else delete map[user];
+    await this.ctx.storage.put('ready', map);
+    await this.broadcastRoster();
   }
 
   // 플레이어별 프로필(무기 등) 등록 — start 전에 각 클라가 본인 데이터를 올린다.
@@ -130,6 +172,7 @@ export class RoomDO {
     }
     game = plugin.createInitialState(players as any, mergedConfig);
     await this.ctx.storage.put('game', game);
+    await this.ctx.storage.put('ready', {}); // 새 판 시작 → ready 초기화(재대결 로비 깨끗하게)
     this.broadcast(JSON.stringify({ type: 'started', players: players.map((p) => p.id) }));
     await this.pushViews(game, plugin);
     await this.runAI(game, plugin);
@@ -204,6 +247,21 @@ export class RoomDO {
     const user = (this.ctx.getTags(ws)[0] as string) || 'anon';
     const remaining = this.ctx.getWebSockets().filter((s) => s !== ws).length;
     this.broadcast(JSON.stringify({ type: 'presence', event: 'leave', user, connections: remaining }), ws);
+    // 떠난 유저의 ready 해제 + 명단 갱신
+    const map = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
+    if (map[user]) { delete map[user]; await this.ctx.storage.put('ready', map); }
+    await this.broadcastRoster();
+    // 방이 비면 좀비 정리 예약 — ZOMBIE_TTL 후 아무도 안 돌아오면 storage 전체 삭제.
+    if (remaining === 0) {
+      try { await this.ctx.storage.setAlarm(Date.now() + ZOMBIE_TTL_MS); } catch {}
+    }
+  }
+
+  // 빈 방 정리 알람: 예약 시점에 소켓 0이면 방 storage 전체 삭제(게임/프로필/ready/seq/gameType).
+  // 그 사이 누가 재접속했으면 fetch()에서 deleteAlarm 했으므로 여기 안 옴.
+  async alarm(): Promise<void> {
+    if (this.ctx.getWebSockets().length > 0) return; // 누가 돌아옴 → 보존
+    await this.ctx.storage.deleteAll();
   }
 
   broadcast(msg: string, except?: WebSocket): void {
