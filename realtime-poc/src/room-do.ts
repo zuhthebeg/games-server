@@ -76,8 +76,19 @@ export class RoomDO {
       return;
     }
 
+    if (msg?.type === 'profile') return this.handleProfile(user, msg.data);
     if (msg?.type === 'start') return this.handleStart(msg.config);
     if (msg?.type === 'action') return this.handleAction(user, msg.action, ws);
+  }
+
+  // 플레이어별 프로필(무기 등) 등록 — start 전에 각 클라가 본인 데이터를 올린다.
+  // PvP(enhance)처럼 시작 요청자 1명이 모든 플레이어의 데이터를 알 수 없는 경우에 필요.
+  // 다른 게임(gostop 등)은 profile을 안 보내므로 영향 없음(additive).
+  async handleProfile(user: string, data: any): Promise<void> {
+    if (!user || data == null) return;
+    const profiles = (await this.ctx.storage.get<Record<string, any>>('profiles')) || {};
+    profiles[user] = data;
+    await this.ctx.storage.put('profiles', profiles);
   }
 
   async handleStart(config: any): Promise<void> {
@@ -104,6 +115,12 @@ export class RoomDO {
     // 게임별 기본 config + 클라 전달 config 병합(클라 우선)
     const gameType = (await this.ctx.storage.get<string>('gameType')) || DEFAULT_GAME;
     const mergedConfig = { ...(getDefaultConfig(gameType) || {}), ...(config || {}) };
+    // 플레이어별 프로필(무기 등)을 playerData에 병합 — 시작 요청자가 못 채운 상대 데이터 보강.
+    // config.playerData(요청자가 명시한 값)가 있으면 우선, 없으면 등록된 profile 사용.
+    const profiles = (await this.ctx.storage.get<Record<string, any>>('profiles')) || {};
+    if (Object.keys(profiles).length) {
+      mergedConfig.playerData = { ...profiles, ...(mergedConfig.playerData || {}) };
+    }
     game = plugin.createInitialState(players as any, mergedConfig);
     await this.ctx.storage.put('game', game);
     this.broadcast(JSON.stringify({ type: 'started', players: players.map((p) => p.id) }));
