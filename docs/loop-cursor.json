@@ -3,18 +3,18 @@
   "active": true,
   "loop": "multi-migration",
   "current": {
-    "game": "(정리) poker/beattap/rps/number-guess 삭제 완료",
-    "step": "4게임 삭제(클라+서버+목록+sitemap/llms/wallet) 양 repo push. 워커 재배포 ea8b94ba.",
+    "game": "blackjack",
+    "step": "blackjack DO/WS 포팅 DONE — shim 방식 + 브라우저 풀라운드 e2e 검증 + 골드 가드",
     "blockedOn": null,
-    "note": "poker=재작업 예정이라 plugin+registry 제거. beattap/rps/number-guess=클라전용 은퇴. apps.json 30→26. index.html i18n/category 정리. 잔여참조 0 확인."
+    "note": "shim mpUI(getState→{myView:lastView})로 2378줄 무수정 재사용. 서버변경 0(getPlayerView 이미 self-sufficient). 버그2 잡음: (1)startupRoute가 ?room= 보고 URL스트립+REST진입 → relay=do 먼저 라우팅하게 수정 (2)applyMultiWalletSettlement이 실 SharedWallet 골드 변경 → DO는 bankroll 가짜라 골드프린팅 → doClient일때 실지갑 정산 스킵 가드. 브라우저 2탭 e2e: 로비→베팅100→딜링→alice스탠드20·bob블랙잭→딜러자동(19)→정산(BJ 3:2 +150·even +100)→딜러공개. 양탭 동기화 확인."
   },
   "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
-  "nextDecision": "남은 마이그레이션 대상은 전부 private-hand 대형 포팅(gomoku/connect4 같은 단순 완전정보 게임은 소진). pvp-battle=클라 없음(스킵). 후보: blackjack(2378줄,이벤트구동,getPlayerView 이미 self-sufficient=서버변경0) / mahjong(1347줄) / ppingpae(3148) / enhance(8820). 다음=blackjack(가장 대중적 카드게임, 카드렌더 경로 확립).",
-  "next": "blackjack DO 포팅(gostop급 청크): 클라 멀티 플로우 정독(handleMultiGameEvent/seq dedup/베팅/정산오버레이/new_round) → ?relay=do IIFE(WSClient gameType=blackjack, 이벤트구동 배선) → 손패 프라이버시(탭별 view) 브라우저 e2e. 서버 getPlayerView 변경 불필요.",
+  "nextDecision": "카드게임 패턴(shim 재사용)도 확립됨. 남은 대형 포팅: mahjong(1347줄,4인,타일 private) / ppingpae(3148줄,타일멜딩 private) / enhance(8820줄). gostop은 이미 reference. 다음=mahjong 또는 ppingpae(진짜 private hand 케이스 — getPlayerView가 상대 패 가리는지 확인 필요).",
+  "next": "mahjong DO 포팅: shim 패턴 재사용 가능성 높음(멀티가 mpUI.getState/sendAction 기반인지 먼저 확인). 단 진짜 private(상대 손패 숨김) → getPlayerView 정책 + 탭별 view 차이 브라우저 검증 필수. 헤더예약 56px 주의.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
   "lastCommit": {
-    "games": "237b542 (pushed)",
-    "games-server": "b965ed2 (pushed)",
+    "games": "8fae261 (pushed)",
+    "games-server": "(unchanged, blackjack 서버변경 없음)",
     "worker": "relay-do-poc ea8b94ba"
   },
   "pendingFixes": [
@@ -28,17 +28,21 @@
     "rule": "GO(5h<70%)=정상청크 / SLOW(70~90%)=작은청크만+리셋까지 보수 / STOP(>=90% or 7day>=95%)=flush+리셋대기",
     "note": "Claude Code /usage 탭과 동일 숫자. 리셋 시각(resets_at)까지 나옴. context %는 압축 트리거일 뿐 게이트 아님."
   },
-  "updated": "2026-06-17T10:15:00+09:00",
+  "updated": "2026-06-17T10:45:00+09:00",
   "gomokuStatus": "DONE — server+client+browser e2e verified. 실기기 최종확인만 남음(선택). connect4가 동형 패턴으로 다음.",
   "done_games": [
     "gostop(do-v8)",
     "gomoku",
-    "connect4"
+    "connect4",
+    "blackjack"
   ],
   "removed_games": [
     "poker(rebuild)",
     "beattap",
     "rps",
     "number-guess"
+  ],
+  "knownGaps": [
+    "blackjack DO: 서버 bankroll=기본1000(실 SharedWallet gold 미연동). 실골드 연동하려면 DO 로스터에 per-player gold 전달 필요 → 그때 지갑정산 가드 해제."
   ]
 }
