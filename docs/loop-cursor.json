@@ -3,19 +3,19 @@
   "active": true,
   "loop": "multi-migration",
   "current": {
-    "game": "ppingpae",
-    "step": "ppingpae DO/WS 포팅 DONE — shim + 2탭 브라우저 e2e + private hand 검증 + 골드 가드",
+    "game": "enhance(pvp-battle)",
+    "step": "enhance DO/WS 포팅 DONE — shim + 2탭 브라우저 e2e(전투해결) 검증",
     "blockedOn": null,
-    "note": "mahjong과 동일 shim 패턴. mpState.client shim(getRoomState→{gameState:view,myView:view}). gameType=ppingpae. 서버변경0(getPlayerView private). minPlayers2=AI패딩 없음→2탭. 상대=handCount만(스모크+브라우저 누출0). 골드가드 mpState._doMode(3 prize addGold 사이트). 브라우저 2탭: 시작→각자 14패 private(alice≠bob)·게임화면·서버동기화. 커밋 f10b9ed."
+    "note": "enhance/ 클라는 PvP 배틀 UI(gameType=pvp-battle 플러그인). MultiplayerUI 콜백(handleBattleStart/handleBattleEvent)+mpUI.{getClient,sendAction,showResult} 사용 → shim mpUI로 대체. 이벤트가 gameState 운반 → DO state를 handleBattleEvent(state_update,{gameState:view})로 브리지. 종료=winnerId!=null(finished 필드 없음). showResult 미니 모달 shim. 2인전용(AI없음)→2탭. PvP 결과는 클라가 SharedWallet 안건드림→가드 불필요. 브라우저 2탭: 시작→액션버튼3→양쪽 attack→round1→2, alice hp100→99, 턴결과애니. 커밋 f6cae1d."
   },
   "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
-  "nextDecision": "남은 대형: enhance(8820줄) / catan·pingtan(⚠️TRADE 서버권위 승격 필요) / bulletdodge(실시간-전송빈도 검토). 다음=enhance(멀티 구조 shim 가능한지 먼저 확인, 8820줄이라 큰 청크).",
-  "next": "enhance DO 포팅: 멀티가 mpUI/MP.client shim 구조인지 확인 → 가능하면 동일 패턴. private면 getPlayerView 확인. SharedWallet 가드 필수.",
+  "nextDecision": "남은 건 catan/pingtan(거래게임)뿐. ⚠️ TRADE_ACCEPT 서버권위 승격 필요(이중수락 버그) — 단순 shim 포팅이 아니라 서버 plugin에 pendingTrade{open}+첫수락만 성사 로직 추가 후 포팅. 별도 설계 청크. pvp-battle은 enhance 클라로 커버됨(별도 클라 없음).",
+  "next": "catan/pingtan: 먼저 서버 catan.ts에 TRADE 서버권위(첫 수락만 성사) 추가 → 그 다음 클라 shim 포팅. 이중수락 버그 재현/수정 우선.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
   "lastCommit": {
-    "games": "f10b9ed (pushed)",
-    "games-server": "(unchanged)",
-    "worker": "relay-do-poc ea8b94ba"
+    "games": "f6cae1d (pushed)",
+    "games-server": "59eb756 (bulletdodge 삭제, 워커 17456abb)",
+    "worker": "relay-do-poc 17456abb"
   },
   "pendingFixes": [
     "do-v7 🟡1: settle 숨김 타이머 매직넘버(500ms) → mpFly 비행 끝 콜백에 묶기",
@@ -28,7 +28,7 @@
     "rule": "GO(5h<70%)=정상청크 / SLOW(70~90%)=작은청크만+리셋까지 보수 / STOP(>=90% or 7day>=95%)=flush+리셋대기",
     "note": "Claude Code /usage 탭과 동일 숫자. 리셋 시각(resets_at)까지 나옴. context %는 압축 트리거일 뿐 게이트 아님."
   },
-  "updated": "2026-06-17T20:35:00+09:00",
+  "updated": "2026-06-17T21:55:00+09:00",
   "gomokuStatus": "DONE — server+client+browser e2e verified. 실기기 최종확인만 남음(선택). connect4가 동형 패턴으로 다음.",
   "done_games": [
     "gostop(do-v8)",
@@ -36,13 +36,15 @@
     "connect4",
     "blackjack",
     "mahjong",
-    "ppingpae"
+    "ppingpae",
+    "enhance(pvp-battle)"
   ],
   "removed_games": [
     "poker(rebuild)",
     "beattap",
     "rps",
-    "number-guess"
+    "number-guess",
+    "bulletdodge"
   ],
   "knownGaps": [
     "blackjack DO: 서버 bankroll=기본1000(실 SharedWallet gold 미연동). 실골드 연동하려면 DO 로스터에 per-player gold 전달 필요 → 그때 지갑정산 가드 해제."
