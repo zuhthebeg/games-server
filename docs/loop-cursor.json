@@ -3,19 +3,19 @@
   "active": true,
   "loop": "multi-migration",
   "current": {
-    "game": "multiplayer.js-승격(서버측)",
-    "step": "DO 워커 일반화 DONE — room-do.ts gostop 하드코딩→getGame(gameType) registry 선택. 라이브 배포+스모크 검증",
+    "game": "gomoku",
+    "step": "gomoku DO/WS 포팅 DONE — 서버(self-sufficient view)+클라(?relay=do)+브라우저 e2e 검증 완료",
     "blockedOn": null,
-    "note": "room-do.ts: gostopPlugin 하드코딩 제거→registry getGame/getDefaultConfig. gameType=WS ?g= (미지정→gostop 하위호환). runAI는 getAIAction 없으면 스킵(PvP). lib URL에 &g= 추가, gostop ?v=20260617b. 워커 배포(ver 3f980043)+라이브 WS 스모크: gostop(하위호환)·gomoku(generic) 둘 다 started+state, err 0. tsc 새 에러 0."
+    "note": "gomoku.getPlayerView self-sufficient(board포함). 클라 ?relay=do IIFE(공용 WSClient, gameType=gomoku, 최소로비, sendMove DO분기, REST 무영향). 워커 5731985c. 브라우저 2탭 e2e: 로비→시작→225셀 렌더→(5,5)흑 착수→양탭 동기화(moveCount1, 턴→white)→플레이어별 배너 정확. 기존 onTimeout 랜덤자동수는 정상동작."
   },
   "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
-  "nextDecision": "서버 generic 완료 → 신규 게임은 클라만 포팅하면 DO/WS 탐. 다음 청크=gomoku 클라 ?relay=do 경로 추가(MultiplayerWSClient, gameType:gomoku) + 실기기. 그 후 connect4(동형).",
-  "next": "gomoku 클라 DO 경로(?relay=do IIFE): MultiplayerWSClient(gameType:gomoku) 직접 배선 + 최소 로비. ⚠️위험=gomoku 클라는 REST MultiplayerUI state shape(state.gameState.board/players/currentPlayer/winner/status)에 묶임 → DO getPlayerView 뷰와 shape 매칭 확인 필수(서버스모크로 못잡음, 브라우저/실기기 렌더 검증). gomoku 플러그인 getPlayerView 반환형 먼저 확인 후 updateFromState에 맞추거나 어댑터.",
+  "nextDecision": "connect4를 같은 패턴으로(getPlayerView self-sufficient 확인+클라 ?relay=do). gomoku 클라 IIFE를 템플릿으로 복제. 그 후 poker(카드렌더+private hand=getPlayerView 이미 private) / blackjack.",
+  "next": "connect4 DO 포팅: (1) connect4.getPlayerView가 board 포함 self-sufficient인지 확인(아니면 gomoku처럼 확장), (2) 클라 ?relay=do IIFE 복제(gameType=connect4), (3) 브라우저 e2e. Sonnet Maker 적합(패턴 확립됨), Opus 리뷰.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
   "lastCommit": {
-    "games": "1f9e12d (pushed, Pages)",
-    "games-server": "a3b1226 (pushed)",
-    "worker": "relay-do-poc ver 3f980043 배포됨"
+    "games": "92b4e27 (pushed)",
+    "games-server": "7153e9c (pushed)",
+    "worker": "relay-do-poc 5731985c"
   },
   "pendingFixes": [
     "do-v7 🟡1: settle 숨김 타이머 매직넘버(500ms) → mpFly 비행 끝 콜백에 묶기",
@@ -28,5 +28,6 @@
     "rule": "GO(5h<70%)=정상청크 / SLOW(70~90%)=작은청크만+리셋까지 보수 / STOP(>=90% or 7day>=95%)=flush+리셋대기",
     "note": "Claude Code /usage 탭과 동일 숫자. 리셋 시각(resets_at)까지 나옴. context %는 압축 트리거일 뿐 게이트 아님."
   },
-  "updated": "2026-06-17T08:05:00+09:00"
+  "updated": "2026-06-17T09:30:00+09:00",
+  "gomokuStatus": "DONE — server+client+browser e2e verified. 실기기 최종확인만 남음(선택). connect4가 동형 패턴으로 다음."
 }
