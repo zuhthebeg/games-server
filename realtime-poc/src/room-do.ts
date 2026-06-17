@@ -14,6 +14,7 @@ import type { GamePlugin } from '../../functions/games/types';
 interface Env {}
 
 const DEFAULT_GAME = 'gostop'; // ?g= 미지정 구버전 gostop 클라 하위호환
+const AI_MOVE_DELAY_MS = 850;  // AI 자동수 사이 페이싱 — 순삭 방지(마작/고스톱 등). 한 수 두기 전 대기.
 
 export class RoomDO {
   ctx: DurableObjectState;
@@ -138,6 +139,9 @@ export class RoomDO {
     while (guard++ < 60 && !plugin.isGameOver(game)) {
       const turnId = plugin.getCurrentTurn(game);
       if (!turnId || !String(turnId).startsWith('ai-')) break;
+      // AI가 한 수 두기 전 잠깐 대기 → 플레이어가 직전 상태를 볼 수 있게(순삭 방지).
+      // 턴 가드 때문에 이 대기 중 인간 액션은 거절되므로 상태 레이스 없음.
+      await new Promise((r) => setTimeout(r, AI_MOVE_DELAY_MS));
       const aiAction = plugin.getAIAction(game, turnId);
       const v = plugin.validateAction(game, aiAction, turnId);
       if (!v.valid) break;
