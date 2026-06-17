@@ -60,6 +60,9 @@ export class RoomDO {
 
     // 누군가 들어왔으니 빈 방 정리 예약을 취소.
     try { await this.ctx.storage.deleteAlarm(); } catch {}
+    // 호스트 = 이 방에 처음 연결한 유저(=방 생성자). 한 번 정해지면 고정(재접속해도 유지).
+    const curHost = await this.ctx.storage.get<string>('hostUser');
+    if (!curHost) await this.ctx.storage.put('hostUser', user);
 
     const game = await this.ctx.storage.get<any>('game');
     const live = game && !game.finished; // 끝난 게임은 좀비 — 재시작 대기 상태로 취급(로비 노출)
@@ -106,11 +109,17 @@ export class RoomDO {
   async broadcastRoster(): Promise<void> {
     const ready = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
     const players = this.rosterPlayers().map(p => ({ ...p, ready: !!ready[p.user] }));
+    // 호스트 = 방 생성자(저장값). 그 유저가 떠나 더 없으면 현재 첫 유저로 승계+저장.
+    let host = await this.ctx.storage.get<string>('hostUser');
+    if ((!host || !players.find(p => p.user === host)) && players.length) {
+      host = players[0].user;
+      await this.ctx.storage.put('hostUser', host);
+    }
     const game = await this.ctx.storage.get<any>('game');
     this.broadcast(JSON.stringify({
       type: 'roster',
       players,
-      hostUser: players[0]?.user || null, // 좌석0 = 호스트(시작 버튼 권한)
+      hostUser: host || null, // 시작 버튼 권한 = 방 생성자
       connections: this.ctx.getWebSockets().length,
       started: !!(game && !game.finished),
     }));
