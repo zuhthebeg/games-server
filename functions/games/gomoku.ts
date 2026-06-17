@@ -156,7 +156,17 @@ export const gomokuPlugin: GamePlugin = {
 
     getPlayerView(state: GomokuState, playerId: string): any {
         const me = state.players.find(p => p.id === playerId);
+        // 완전정보 게임 → 공개상태 전체를 포함해 self-sufficient하게 반환.
+        // DO 트랜스포트(room-do.ts)는 state 메시지에 getPlayerView만 싣는다 → 보드까지 들어가야 클라가 렌더 가능.
         return {
+            board: state.board,
+            currentPlayer: state.currentPlayer,
+            players: state.players,
+            winner: state.winner,
+            winLine: state.winLine,
+            lastMove: state.lastMove,
+            moveCount: state.moveCount,
+            status: state.winner ? 'finished' : 'playing',
             myColor: me?.color,
             isMyTurn: state.currentPlayer === playerId && !state.winner
         };
