@@ -3,17 +3,17 @@
   "active": true,
   "loop": "multi-migration",
   "current": {
-    "game": "mahjong",
-    "step": "mahjong DO/WS 포팅 DONE — shim + 1인+AI3 브라우저 e2e + private hand 검증 + 골드 가드",
+    "game": "ppingpae",
+    "step": "ppingpae DO/WS 포팅 DONE — shim + 2탭 브라우저 e2e + private hand 검증 + 골드 가드",
     "blockedOn": null,
-    "note": "mahjong MP 레이어(MP.client.{getMyUserId,onEvent,getRoomState,sendAction})를 WSClient shim으로 대체. gameType=mahjong-tw. 서버변경 0(getPlayerView 이미 private+self-sufficient). createInitialState가 빈좌석 ai-* 패딩→runAI 자동플레이→1인+AI3. 진짜 private: 상대=handCount만(타일누출0, 스모크+브라우저 확인). 골드 가드 MP._doMode. 브라우저 e2e: 시작→딜링(내패17)→버림패→내패16·턴진행·claim페이즈·디스카드15·월58·AI 3자동플레이. 커밋 bd70667."
+    "note": "mahjong과 동일 shim 패턴. mpState.client shim(getRoomState→{gameState:view,myView:view}). gameType=ppingpae. 서버변경0(getPlayerView private). minPlayers2=AI패딩 없음→2탭. 상대=handCount만(스모크+브라우저 누출0). 골드가드 mpState._doMode(3 prize addGold 사이트). 브라우저 2탭: 시작→각자 14패 private(alice≠bob)·게임화면·서버동기화. 커밋 f10b9ed."
   },
   "gostopStatus": "DONE — do-v7 reviewed(Claude) + cocy 실기기 확인. 안정화 완료, 승격 기준점.",
-  "nextDecision": "shim 패턴이 카드(blackjack)·타일 private(mahjong)까지 검증됨. 남은 대형: ppingpae(3148줄,타일멜딩 private)·enhance(8820줄). 둘 다 멀티 구조 먼저 확인(MP.client shim 가능한지). gostop/catan(trade)도 남았으나 gostop=reference, catan=TRADE 서버권위 승격 필요(⚠️). 다음=ppingpae.",
-  "next": "ppingpae DO 포팅: 멀티가 MP.client/mpUI shim 가능한 구조인지 확인 → 가능하면 동일 패턴. private hand면 getPlayerView 정책 확인. SharedWallet 정산 가드 잊지 말것(blackjack/mahjong 선례).",
+  "nextDecision": "남은 대형: enhance(8820줄) / catan·pingtan(⚠️TRADE 서버권위 승격 필요) / bulletdodge(실시간-전송빈도 검토). 다음=enhance(멀티 구조 shim 가능한지 먼저 확인, 8820줄이라 큰 청크).",
+  "next": "enhance DO 포팅: 멀티가 mpUI/MP.client shim 구조인지 확인 → 가능하면 동일 패턴. private면 getPlayerView 확인. SharedWallet 가드 필수.",
   "modelPolicy": "단순/기계적=Sonnet Maker(Agent model:sonnet, 별도 사용량 레인), 판단/blast-radius/리뷰=Opus. SLOW여도 Sonnet으로 전진. 게이트: scripts/claude-usage.sh.",
   "lastCommit": {
-    "games": "bd70667 (pushed)",
+    "games": "f10b9ed (pushed)",
     "games-server": "(unchanged)",
     "worker": "relay-do-poc ea8b94ba"
   },
@@ -28,14 +28,15 @@
     "rule": "GO(5h<70%)=정상청크 / SLOW(70~90%)=작은청크만+리셋까지 보수 / STOP(>=90% or 7day>=95%)=flush+리셋대기",
     "note": "Claude Code /usage 탭과 동일 숫자. 리셋 시각(resets_at)까지 나옴. context %는 압축 트리거일 뿐 게이트 아님."
   },
-  "updated": "2026-06-17T17:10:00+09:00",
+  "updated": "2026-06-17T20:35:00+09:00",
   "gomokuStatus": "DONE — server+client+browser e2e verified. 실기기 최종확인만 남음(선택). connect4가 동형 패턴으로 다음.",
   "done_games": [
     "gostop(do-v8)",
     "gomoku",
     "connect4",
     "blackjack",
-    "mahjong"
+    "mahjong",
+    "ppingpae"
   ],
   "removed_games": [
     "poker(rebuild)",
