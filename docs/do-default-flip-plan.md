@@ -19,16 +19,18 @@
 
 권장 = 공용 판단 함수로 중앙화 (lib/multiplayer.js 정적 메서드 또는 lib/relay-mode.js):
 ```js
-// DO 기본 ON 여부. 명시 URL > 전역 킬스위치 > 게임별 기본.
-MultiplayerWSClient.relayDefaultOn = function () {
+// DO 기본 여부. 우선순위: 명시 URL > 전역 킬스위치 > 게임별 기본(doDefault).
+// 구현됨: lib/multiplayer.js (커밋 시점 default OFF=기존 opt-in과 동일, 채택해도 무영향).
+MultiplayerWSClient.relayDefaultOn = function (doDefault) {
   var p = new URLSearchParams(location.search).get('relay');
   if (p === 'rest') return false;   // 명시 탈출 (양방향 escape hatch)
   if (p === 'do')   return true;    // 명시 진입 (테스트/공유링크)
   try { if (localStorage.getItem('relayKill') === '1') return false; } catch (e) {} // 전역 킬스위치
-  return true;                      // 기본 ON
+  return doDefault === true;        // 게임별 기본 (미지정=false)
 };
 ```
-- **게임별 플립** = 그 게임의 게이트를 `if (relay === 'do')` → `if (MultiplayerWSClient.relayDefaultOn())` 로 교체 (한 줄).
+- **2단계 채택(안전)**: ① 게임 게이트를 `relayDefaultOn(false)`로 교체 = 동작 100% 동일(헬퍼만 도입). ② 검증 후 `relayDefaultOn(true)`로 플립 = DO 기본. 도입과 플립을 분리.
+- **게임별 플립** = 그 게임의 게이트를 `if (relay === 'do')` → `if (MultiplayerWSClient.relayDefaultOn(true))` 로 교체 (한 줄).
 - **전역 즉시 롤백** = `localStorage.relayKill='1'` (어드민 토글로 노출 가능) 또는 URL `?relay=rest`.
 - **게임별 롤백** = 그 게임 한 줄만 `=== 'do'`로 되돌림.
 - lib 채택 시 `?v=` 캐시버스트 필수.
