@@ -126,10 +126,12 @@ export class RoomDO {
 
   // ===== 로비: 명단(roster) + 준비(ready) =====
   // 현재 연결된 소켓에서 유저 중복 제거(최초 순서=좌석). 끊긴 유저는 자동 제외.
-  rosterPlayers(): { user: string; nick: string }[] {
+  // exceptWs: webSocketClose 중인 소켓(아직 getWebSockets()에 남아있음)을 명단에서 제외 — 나간 사람이 대기실에 잔류하는 버그 방지.
+  rosterPlayers(exceptWs?: WebSocket): { user: string; nick: string }[] {
     const seen = new Set<string>();
     const out: { user: string; nick: string }[] = [];
     for (const s of this.ctx.getWebSockets()) {
+      if (exceptWs && s === exceptWs) continue;
       const tags = this.ctx.getTags(s);
       const u = tags[0] as string;
       if (!u || seen.has(u)) continue;
@@ -139,9 +141,9 @@ export class RoomDO {
     return out;
   }
 
-  async broadcastRoster(): Promise<void> {
+  async broadcastRoster(exceptWs?: WebSocket): Promise<void> {
     const ready = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
-    const players = this.rosterPlayers().map(p => ({ ...p, ready: !!ready[p.user] }));
+    const players = this.rosterPlayers(exceptWs).map(p => ({ ...p, ready: !!ready[p.user] }));
     // 호스트 = 방 생성자(저장값). 그 유저가 떠나 더 없으면 현재 첫 유저로 승계+저장.
     let host = await this.ctx.storage.get<string>('hostUser');
     if ((!host || !players.find(p => p.user === host)) && players.length) {
@@ -149,18 +151,19 @@ export class RoomDO {
       await this.ctx.storage.put('hostUser', host);
     }
     const game = await this.ctx.storage.get<any>('game');
+    const connections = this.ctx.getWebSockets().filter((s) => !(exceptWs && s === exceptWs)).length;
     this.broadcast(JSON.stringify({
       type: 'roster',
       players,
       hostUser: host || null, // 시작 버튼 권한 = 방 생성자
-      connections: this.ctx.getWebSockets().length,
+      connections,
       started: !!(game && !game.finished),
-    }));
+    }), exceptWs);
   }
 
   // 코디네이터(레지스트리)에 방 상태 보고 — best-effort, 실패해도 방 동작엔 영향 없음.
   // event: 'update'(상태갱신) | 'create'(시작, created++) | 'finish'(종료, finished++) | 'empty'(방 제거)
-  async reportToCoord(event: string): Promise<void> {
+  async reportToCoord(event: string, exceptWs?: WebSocket): Promise<void> {
     try {
       const roomId = await this.ctx.storage.get<string>('roomId');
       if (!roomId || !this.env?.COORD) return;
@@ -169,7 +172,7 @@ export class RoomDO {
       const game = await this.ctx.storage.get<any>('game');
       const body = {
         roomId, gameType, event,
-        players: this.rosterPlayers().length,
+        players: this.rosterPlayers(exceptWs).length,
         max: (plugin && plugin.maxPlayers) || 2,
         started: !!(game && !game.finished),
       };
@@ -366,11 +369,11 @@ export class RoomDO {
       return;
     }
 
-    // 떠난 유저의 ready 해제 + 명단 갱신
+    // 떠난 유저의 ready 해제 + 명단 갱신. 닫히는 소켓(ws)은 아직 getWebSockets()에 남아있으므로 제외.
     const map = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
     if (map[user]) { delete map[user]; await this.ctx.storage.put('ready', map); }
-    await this.broadcastRoster();
-    await this.reportToCoord('update'); // 레지스트리: 인원 변동 반영
+    await this.broadcastRoster(ws);
+    await this.reportToCoord('update', ws); // 레지스트리: 인원 변동 반영
     // 방이 비면 좀비 정리 예약 — ZOMBIE_TTL 후 아무도 안 돌아오면 storage 전체 삭제.
     if (remaining === 0) {
       try { await this.ctx.storage.setAlarm(Date.now() + ZOMBIE_TTL_MS); } catch {}
