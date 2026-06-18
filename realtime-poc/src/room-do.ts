@@ -180,7 +180,10 @@ export class RoomDO {
   async handleStart(config: any): Promise<void> {
     const plugin = await this.getPlugin();
     let game = await this.ctx.storage.get<any>('game');
-    if (game && !game.finished) {
+    // 게임 종료 판정: finished 플래그(gostop/mahjong/ppingpae·relay 센티넬) 또는
+    // plugin.isGameOver(gomoku/connect4 등 finished 미설정 PvP). relay는 센티넬만 신뢰(서버에 실상태 없음).
+    const gameOver = !!(game && (game.finished || (!plugin.relay && typeof plugin.isGameOver === 'function' && plugin.isGameOver(game))));
+    if (game && !gameOver) {
       // 진행 중 재시작 요청(멱등): relay는 저장된 스냅샷 resync, 서버권위는 뷰 재전송.
       if (plugin.relay) {
         const snap = await this.ctx.storage.get<any>('lastSnapshot');
@@ -192,7 +195,7 @@ export class RoomDO {
       return;
     }
     // 끝난 게임(좀비)이 남아 있으면 새 판으로 리셋. seq도 초기화.
-    if (game && game.finished) { await this.ctx.storage.delete('game'); await this.ctx.storage.put('seq', 0); game = null; }
+    if (gameOver) { await this.ctx.storage.delete('game'); await this.ctx.storage.put('seq', 0); game = null; }
     // 접속한 소켓들로 로스터 구성(유저 중복 제거, 좌석=순서)
     const seen = new Set<string>();
     const players: { id: string; nickname: string; seat: number }[] = [];
@@ -327,6 +330,24 @@ export class RoomDO {
     const user = (this.ctx.getTags(ws)[0] as string) || 'anon';
     const remaining = this.ctx.getWebSockets().filter((s) => s !== ws).length;
     this.broadcast(JSON.stringify({ type: 'presence', event: 'leave', user, connections: remaining }), ws);
+
+    // ===== 호스트가 로비(시작 전)에서 이탈 → 방 폭파 (relay 게임 전용) =====
+    // 방 = 호스트 소유. 게임 시작 전 호스트가 나가면 방을 살려두지 않는다(좀비방/스냅샷 resync 크래시 방지).
+    // 남은 인원에게 room_closed를 알려 로비로 되돌리고 storage 전체를 비운다.
+    // 진행 중(started) 이탈은 폭파하지 않고 broadcastRoster가 호스트를 승계한다(블립 내성).
+    // ※ 좀비 스냅샷 문제는 relay(catan/pingtan)에만 있다. 서버권위 게임 7종의 기존 로비/승계 동선은 건드리지 않는다.
+    const gameType = (await this.ctx.storage.get<string>('gameType')) || DEFAULT_GAME;
+    const isRelay = !!getGame(gameType)?.relay;
+    const game = await this.ctx.storage.get<any>('game');
+    const started = !!(game && !game.finished);
+    const host = await this.ctx.storage.get<string>('hostUser');
+    if (isRelay && user === host && !started) {
+      this.broadcast(JSON.stringify({ type: 'room_closed', reason: 'host_left' }), ws);
+      await this.reportToCoord('empty'); // deleteAll 전에 roomId를 읽어 레지스트리에서 제거
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+
     // 떠난 유저의 ready 해제 + 명단 갱신
     const map = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
     if (map[user]) { delete map[user]; await this.ctx.storage.put('ready', map); }
