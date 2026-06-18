@@ -141,3 +141,24 @@ export const catanPlugin: GamePlugin = {
 6. 호스트 마이그레이션 별도 평가 → 필요시 후속 청크.
 
 각 단계 git commit → push → (워커는 wrangler) deploy 순서 준수. 배포 전 git HEAD = 배포대상 확인.
+
+---
+
+## 7. 구현 현황 (2026-06-18)
+
+### ✅ 서버 (1~3단계) — 완료·검증·배포
+- `GamePlugin.relay?: boolean` 추가, `catanPlugin.relay = true`.
+- `room-do.ts` relay 분기 3곳: handleStart(센티넬 game, createInitialState 스킵) / handleAction(validate·apply 스킵, full action+seq 브로드캐스트, lastSnapshot 저장) / connect·재시작(lastSnapshot resync).
+- 배포: `relay-do-poc` ver `6949cebc`. 커밋 `3a8015a` push 완료.
+- **스모크 PASS** (`_smoke.js`, 3소켓): start 브로드캐스트 / 액션 seq 단조 [1,2] / `__snapshot`+full action 보존 / 재접속 `__resync` 최신 스냅샷(afterRoad) 전달.
+
+### 🔬 클라 통합 — de-risk 완료, 빌드 남음
+**호재:** pingtan `onMpEvent`의 `action` 분기(index.html:8449)가 이미 `event.data`에서 액션을 꺼냄 → DO 이벤트 형태 `{seq,type:'action',data:action}`와 **무수정 호환**. `__resync`는 미지 타입→`applyGameAction` 실패→`recoverFromActionSnapshot(__snapshot)` 자연 발동. **인게임 동기화는 사실상 공짜.**
+
+**남은 일(별도 청크):** pingtan 멀티 진입이 **이중 로비**다 —
+1. `MultiplayerUI`(mpLobbyContainer, index.html:9077) — 주 진입. 내부에서 자체 REST `MultiplayerClient` 생성 + 맵선택기를 waiting-room에 주입. REST 깊게 결합.
+2. 인앱 `room-lobby` 스크린(createRoom/joinRoom/startGame, 8964~).
+
+WSClient는 생성 시 roomId 고정이라 REST MultiplayerUI 밑에 못 끼움(7게임이 별도 DO 로비 깐 이유). 권장 설계: **`PingtanDOClient` 어댑터** — MultiplayerWSClient를 감싸 pingtan이 기대하는 표면(`createRoom/joinRoom/startListening/setReady/startGame/getMyUserId/leaveRoom/getRoomState/isInRoom/onStateChange(room)/onEvent`)을 그대로 노출. roster→room 매핑(`{id,players:[{id,nickname,isHost,isReady}],status}`), `onStarted`→synthetic `game_started`. **엔진 10k줄·onMpEvent 무수정**, `ensureMp()`에서 `?relay=do`면 어댑터 선택. + WSClient에 `setReady()` additive 추가. MultiplayerUI 주 진입도 DO 모드 분기 필요(맵선택 보존).
+
+리스크: 라이브 REST 멀티 깨지 않게 additive로만. 2탭 브라우저 검증 필수(cocy 워크플로우).
