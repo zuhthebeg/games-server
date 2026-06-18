@@ -104,6 +104,24 @@ export class RoomDO {
     if (msg?.type === 'roster') return void (await this.broadcastRoster()); // 클라가 명단 새로고침 요청
     if (msg?.type === 'start') return this.handleStart(msg.config);
     if (msg?.type === 'action') return this.handleAction(user, msg.action, ws);
+    if (msg?.type === 'leave') return this.handleLeave(user, ws);
+  }
+
+  // 의도적 '나가기'(튕김과 구분). 진행 중이면 남은 사람에게 opponent_left 통보 + 좀비 game 정리.
+  // 클라가 ws.close() 직전에 {type:'leave'}를 보낸다. 단순 close(튕김)는 이 경로를 안 타므로 재접속 동선 유지.
+  async handleLeave(user: string, ws: WebSocket): Promise<void> {
+    const plugin = await this.getPlugin();
+    const game = await this.ctx.storage.get<any>('game');
+    const over = !!(game && (game.finished || (!plugin.relay && typeof plugin.isGameOver === 'function' && plugin.isGameOver(game))));
+    if (game && !over && !plugin.relay) {
+      // 진행 중 의도적 이탈 → 남은 사람에게 종료 통보 + 판 정리(재대결/새매칭 깨끗하게)
+      this.broadcast(JSON.stringify({ type: 'event', event: { type: 'opponent_left', user } }), ws);
+      await this.ctx.storage.delete('game');
+      await this.ctx.storage.put('seq', 0);
+      const map = (await this.ctx.storage.get<Record<string, boolean>>('ready')) || {};
+      if (Object.keys(map).length) await this.ctx.storage.put('ready', {});
+    }
+    try { ws.close(); } catch {}
   }
 
   // ===== 로비: 명단(roster) + 준비(ready) =====
