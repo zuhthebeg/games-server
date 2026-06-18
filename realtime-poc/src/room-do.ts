@@ -73,7 +73,16 @@ export class RoomDO {
     const live = game && !game.finished; // 끝난 게임은 좀비 — 재시작 대기 상태로 취급(로비 노출)
     server.send(JSON.stringify({ type: 'connected', user, started: !!live, connections: this.ctx.getWebSockets().length }));
     // 재연결: 진행 중이면 본인 시점 상태 즉시 복원(끝난 게임은 복원하지 않음 → 새 판 시작 가능)
-    if (live && plugin) server.send(JSON.stringify({ type: 'state', view: plugin.getPlayerView(game, user) }));
+    if (live && plugin?.relay) {
+      // relay 게임: 서버에 게임상태 없음 → 저장된 호스트 스냅샷으로 resync(있을 때만).
+      const snap = await this.ctx.storage.get<any>('lastSnapshot');
+      if (snap != null) {
+        const seq = (await this.ctx.storage.get<number>('seq')) ?? 0;
+        server.send(JSON.stringify({ type: 'event', event: { seq, type: 'action', data: { type: '__resync', __snapshot: snap } } }));
+      }
+    } else if (live && plugin) {
+      server.send(JSON.stringify({ type: 'state', view: plugin.getPlayerView(game, user) }));
+    }
     this.broadcast(JSON.stringify({ type: 'presence', event: 'join', user, connections: this.ctx.getWebSockets().length }), server);
     await this.broadcastRoster(); // 로비 명단 갱신(이름+ready)
     await this.reportToCoord('update'); // 레지스트리에 방 등장/인원 보고
@@ -172,7 +181,14 @@ export class RoomDO {
     const plugin = await this.getPlugin();
     let game = await this.ctx.storage.get<any>('game');
     if (game && !game.finished) {
-      await this.pushViews(game, plugin); // 진행 중 → 뷰만 재전송(멱등)
+      // 진행 중 재시작 요청(멱등): relay는 저장된 스냅샷 resync, 서버권위는 뷰 재전송.
+      if (plugin.relay) {
+        const snap = await this.ctx.storage.get<any>('lastSnapshot');
+        const seq = (await this.ctx.storage.get<number>('seq')) ?? 0;
+        if (snap != null) this.broadcast(JSON.stringify({ type: 'event', event: { seq, type: 'action', data: { type: '__resync', __snapshot: snap } } }));
+      } else {
+        await this.pushViews(game, plugin);
+      }
       return;
     }
     // 끝난 게임(좀비)이 남아 있으면 새 판으로 리셋. seq도 초기화.
@@ -193,6 +209,20 @@ export class RoomDO {
     const minP = plugin.minPlayers || 1;
     if (players.length < minP) {
       this.broadcast(JSON.stringify({ type: 'start_rejected', reason: 'need_more_players', need: minP, have: players.length }));
+      return;
+    }
+
+    // ===== relay 게임(catan/pingtan): 서버는 게임상태를 만들지 않는다 =====
+    // 센티넬 game만 저장(live/roster의 started 플래그용). 초기상태는 호스트 클라가 빌드해
+    // 첫 action(+__snapshot)으로 브로드캐스트 → 나머지 클라가 스냅샷으로 동기화.
+    if (plugin.relay) {
+      await this.ctx.storage.put('seq', 0);
+      await this.ctx.storage.delete('lastSnapshot');
+      game = { relay: true, finished: false, players: players.map((p) => ({ id: p.id, nickname: p.nickname, seat: p.seat })) };
+      await this.ctx.storage.put('game', game);
+      await this.ctx.storage.put('ready', {});
+      this.broadcast(JSON.stringify({ type: 'started', players: players.map((p) => p.id), config: config || {} }));
+      await this.reportToCoord('create');
       return;
     }
 
@@ -219,6 +249,17 @@ export class RoomDO {
     let game = await this.ctx.storage.get<any>('game');
     if (!game) {
       ws.send(JSON.stringify({ type: 'error', error: '게임 미시작' }));
+      return;
+    }
+    // ===== relay 게임: 룰 실행 없이 액션 통째를 순서대로 브로드캐스트 =====
+    // 클라가 로컬 권위로 적용한 결과(+__snapshot)를 그대로 중계. relay.cocy.io 이벤트 형태와 일치.
+    if (plugin.relay) {
+      let seq = (await this.ctx.storage.get<number>('seq')) ?? 0;
+      seq += 1;
+      await this.ctx.storage.put('seq', seq);
+      if (action && action.__snapshot != null) await this.ctx.storage.put('lastSnapshot', action.__snapshot); // 재접속 resync용
+      // sender 포함 전체 브로드캐스트 — 수신측 dedup(actionId/seq)은 클라가 담당.
+      this.broadcast(JSON.stringify({ type: 'event', event: { seq, type: 'action', data: action } }));
       return;
     }
     const v = plugin.validateAction(game, action, user);

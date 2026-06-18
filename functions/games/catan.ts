@@ -458,6 +458,7 @@ function checkWinner(state: CatanState): string | null {
 export const catanPlugin: GamePlugin = {
     id: 'catan',
     name: '카탄',
+    relay: true, // host-authoritative — DO는 plugin 실행 안 하고 클라 액션(+__snapshot)만 순서대로 relay
     minPlayers: 2,
     maxPlayers: 4,
 
