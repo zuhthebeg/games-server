@@ -205,9 +205,11 @@ export class RoomDO {
     }
     if (players.length === 0) return;
     // minPlayers 미달이면 시작 거부 — 1인 게임(gostop/mahjong/blackjack=AI패딩)은 통과,
-    // 2인 PvP(pvp-battle/catan 등)는 상대 접속 전 시작을 막아 'players:Array(1)' 깨진 판 방지.
+    // 2인 PvP(pvp-battle 등)는 상대 접속 전 시작을 막아 'players:Array(1)' 깨진 판 방지.
+    // ※ relay 게임(catan/pingtan)은 AI를 호스트 클라가 채우므로 DO는 소켓 수만으론 판단 못 함 →
+    //    minPlayers 게이트를 스킵하고 호스트 클라의 시작 판단(AI 포함 canStart)을 신뢰한다.
     const minP = plugin.minPlayers || 1;
-    if (players.length < minP) {
+    if (!plugin.relay && players.length < minP) {
       this.broadcast(JSON.stringify({ type: 'start_rejected', reason: 'need_more_players', need: minP, have: players.length }));
       return;
     }
