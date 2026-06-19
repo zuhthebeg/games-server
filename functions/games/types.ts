@@ -50,6 +50,8 @@ export interface GamePlugin {
     name: string;           // "텍사스 홀덤", "우노"
     minPlayers: number;
     maxPlayers: number;
+    /** AI 자동수 사이 페이싱(ms) 오버라이드. 없으면 전역 기본값. */
+    aiMoveDelayMs?: number;
     /** true면 host-authoritative relay 게임(catan/pingtan). DO가 plugin 룰을 실행하지 않고
      *  클라가 보낸 액션(+__snapshot)을 순서대로 통째 브로드캐스트만 함. 미선언=서버권위(기본). */
     relay?: boolean;

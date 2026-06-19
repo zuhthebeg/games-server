@@ -292,6 +292,7 @@ export const gostopPlugin: GamePlugin = {
     name: '맞고 (화투)',
     minPlayers: 1,
     maxPlayers: 4,
+    aiMoveDelayMs: 1500,   // AI 페이싱 — 천천히 내고 뒤집도록(맞고 체감 속도)
 
     createInitialState(players: Player[], config?: any): GostopState {
         const deckCards = shuffle(buildDeck());

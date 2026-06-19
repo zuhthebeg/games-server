@@ -312,7 +312,8 @@ export class RoomDO {
       if (!turnId || !String(turnId).startsWith('ai-')) break;
       // AI가 한 수 두기 전 잠깐 대기 → 플레이어가 직전 상태를 볼 수 있게(순삭 방지).
       // 턴 가드 때문에 이 대기 중 인간 액션은 거절되므로 상태 레이스 없음.
-      await new Promise((r) => setTimeout(r, AI_MOVE_DELAY_MS));
+      // 게임별 페이싱 오버라이드(plugin.aiMoveDelayMs) 우선 — 예: gostop 느리게.
+      await new Promise((r) => setTimeout(r, (plugin as any).aiMoveDelayMs || AI_MOVE_DELAY_MS));
       const aiAction = plugin.getAIAction(game, turnId);
       const v = plugin.validateAction(game, aiAction, turnId);
       if (!v.valid) break;
