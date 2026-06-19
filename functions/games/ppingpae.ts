@@ -471,27 +471,46 @@ export const ppingpaePlugin: GamePlugin = {
     getAIAction(state: PpingpaeState, playerId: string): GameAction {
         const player = state.players.find(p => p.id === playerId);
         if (!player) return { type: 'PASS' };
-        const melds = findAiMelds(player.handIds, state.tileMap, state.config.initialMeldScore, player.hasInitialMeld);
-        if (!melds || !melds.length) return { type: 'PASS' };   // 낼 게 없으면 드로우
-        const used = new Set(melds.flat());
+        const tm = state.tileMap;
         const orderMeld = (ids: string[]) => [...ids].sort((a, b) => {
-            const ta = state.tileMap[a], tb = state.tileMap[b];
+            const ta = tm[a], tb = tm[b];
             const ja = ta.isJoker ? 1 : 0, jb = tb.isJoker ? 1 : 0;
             if (ja !== jb) return ja - jb;                              // 조커는 뒤로
             if (ta.number !== tb.number) return ta.number - tb.number;  // 런: 숫자 오름차순
             return String(ta.color).localeCompare(String(tb.color));    // 그룹: 색 순
         });
-        const newBoard = state.board
-            .map(g => ({ gid: g.gid, tileIds: [...g.tileIds] }))      // 기존 보드 유지(gid는 applyAction이 재할당)
-            .concat(melds.map((ids, i) => ({ gid: 900000 + i, tileIds: orderMeld(ids) })));
+        const newBoard = state.board.map(g => ({ gid: g.gid, tileIds: [...g.tileIds] }));
+        const used = new Set<string>();
+        const remain = () => player.handIds.filter(id => !used.has(id));
+
+        // 1) 출전 후: 기존 보드 그룹에 손패를 한 장씩 붙여 확장(붙여도 유효한 세트면). 손패 소진에 유리.
+        if (player.hasInitialMeld) {
+            let ext = true;
+            while (ext) {
+                ext = false;
+                for (const g of newBoard) {
+                    for (const id of remain()) {
+                        if (isValidSet([...g.tileIds, id].map(t => tm[t]))) { g.tileIds.push(id); used.add(id); ext = true; break; }
+                    }
+                    if (ext) break;
+                }
+            }
+        }
+
+        // 2) 남은 손패에서 새 세트를 가능한 만큼(전부) 찾아 등록. 초기 출전이면 합계>=30 충족 시에만.
+        const melds = findAiMelds(remain(), tm, state.config.initialMeldScore, player.hasInitialMeld);
+        if (melds) for (const ids of melds) { ids.forEach(id => used.add(id)); newBoard.push({ gid: 900000 + newBoard.length, tileIds: ids }); }
+
+        if (used.size === 0) return { type: 'PASS' };   // 낼 게 없으면 드로우
+        for (const g of newBoard) g.tileIds = orderMeld(g.tileIds);   // 확장된 그룹 포함 정렬
         const newHand = player.handIds.filter(id => !used.has(id));
         return { type: 'COMPLETE_TURN', payload: { board: newBoard, handIds: newHand } };
     },
 };
 
-// AI 멜드 탐색: 손패에서 서로 겹치지 않는 유효 세트를 그리디로 고른다.
-// 초기 출전 전이면 낸 타일 합계 >= minScore(보통 30)여야 하고, 출전 후면 한 턴에 한 세트씩.
-// 워커 CPU 보호: 후보는 크기 3~4 부분집합만(런/그룹 대부분 커버).
+// AI 멜드 탐색: 손패에서 서로 겹치지 않는 유효 세트를 그리디(고점수 우선)로 가능한 만큼 고른다.
+// 초기 출전 전이면 낸 타일 합계 >= minScore(보통 30) 충족 시에만 반환. 출전 후면 찾은 세트 전부.
+// 후보는 크기 3~5 부분집합(런/그룹 커버, 워커 CPU 보호).
 function findAiMelds(
     handIds: string[],
     tileMap: Record<string, PpingpaeTile>,
@@ -508,7 +527,7 @@ function findAiMelds(
                 valids.push({ ids: [...chosen], score });
             }
         }
-        if (chosen.length >= 4) return;
+        if (chosen.length >= 5) return;   // 후보 최대 5장(런 5까지 — 고점수 초기 출전에 유리)
         for (let i = start; i < n; i++) { chosen.push(handIds[i]); rec(i + 1, chosen); chosen.pop(); }
     };
     rec(0, []);
@@ -521,9 +540,7 @@ function findAiMelds(
         if (v.ids.some(id => usedIds.has(id))) continue;
         v.ids.forEach(id => usedIds.add(id));
         picked.push(v.ids);
-        total += v.score;
-        if (hasInitial) break;          // 출전 후엔 한 세트만(턴 페이싱)
-        if (total >= minScore) break;   // 초기 출전 점수 충족
+        total += v.score;   // 겹치지 않는 세트는 전부 집음(턴당 가능한 만큼 던짐)
     }
     if (hasInitial) return picked.length ? picked : null;
     return total >= minScore ? picked : null;
