@@ -313,24 +313,37 @@ export class RoomDO {
   }
 
   // 빈 좌석(ai-*)이 현재 행동자면 DO가 자동 플레이. getAIAction 없는 PvP 게임은 스킵. 무한루프 방지 가드.
-  async runAI(game: any, plugin: GamePlugin): Promise<void> {
+  // 동시성 주의: 베팅 단계는 턴 순서가 없어 대기(await) 중 인간 베팅이 storage를 갱신한다.
+  //   → 루프가 메모리에 든 옛 game을 쓰면 인간 베팅을 덮어써(클로버) 영원히 "대기중"이 된다.
+  //   해결: (1) 재진입 락으로 동시 루프 1개만, (2) 매 반복마다 storage에서 game을 새로 읽어 최신 상태로 판단.
+  async runAI(_game: any, plugin: GamePlugin): Promise<void> {
     if (typeof plugin.getAIAction !== 'function') return; // PvP 게임(gomoku/connect4 등) — AI 자동플레이 없음
-    let guard = 0;
-    while (guard++ < 60 && !plugin.isGameOver(game)) {
-      const turnId = plugin.getCurrentTurn(game);
-      if (!turnId || !String(turnId).startsWith('ai-')) break;
-      // AI가 한 수 두기 전 잠깐 대기 → 플레이어가 직전 상태를 볼 수 있게(순삭 방지).
-      // 턴 가드 때문에 이 대기 중 인간 액션은 거절되므로 상태 레이스 없음.
-      // 게임별 페이싱 오버라이드(plugin.aiMoveDelayMs) 우선 — 예: gostop 느리게.
-      await new Promise((r) => setTimeout(r, (plugin as any).aiMoveDelayMs || AI_MOVE_DELAY_MS));
-      const aiAction = plugin.getAIAction(game, turnId);
-      const v = plugin.validateAction(game, aiAction, turnId);
-      if (!v.valid) break;
-      const res = plugin.applyAction(game, aiAction, turnId);
-      game = res.newState;
-      await this.ctx.storage.put('game', game);
-      await this.broadcastEvents(res.events);  // events BEFORE state
-      await this.pushViews(game, plugin);
+    if ((this as any)._aiRunning) return;                 // 재진입 방지 — 이미 도는 루프가 최신 상태를 처리
+    (this as any)._aiRunning = true;
+    try {
+      let guard = 0;
+      while (guard++ < 60) {
+        let game = await this.ctx.storage.get<any>('game');   // 항상 최신 상태로 판단(인간 베팅 반영)
+        if (!game || plugin.isGameOver(game)) break;
+        const turnId = plugin.getCurrentTurn(game);
+        if (!turnId || !String(turnId).startsWith('ai-')) break;
+        // AI가 한 수 두기 전 잠깐 대기 → 플레이어가 직전 상태를 볼 수 있게(순삭 방지). 게임별 페이싱(aiMoveDelayMs) 우선.
+        await new Promise((r) => setTimeout(r, (plugin as any).aiMoveDelayMs || AI_MOVE_DELAY_MS));
+        // 대기 중 상태가 바뀌었을 수 있으니 다시 읽어 같은 턴인지 확인.
+        game = await this.ctx.storage.get<any>('game');
+        if (!game || plugin.isGameOver(game)) break;
+        const turnNow = plugin.getCurrentTurn(game);
+        if (turnNow !== turnId) { if (turnNow && String(turnNow).startsWith('ai-')) continue; break; }
+        const aiAction = plugin.getAIAction(game, turnId);
+        const v = plugin.validateAction(game, aiAction, turnId);
+        if (!v.valid) break;
+        const res = plugin.applyAction(game, aiAction, turnId);
+        await this.ctx.storage.put('game', res.newState);
+        await this.broadcastEvents(res.events);  // events BEFORE state
+        await this.pushViews(res.newState, plugin);
+      }
+    } finally {
+      (this as any)._aiRunning = false;
     }
   }
 
