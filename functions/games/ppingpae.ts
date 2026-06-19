@@ -472,13 +472,33 @@ export const ppingpaePlugin: GamePlugin = {
         const player = state.players.find(p => p.id === playerId);
         if (!player) return { type: 'PASS' };
         const tm = state.tileMap;
-        const orderMeld = (ids: string[]) => [...ids].sort((a, b) => {
-            const ta = tm[a], tb = tm[b];
-            const ja = ta.isJoker ? 1 : 0, jb = tb.isJoker ? 1 : 0;
-            if (ja !== jb) return ja - jb;                              // 조커는 뒤로
-            if (ta.number !== tb.number) return ta.number - tb.number;  // 런: 숫자 오름차순
-            return String(ta.color).localeCompare(String(tb.color));    // 그룹: 색 순
-        });
+        // 클라 orderTilesForSet와 동일: 런이면 조커를 빈 숫자 자리(갭)에 채워 정렬, 그룹이면 조커 뒤+색순.
+        const colorOrder: Record<string, number> = { black: 0, red: 1, blue: 2, orange: 3, joker: 4 };
+        const orderMeld = (ids: string[]): string[] => {
+            const tiles = ids.map(id => tm[id]);
+            if (isValidRun(tiles)) {
+                const real = tiles.filter(t => !t.isJoker);
+                if (real.length === 0) return ids;
+                const jokerIds = ids.filter(id => tm[id].isJoker);
+                const n = tiles.length;
+                const minNum = Math.min(...real.map(t => t.number));
+                const s = Math.min(minNum, 14 - n);   // 시작점: 갭을 조커가 우선 메우고 나머진 오른쪽 확장
+                const realByNum = new Map<number, string>();
+                for (const id of ids) { const t = tm[id]; if (!t.isJoker && !realByNum.has(t.number)) realByNum.set(t.number, id); }
+                const result: string[] = new Array(n);
+                let jk = 0;
+                for (let i = 0; i < n; i++) {
+                    const rid = realByNum.get(s + i);
+                    result[i] = rid !== undefined ? rid : jokerIds[jk++];
+                }
+                return result;
+            }
+            return [...ids].sort((a, b) => {     // 그룹
+                const ta = tm[a], tb = tm[b];
+                if (ta.isJoker !== tb.isJoker) return ta.isJoker ? 1 : -1;
+                return (colorOrder[ta.color] ?? 9) - (colorOrder[tb.color] ?? 9) || ta.number - tb.number;
+            });
+        };
         const newBoard = state.board.map(g => ({ gid: g.gid, tileIds: [...g.tileIds] }));
         const used = new Set<string>();
         const remain = () => player.handIds.filter(id => !used.has(id));
