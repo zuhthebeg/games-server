@@ -299,8 +299,10 @@ export const gostopPlugin: GamePlugin = {
         const cardMap: Record<string, Card> = {};
         deckCards.forEach(c => cardMap[c.id] = c);
         const ids = deckCards.map(c => c.id);
-        // 빈 좌석 ai-* 로 채움(서버 자동 플레이). want = max(접속자, config.seats|2)
-        const want = Math.min(4, Math.max(players.length, (config?.seats | 0) || 2));
+        // 빈 좌석 AI 패딩은 '빈자리 채움'(fillAI) 시작일 때만(선택 인원 seats까지). 일반 시작은 들어온 사람들로만.
+        const want = config?.fillAI
+            ? Math.min(4, Math.max(players.length, (config?.seats | 0) || 2))
+            : players.length;
         const allP: { id: string; nickname: string; seat: number }[] = players.map((p, i) => ({ id: p.id, nickname: p.nickname, seat: i }));
         for (let seat = players.length; seat < want; seat++) allP.push({ id: `ai-${seat}`, nickname: `🤖 봇${seat}`, seat });
         const N = allP.length;
