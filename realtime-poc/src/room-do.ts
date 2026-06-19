@@ -288,9 +288,9 @@ export class RoomDO {
       this.broadcast(JSON.stringify({ type: 'event', event: { seq, type: 'action', data: action } }));
       return;
     }
-    // 리액션(이모트) 등 상태 무변경 액션 — 서버권위 게임(ppingpae/mahjong 등)도 통째 브로드캐스트해
-    // 전 클라가 보게 한다. (applyAction의 빈 events라 기존엔 발신자만 보였음)
-    if (action && action.type === 'REACTION_EMOTE') {
+    // 리액션(이모트)·턴 미리보기(상대 작업 실시간 공유) 등 상태 무변경 액션 — 서버권위 게임도 통째
+    // 브로드캐스트해 전 클라가 보게 한다. 룰/상태 변경 없음(view 갱신 X). TURN_PREVIEW는 발신측 작업 중 보드.
+    if (action && (action.type === 'REACTION_EMOTE' || action.type === 'TURN_PREVIEW')) {
       let rseq = (await this.ctx.storage.get<number>('seq')) ?? 0;
       rseq += 1;
       await this.ctx.storage.put('seq', rseq);
