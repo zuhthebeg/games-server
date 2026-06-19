@@ -344,7 +344,7 @@ export const blackjackPlugin: GamePlugin = {
             currentHandIndex: 0,
             config: {
                 minBet: config?.minBet ?? 10,
-                maxBet: config?.maxBet ?? 10000,
+                maxBet: config?.maxBet ?? Number.MAX_SAFE_INTEGER,   // 상한 사실상 없음 → 하프/올인은 보유칩(bankroll)이 한계
             },
         };
     },
