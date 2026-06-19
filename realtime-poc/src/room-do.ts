@@ -22,10 +22,21 @@ const ZOMBIE_TTL_MS = 90_000;  // 방이 빈 뒤 이 시간 지나도 아무도 
 export class RoomDO {
   ctx: DurableObjectState;
   env: Env;
+  // 게임 상태 변경 직렬화용 뮤텍스. DO는 단일 스레드지만 await 지점에서 메시지가 인터리브된다.
+  //   → 두 인간의 베팅(또는 인간 베팅 vs AI 루프)이 storage의 옛 game을 읽어 서로 덮어쓰면
+  //     ready 플래그가 사라져 "전원 ready"가 영원히 안 됨(=딜 안 됨). 모든 상태변경을 이 체인으로 직렬화.
+  private _chain: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
     this.env = env;
+  }
+
+  // 직렬 실행: read-modify-write 전체를 한 번에 하나만 돌게 한다(클로버 방지).
+  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this._chain.then(fn, fn);
+    this._chain = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   // 이 방의 gameType → plugin. storage에 고정된 값 우선, 없으면 기본(gostop).
@@ -102,7 +113,7 @@ export class RoomDO {
     if (msg?.type === 'profile') return this.handleProfile(user, msg.data);
     if (msg?.type === 'ready') return this.handleReady(user, !!msg.ready);
     if (msg?.type === 'roster') return void (await this.broadcastRoster()); // 클라가 명단 새로고침 요청
-    if (msg?.type === 'start') return this.handleStart(msg.config);
+    if (msg?.type === 'start') return void this.exclusive(() => this.handleStart(msg.config));
     if (msg?.type === 'action') return this.handleAction(user, msg.action, ws);
     if (msg?.type === 'leave') return this.handleLeave(user, ws);
   }
@@ -297,53 +308,54 @@ export class RoomDO {
       this.broadcast(JSON.stringify({ type: 'event', event: { seq: rseq, type: 'action', data: action } }));
       return;
     }
-    const v = plugin.validateAction(game, action, user);
-    if (!v.valid) {
-      // 턴 가드 등 거절 — 발신자에게만 (상태 변경 0)
-      ws.send(JSON.stringify({ type: 'error', error: v.error || 'invalid', action }));
-      return;
-    }
-    const res = plugin.applyAction(game, action, user);
-    game = res.newState;
-    await this.ctx.storage.put('game', game);
-    await this.broadcastEvents(res.events);  // events BEFORE state — client captures DOM coords before re-render
-    await this.pushViews(game, plugin);
-    if (plugin.isGameOver(game)) await this.reportToCoord('finish'); // 레지스트리: 판 종료(finished++)
-    await this.runAI(game, plugin);
+    // ===== 상태 변경 경로: 직렬화(read-modify-write 클로버 방지) =====
+    await this.exclusive(async () => {
+      const g = await this.ctx.storage.get<any>('game');   // 락 안에서 최신 상태 재조회
+      if (!g) return;
+      const v = plugin.validateAction(g, action, user);
+      if (!v.valid) {
+        // 턴 가드 등 거절 — 발신자에게만 (상태 변경 0)
+        ws.send(JSON.stringify({ type: 'error', error: v.error || 'invalid', action }));
+        return;
+      }
+      const res = plugin.applyAction(g, action, user);
+      await this.ctx.storage.put('game', res.newState);
+      await this.broadcastEvents(res.events);  // events BEFORE state — client captures DOM coords before re-render
+      await this.pushViews(res.newState, plugin);
+      if (plugin.isGameOver(res.newState)) await this.reportToCoord('finish'); // 레지스트리: 판 종료(finished++)
+      await this.runAI(res.newState, plugin);
+    });
   }
 
-  // 빈 좌석(ai-*)이 현재 행동자면 DO가 자동 플레이. getAIAction 없는 PvP 게임은 스킵. 무한루프 방지 가드.
-  // 동시성 주의: 베팅 단계는 턴 순서가 없어 대기(await) 중 인간 베팅이 storage를 갱신한다.
-  //   → 루프가 메모리에 든 옛 game을 쓰면 인간 베팅을 덮어써(클로버) 영원히 "대기중"이 된다.
-  //   해결: (1) 재진입 락으로 동시 루프 1개만, (2) 매 반복마다 storage에서 game을 새로 읽어 최신 상태로 판단.
+  // 빈 좌석(ai-*)이 현재 행동자면 DO가 자동 플레이. getAIAction 없는 PvP 게임은 스킵.
+  // 항상 exclusive() 안에서만 호출된다(handleStart/handleAction) → 상태변경 직렬화 보장(별도 재진입 락 불필요).
+  // 매 반복 storage에서 game을 새로 읽어 최신 상태로 판단. 베팅(동시·순서무관)은 즉시 처리,
+  // 카드 플레이 등 '보여줄' 수는 페이싱(aiMoveDelayMs) 후 재확인.
   async runAI(_game: any, plugin: GamePlugin): Promise<void> {
     if (typeof plugin.getAIAction !== 'function') return; // PvP 게임(gomoku/connect4 등) — AI 자동플레이 없음
-    if ((this as any)._aiRunning) return;                 // 재진입 방지 — 이미 도는 루프가 최신 상태를 처리
-    (this as any)._aiRunning = true;
-    try {
-      let guard = 0;
-      while (guard++ < 60) {
-        let game = await this.ctx.storage.get<any>('game');   // 항상 최신 상태로 판단(인간 베팅 반영)
-        if (!game || plugin.isGameOver(game)) break;
-        const turnId = plugin.getCurrentTurn(game);
-        if (!turnId || !String(turnId).startsWith('ai-')) break;
-        // AI가 한 수 두기 전 잠깐 대기 → 플레이어가 직전 상태를 볼 수 있게(순삭 방지). 게임별 페이싱(aiMoveDelayMs) 우선.
-        await new Promise((r) => setTimeout(r, (plugin as any).aiMoveDelayMs || AI_MOVE_DELAY_MS));
-        // 대기 중 상태가 바뀌었을 수 있으니 다시 읽어 같은 턴인지 확인.
+    let guard = 0;
+    while (guard++ < 80) {
+      let game = await this.ctx.storage.get<any>('game');
+      if (!game || plugin.isGameOver(game)) break;
+      const turnId = plugin.getCurrentTurn(game);
+      if (!turnId || !String(turnId).startsWith('ai-')) break;
+      let aiAction = plugin.getAIAction(game, turnId);
+      // 베팅은 페이싱 없이 즉시(딜 지연 방지). 그 외(플레이)는 대기 후 상태 재확인.
+      const delayMs = aiAction?.type === 'bet' ? 0 : ((plugin as any).aiMoveDelayMs || AI_MOVE_DELAY_MS);
+      if (delayMs) {
+        await new Promise((r) => setTimeout(r, delayMs));
         game = await this.ctx.storage.get<any>('game');
         if (!game || plugin.isGameOver(game)) break;
         const turnNow = plugin.getCurrentTurn(game);
         if (turnNow !== turnId) { if (turnNow && String(turnNow).startsWith('ai-')) continue; break; }
-        const aiAction = plugin.getAIAction(game, turnId);
-        const v = plugin.validateAction(game, aiAction, turnId);
-        if (!v.valid) break;
-        const res = plugin.applyAction(game, aiAction, turnId);
-        await this.ctx.storage.put('game', res.newState);
-        await this.broadcastEvents(res.events);  // events BEFORE state
-        await this.pushViews(res.newState, plugin);
+        aiAction = plugin.getAIAction(game, turnId);
       }
-    } finally {
-      (this as any)._aiRunning = false;
+      const v = plugin.validateAction(game, aiAction, turnId);
+      if (!v.valid) break;
+      const res = plugin.applyAction(game, aiAction, turnId);
+      await this.ctx.storage.put('game', res.newState);
+      await this.broadcastEvents(res.events);  // events BEFORE state
+      await this.pushViews(res.newState, plugin);
     }
   }
 

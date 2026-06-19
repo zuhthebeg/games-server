@@ -316,8 +316,10 @@ export const blackjackPlugin: GamePlugin = {
             const g = pd[id]?.gold ?? config?.gold?.[id] ?? config?.startingGold ?? 1000;
             return Number(g);
         };
-        // 빈 좌석을 ai-* 봇으로 패딩(테이블 채우기). want = max(접속자, config.seats), 최대 6.
-        const want = Math.min(6, Math.max(sortedPlayers.length, (Number(config?.seats) | 0) || sortedPlayers.length));
+        // 빈 좌석 AI 패딩은 '빈자리 채움'(fillAI) 시작일 때만. 일반 시작은 들어온 사람들로만.
+        const want = config?.fillAI
+            ? Math.min(6, Math.max(sortedPlayers.length, (Number(config?.seats) | 0) || sortedPlayers.length))
+            : sortedPlayers.length;
         const seated: { id: string; nickname: string; seat: number }[] =
             sortedPlayers.map((p, i) => ({ id: p.id, nickname: p.nickname, seat: i }));
         for (let s = seated.length; s < want; s++) seated.push({ id: `ai-${s}`, nickname: `🤖 봇${s}`, seat: s });
