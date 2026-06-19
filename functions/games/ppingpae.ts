@@ -281,7 +281,7 @@ function endByStalemate(state: PpingpaeState): void {
 export const ppingpaePlugin: GamePlugin = {
     id: 'ppingpae',
     name: '삥패',
-    minPlayers: 2,
+    minPlayers: 1,
     maxPlayers: 4,
 
     createInitialState(players: Player[], config?: any): PpingpaeState {
@@ -293,8 +293,16 @@ export const ppingpaePlugin: GamePlugin = {
         const initialMeldScore = config?.initialMeldScore ?? 30;
         const timeLimit = config?.timeLimit ?? 60;
 
+        // 빈 좌석 ai-* 로 채움(서버 자동 플레이=getAIAction). want = max(접속자, config.seats), 최대 4.
+        const want = Math.min(4, Math.max(players.length, (Number(config?.seats) | 0) || players.length));
+        const allP: { id: string; nickname: string; seat: number }[] =
+            players.map((p, i) => ({ id: p.id, nickname: p.nickname, seat: i }));
+        for (let seat = players.length; seat < want; seat++) {
+            allP.push({ id: `ai-${seat}`, nickname: `🤖 봇${seat + 1}`, seat });
+        }
+
         const orderedPool = pool.map(t => t.id);
-        const dealtPlayers: PpingpaePlayer[] = players.map((p) => ({
+        const dealtPlayers: PpingpaePlayer[] = allP.map((p) => ({
             id: p.id,
             nickname: p.nickname,
             seat: p.seat,
