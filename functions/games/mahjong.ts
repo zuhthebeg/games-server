@@ -256,8 +256,10 @@ function advanceToDraw(state: MJState, fromSeat: number): void {
 function kanReplace(state: MJState, seat: number): void {
     const p = state.players[seat]; state.flags.isRinshan = true;
     if (state.wall.length > 0) {
-        p.hand.push(state.wall.shift()!);
-        processFlowers(state, seat); // 보충패가 연속 화패여도 모두 처리
+        const rt = state.wall.shift()!;
+        p.hand.push(rt);
+        state.lastDraw = rt;        // 보충패 = 마지막 드로우 → 클라가 맨 오른쪽에 따로 표시
+        processFlowers(state, seat); // 보충패가 연속 화패여도 모두 처리(화패면 lastDraw가 손패에 없어 표시 생략)
         p.hand = sortHand(p.hand);
     }
 }
@@ -344,6 +346,7 @@ export const mahjongPlugin: GamePlugin = {
     name: '대만 마작',
     minPlayers: 1,
     maxPlayers: 4,
+    aiMoveDelayMs: 1400,   // CPU 턴 페이싱 — 한 수 따라가게 천천히
 
     createInitialState(players: Player[], config?: any): MJState {
         const wall = shuffle(buildWall());
@@ -440,7 +443,7 @@ export const mahjongPlugin: GamePlugin = {
                 const kt = action.payload.kanType;
                 if (kt === 'an') { const tile = canAnKan(p.hand)[0]; p.hand = p.hand.filter(t => t !== tile); p.melds.push({ type: 'ankan', tiles: [tile, tile, tile, tile], from: seat }); }
                 else { const addK = p.melds.filter(m => m.type === 'pon').map(m => m.tiles[0]).filter(t => p.hand.includes(t)); const tile = addK[0]; const mi = p.melds.findIndex(m => m.type === 'pon' && m.tiles[0] === tile); if (mi >= 0) { p.melds[mi].type = 'addkan'; p.melds[mi].tiles.push(tile); } const i = p.hand.indexOf(tile); if (i >= 0) p.hand.splice(i, 1); }
-                kanReplace(newState, seat); newState.lastDraw = null;
+                kanReplace(newState, seat);   // 보충패를 lastDraw로 노출(클라 표시용) — null 처리 제거
                 events.push({ type: 'kan', playerId, payload: { kanType: kt } });
                 return { newState, events };
             }
