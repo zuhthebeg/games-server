@@ -309,7 +309,13 @@ export const blackjackPlugin: GamePlugin = {
 
     createInitialState(players: Player[], config?: any): BlackjackState {
         const sortedPlayers = [...players].sort((a, b) => a.seat - b.seat);
-        const configuredGold = config?.gold || {};
+        // 실골드는 sendProfile → mergedConfig.playerData[id].gold 로 들어온다(room-do). config.gold는 폴백.
+        const pd = config?.playerData || {};
+        const goldFor = (id: string): number => {
+            if (id.startsWith('ai-')) return Number(config?.aiStartingGold ?? 5000);  // AI 봇 넉넉히(파산 잦으면 테이블 빔)
+            const g = pd[id]?.gold ?? config?.gold?.[id] ?? config?.startingGold ?? 1000;
+            return Number(g);
+        };
         // 빈 좌석을 ai-* 봇으로 패딩(테이블 채우기). want = max(접속자, config.seats), 최대 6.
         const want = Math.min(6, Math.max(sortedPlayers.length, (Number(config?.seats) | 0) || sortedPlayers.length));
         const seated: { id: string; nickname: string; seat: number }[] =
@@ -323,7 +329,7 @@ export const blackjackPlugin: GamePlugin = {
                 seat: p.seat,
                 hands: [],
                 bet: 0,
-                bankroll: Math.max(0, Math.floor(Number(configuredGold[p.id] ?? config?.startingGold ?? 1000))),
+                bankroll: Math.max(0, Math.floor(goldFor(p.id))),
                 bankrupt: false,
                 totalWinnings: 0,
                 streak: 0,
