@@ -474,9 +474,16 @@ export const ppingpaePlugin: GamePlugin = {
         const melds = findAiMelds(player.handIds, state.tileMap, state.config.initialMeldScore, player.hasInitialMeld);
         if (!melds || !melds.length) return { type: 'PASS' };   // 낼 게 없으면 드로우
         const used = new Set(melds.flat());
+        const orderMeld = (ids: string[]) => [...ids].sort((a, b) => {
+            const ta = state.tileMap[a], tb = state.tileMap[b];
+            const ja = ta.isJoker ? 1 : 0, jb = tb.isJoker ? 1 : 0;
+            if (ja !== jb) return ja - jb;                              // 조커는 뒤로
+            if (ta.number !== tb.number) return ta.number - tb.number;  // 런: 숫자 오름차순
+            return String(ta.color).localeCompare(String(tb.color));    // 그룹: 색 순
+        });
         const newBoard = state.board
             .map(g => ({ gid: g.gid, tileIds: [...g.tileIds] }))      // 기존 보드 유지(gid는 applyAction이 재할당)
-            .concat(melds.map((ids, i) => ({ gid: 900000 + i, tileIds: ids })));
+            .concat(melds.map((ids, i) => ({ gid: 900000 + i, tileIds: orderMeld(ids) })));
         const newHand = player.handIds.filter(id => !used.has(id));
         return { type: 'COMPLETE_TURN', payload: { board: newBoard, handIds: newHand } };
     },
