@@ -468,8 +468,56 @@ export const ppingpaePlugin: GamePlugin = {
         return { type: 'PASS' };
     },
 
-    getAIAction(state: PpingpaeState, _playerId: string): GameAction {
-        // Simple AI: always pass (draw a tile)
-        return { type: 'PASS' };
+    getAIAction(state: PpingpaeState, playerId: string): GameAction {
+        const player = state.players.find(p => p.id === playerId);
+        if (!player) return { type: 'PASS' };
+        const melds = findAiMelds(player.handIds, state.tileMap, state.config.initialMeldScore, player.hasInitialMeld);
+        if (!melds || !melds.length) return { type: 'PASS' };   // 낼 게 없으면 드로우
+        const used = new Set(melds.flat());
+        const newBoard = state.board
+            .map(g => ({ gid: g.gid, tileIds: [...g.tileIds] }))      // 기존 보드 유지(gid는 applyAction이 재할당)
+            .concat(melds.map((ids, i) => ({ gid: 900000 + i, tileIds: ids })));
+        const newHand = player.handIds.filter(id => !used.has(id));
+        return { type: 'COMPLETE_TURN', payload: { board: newBoard, handIds: newHand } };
     },
 };
+
+// AI 멜드 탐색: 손패에서 서로 겹치지 않는 유효 세트를 그리디로 고른다.
+// 초기 출전 전이면 낸 타일 합계 >= minScore(보통 30)여야 하고, 출전 후면 한 턴에 한 세트씩.
+// 워커 CPU 보호: 후보는 크기 3~4 부분집합만(런/그룹 대부분 커버).
+function findAiMelds(
+    handIds: string[],
+    tileMap: Record<string, PpingpaeTile>,
+    minScore: number,
+    hasInitial: boolean,
+): string[][] | null {
+    const valids: { ids: string[]; score: number }[] = [];
+    const n = handIds.length;
+    const rec = (start: number, chosen: string[]) => {
+        if (chosen.length >= 3) {
+            const tiles = chosen.map(id => tileMap[id]);
+            if (isValidSet(tiles)) {
+                const score = tiles.reduce((s, t) => s + (t && !t.isJoker ? t.number : 0), 0);
+                valids.push({ ids: [...chosen], score });
+            }
+        }
+        if (chosen.length >= 4) return;
+        for (let i = start; i < n; i++) { chosen.push(handIds[i]); rec(i + 1, chosen); chosen.pop(); }
+    };
+    rec(0, []);
+    if (!valids.length) return null;
+    valids.sort((a, b) => b.score - a.score);   // 높은 점수 세트 우선
+    const usedIds = new Set<string>();
+    const picked: string[][] = [];
+    let total = 0;
+    for (const v of valids) {
+        if (v.ids.some(id => usedIds.has(id))) continue;
+        v.ids.forEach(id => usedIds.add(id));
+        picked.push(v.ids);
+        total += v.score;
+        if (hasInitial) break;          // 출전 후엔 한 세트만(턴 페이싱)
+        if (total >= minScore) break;   // 초기 출전 점수 충족
+    }
+    if (hasInitial) return picked.length ? picked : null;
+    return total >= minScore ? picked : null;
+}
