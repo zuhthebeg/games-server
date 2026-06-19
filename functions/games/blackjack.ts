@@ -310,9 +310,14 @@ export const blackjackPlugin: GamePlugin = {
     createInitialState(players: Player[], config?: any): BlackjackState {
         const sortedPlayers = [...players].sort((a, b) => a.seat - b.seat);
         const configuredGold = config?.gold || {};
+        // 빈 좌석을 ai-* 봇으로 패딩(테이블 채우기). want = max(접속자, config.seats), 최대 6.
+        const want = Math.min(6, Math.max(sortedPlayers.length, (Number(config?.seats) | 0) || sortedPlayers.length));
+        const seated: { id: string; nickname: string; seat: number }[] =
+            sortedPlayers.map((p, i) => ({ id: p.id, nickname: p.nickname, seat: i }));
+        for (let s = seated.length; s < want; s++) seated.push({ id: `ai-${s}`, nickname: `🤖 봇${s}`, seat: s });
 
         return {
-            players: sortedPlayers.map((p) => ({
+            players: seated.map((p) => ({
                 id: p.id,
                 nickname: p.nickname,
                 seat: p.seat,
@@ -587,8 +592,31 @@ export const blackjackPlugin: GamePlugin = {
     },
 
     getCurrentTurn(state: BlackjackState): string | null {
+        // 베팅 단계: 순서 없음. 아직 안 낸 AI를 반환해 runAI가 자동 베팅시킴(사람은 UI로).
+        if (state.phase === 'betting') {
+            const ai = state.players.find(p => p.id.startsWith('ai-') && !p.ready && !p.bankrupt && p.bankroll > 0);
+            return ai ? ai.id : null;
+        }
         if (state.phase !== 'playing') return null;
         return state.players[state.currentPlayerIndex]?.id || null;
+    },
+
+    // AI 봇: 베팅=보유 내 랜덤 소액 / 플레이=기본 전략(17 미만 또는 소프트17 이하 Hit, 그 외 Stand).
+    getAIAction(state: BlackjackState, playerId: string): GameAction {
+        const player = state.players.find(p => p.id === playerId);
+        if (!player) return { type: 'stand' };
+        if (state.phase === 'betting') {
+            const minB = state.config.minBet, maxB = state.config.maxBet;
+            let amt = minB * (1 + Math.floor(Math.random() * 4));   // minBet의 1~4배
+            amt = Math.floor(Math.max(minB, Math.min(maxB, player.bankroll, amt)));
+            if (amt > player.bankroll) amt = Math.floor(player.bankroll);
+            return { type: 'bet', payload: { amount: amt } } as GameAction;
+        }
+        const hand = player.hands[state.currentHandIndex] || player.hands[0];
+        if (!hand) return { type: 'stand' };
+        const v = getHandValue(hand.cards);
+        if (v.total < 17 || (v.soft && v.total <= 17)) return { type: 'hit' };
+        return { type: 'stand' };
     },
 
     isGameOver(state: BlackjackState): boolean {
