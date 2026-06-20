@@ -76,7 +76,7 @@ registerGame({ ...catanPlugin, id: 'pingtan', name: '삥탄' }, {});
 registerGame(catanPlugin, {});
 registerGame(enhanceGame, {});
 registerGame(pvpBattlePlugin, {});
-registerGame(blackjackPlugin, { minBet: 10, maxBet: 10000 });
+registerGame(blackjackPlugin, { minBet: 10, maxBet: Number.MAX_SAFE_INTEGER }); // 상한 없음 — 서버가 bankroll(보유골드)로 과베팅 차단(blackjack.ts:371)
 registerGame(ppingpaePlugin, { timeLimit: 60, initialHandSize: 14, initialMeldScore: 30 });
 registerGame(mahjongPlugin, { timeLimit: 20, bet: 100000 });
 registerGame(gostopPlugin, { timeLimit: 30, bet: 1 });
