@@ -165,7 +165,9 @@ function resolvePlay(s: GostopState, seat: number, handIds: string[], bomb: bool
     }
 
     const willEmpty = (s.table.length - captured.length) === 0 && captured.length > 0;
-    const canSteal = s.deck.length > 0;
+    // 피뺏기(쪽/쓸/따닥/뻑쓸이/폭탄)는 '마지막 차례'에서만 막힌다(정통룰). 덱이 0이어도 손패 남은 사람이 있으면
+    // 게임이 계속되므로 발동. 진짜 마지막 한 수(덱0 + 전원 손패0)에서만 못 뺏음.
+    const canSteal = s.deck.length > 0 || s.players.some(p => p.hand.length > 0);
     let steals = 0; const stags: string[] = []; const stolen: string[] = [];
     const others = s.players.map((_, i) => i).filter(i => i !== seat);
     if (!ppuk) {
@@ -297,7 +299,8 @@ function flipTurn(s: GostopState, seat: number, events: GameEvent[]) {
     if (willEmpty) steals++;
     captured.forEach(id => removeFromTable(s, id));
     const others = s.players.map((_, i) => i).filter(i => i !== seat);
-    if (s.deck.length > 0) for (let i = 0; i < steals; i++) for (const o of others) stealPi(s, o, seat);
+    const canSteal = s.deck.length > 0 || s.players.some(p => p.hand.length > 0); // 마지막 차례에서만 못 뺏음
+    if (canSteal) for (let i = 0; i < steals; i++) for (const o of others) stealPi(s, o, seat);
     pl.cap.push(...captured);
     if (s.flipOwed) s.flipOwed[seat]--;
     events.push({ type: 'flip_turn', playerId: pl.id, payload: { seat, flipId, captured, flipCard: s.cardMap[flipId] } });
