@@ -7,7 +7,7 @@
     "deploy": "wrangler pages deploy ./dist",
     "db:local": "wrangler d1 execute games-relay-db --local --file=./schema.sql",
     "db:prod": "wrangler d1 execute games-relay-db --file=./schema.sql",
-    "test": "node tests/gostop-fullgame-e2e.test.cjs && node tests/gostop-bomb-turn.test.cjs && node tests/gostop-do-transport.test.cjs",
+    "test": "node tests/gostop-fullgame-e2e.test.cjs && node tests/gostop-bomb-turn.test.cjs && node tests/gostop-do-transport.test.cjs && node tests/gostop-gwangsell-4p.test.cjs",
     "test:gostop": "node tests/gostop-fullgame-e2e.test.cjs",
     "test:gostop-do": "node tests/gostop-do-transport.test.cjs"
   },

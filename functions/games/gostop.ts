@@ -16,15 +16,20 @@
 import type { GamePlugin, Player, GameAction, ValidationResult, ActionResult, GameResult, GameEvent } from './types';
 
 const GO_MIN = 7;
+const GWANG_SELL_PT = 2; // 광팔이 위로금: 빠진 사람 광 1장당 점수(통상 2~3점 중 보수적 2점)
 
 interface Card { id: string; m: number; role: string; gwang: boolean; bigwang: boolean; godori: boolean; tti: string | null; ssangpi: boolean; file: string; }
-interface GPlayer { id: string; nickname: string; seat: number; hand: string[]; cap: string[]; }
+interface GPlayer { id: string; nickname: string; seat: number; hand: string[]; cap: string[]; out?: boolean; }
 interface GostopState {
     cardMap: Record<string, Card>;
     deck: string[];
     table: string[];
     players: GPlayer[];
     currentTurn: number;
+    // 4인 광팔이: 딜 직후 참가/빠짐 결정 단계. queue=결정 순서(선 다음부터), idx=현재 결정자.
+    prePhase: { queue: number[]; idx: number } | null;
+    // 빠진 사람. forced=강제로 밀려난 사람만 광팔기(위로금) 가능. gwang=빠질 때 손패 광 수.
+    out: { seat: number; forced: boolean; gwang: number } | null;
     go: number; goBy: number; goMin: number;
     shakeMult: number[];
     ppuk3Mult: number;
@@ -191,6 +196,22 @@ function bombMonth(s: GostopState, seat: number): number | null {
     return m ? +m : null;
 }
 
+function handGwang(s: GostopState, seat: number): number { return s.players[seat].hand.filter(id => cm(s, id).gwang).length; }
+
+// 광팔이: outSeat이 빠진다. forced=강제(seat1·2 둘 다 참가해 seat3이 밀려난 경우)만 위로금 자격.
+// 빠진 사람 손패는 더미로 회수 후 셔플(다시 21장), 그 좌석은 turn에서 제외(canAct=false).
+function finalizeSitOut(s: GostopState, outSeat: number, forced: boolean, events: GameEvent[]) {
+    const gwang = handGwang(s, outSeat);
+    const pl = s.players[outSeat];
+    s.deck.push(...pl.hand); pl.hand = []; pl.out = true;
+    s.deck = shuffle(s.deck);
+    s.out = { seat: outSeat, forced, gwang };
+    s.prePhase = null;
+    s.currentTurn = 0; // 선(seat0)부터 플레이 시작
+    events.push({ type: 'sit_out', payload: { seat: outSeat, forced, gwang, sold: forced && gwang > 0 } });
+    events.push({ type: 'turn', payload: { seat: 0 } });
+}
+
 function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean; chongtong?: boolean }) {
     const sc = score(s, s.players[winner].cap);
     let basePt: number; const tags: string[] = [];
@@ -208,7 +229,7 @@ function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean; chongt
     const mungbak = wyul >= 7;
     let gain = 0;
     s.players.forEach((p, i) => {
-        if (i === winner) return;
+        if (i === winner || p.out) return; // 빠진 사람은 일반 패자 정산 제외(위로금 별도)
         const ls = score(s, p.cap); let lm = 1;
         if (!opts?.ppuk3 && !opts?.chongtong) {
             if (ls.pi <= 6) { lm *= 2; tags.push('피박'); }
@@ -220,6 +241,20 @@ function settle(s: GostopState, winner: number, opts?: { ppuk3?: boolean; chongt
         s.scores[p.id] = -pay; gain += pay;
     });
     s.scores[s.players[winner].id] = gain;
+    // 광팔이 위로금(후불제): 강제로 빠지고 광 보유 시, 승자 제외한 나머지 활성 플레이어들이 광1장당 GWANG_SELL_PT점씩 지불.
+    if (s.out && s.out.forced && s.out.gwang > 0) {
+        const outId = s.players[s.out.seat].id;
+        const wamt = s.out.gwang * GWANG_SELL_PT * 10000 * (s.bet || 1);
+        let consol = 0;
+        s.players.forEach((p, i) => {
+            if (i === winner || p.out) return; // 승자 면제 + 빠진 본인 제외 → 나머지 활성 패자들이 지불
+            s.scores[p.id] = (s.scores[p.id] || 0) - wamt; consol += wamt;
+        });
+        s.scores[outId] = consol;
+        if (consol > 0) tags.push(`광팔이(광${s.out.gwang})`);
+    } else if (s.out) {
+        s.scores[s.players[s.out.seat].id] = 0; // 자진 빠짐 or 광 0 → 위로금 없음
+    }
     s.endReason = (sc.parts.map(p => p[0] + '+' + p[1]).join(' ')) + (tags.length ? ' · ' + [...new Set(tags)].join('·') : '') + ` = ${basePt}점`;
     s.pending = null;
 }
@@ -270,6 +305,7 @@ function flipTurn(s: GostopState, seat: number, events: GameEvent[]) {
 // 턴은 항상 교대한다(싱글 모델). 폭탄 뒤집기탄(flipOwed)은 자동 실행하지 않는다 —
 // 폭탄 친 사람의 "자기 차례" 액션(FLIP)으로 처리. 사람은 선택적(패 내기 vs 뒤집기), AI는 getAIAction이 FLIP 선택.
 function canAct(s: GostopState, seat: number): boolean {
+    if (s.players[seat].out) return false; // 광팔이로 빠진 좌석 — 턴 제외
     if (s.players[seat].hand.length > 0) return true;
     return !!(s.flipOwed && s.flipOwed[seat] > 0 && s.deck.length > 0); // 손패 없어도 남은 뒤집기탄 있으면 행동 가능
 }
@@ -306,17 +342,21 @@ export const gostopPlugin: GamePlugin = {
         const allP: { id: string; nickname: string; seat: number }[] = players.map((p, i) => ({ id: p.id, nickname: p.nickname, seat: i }));
         for (let seat = players.length; seat < want; seat++) allP.push({ id: `ai-${seat}`, nickname: `🤖 봇${seat}`, seat });
         const N = allP.length;
-        const handSize = N === 2 ? 10 : N === 3 ? 7 : 6;
+        // 4인 = 진정한 고스톱(광팔이): 4명에게 7장씩 돌린 뒤 1명이 빠지고 3인으로 친다.
+        const handSize = N === 2 ? 10 : 7;
         const tableSize = N === 2 ? 8 : 6;
         const table = ids.splice(0, tableSize);
         const gp: GPlayer[] = allP.map(p => ({ id: p.id, nickname: p.nickname, seat: p.seat, hand: [], cap: [] }));
         for (let r = 0; r < handSize; r++) for (const p of gp) p.hand.push(ids.shift()!);
         gp.forEach(p => p.hand.sort((a, b) => cardMap[a].m - cardMap[b].m));
-        // 총통: 딜 손패에 같은 월 4장 → 즉시 승
+        // 총통: 딜 손패에 같은 월 4장 → 즉시 승 (광팔이보다 우선)
         let chong = -1;
         for (let p = 0; p < gp.length; p++) { const c: Record<number, number> = {}; gp[p].hand.forEach(id => { const m = cardMap[id].m; c[m] = (c[m] || 0) + 1; }); if (Object.values(c).some(n => n === 4)) { chong = p; break; } }
+        // 광팔이 결정 단계: 4인 & 총통 없을 때만. 선(seat0)은 고정 참가, seat1·2가 순서대로 참가/빠짐 결정.
+        // seat1 빠짐 → seat1 out / seat1 참가·seat2 빠짐 → seat2 out / 둘 다 참가 → seat3 강제 out(광팔기 가능).
+        const prePhase = (N === 4 && chong < 0) ? { queue: [1, 2], idx: 0 } : null;
         const st: GostopState = {
-            cardMap, deck: ids, table, players: gp, currentTurn: 0,
+            cardMap, deck: ids, table, players: gp, currentTurn: 0, prePhase, out: null,
             go: 0, goBy: -1, goMin: N >= 3 ? 3 : 7, shakeMult: Array(N).fill(1), ppuk3Mult: 1, ppukCount: Array(N).fill(0), ppukOwner: {}, flipOwed: Array(N).fill(0),
             pending: null, pendingFlip: null, bet: config?.bet ?? 1, finished: false, winnerSeat: null, scores: {}, endReason: null,
             lastEvent: null, config: { timeLimit: config?.timeLimit ?? 30, bet: config?.bet ?? 1 },
@@ -329,6 +369,11 @@ export const gostopPlugin: GamePlugin = {
         if (state.finished) return { valid: false, error: '게임 종료됨' };
         const seat = state.players.findIndex(p => p.id === playerId);
         if (seat < 0) return { valid: false, error: '플레이어 없음' };
+        if (state.prePhase) {
+            if (state.prePhase.queue[state.prePhase.idx] !== seat) return { valid: false, error: '당신 결정 차례 아님' };
+            if (action.type !== 'SITDECIDE') return { valid: false, error: '참가/빠짐 선택 필요' };
+            return { valid: true };
+        }
         if (state.pendingFlip) {
             if (state.pendingFlip.seat !== seat) return { valid: false, error: '당신 차례 아님' };
             if (action.type !== 'FLIPPICK') return { valid: false, error: '먹을 패 선택 필요' };
@@ -365,6 +410,19 @@ export const gostopPlugin: GamePlugin = {
         const events: GameEvent[] = [];
         const seat = s.players.findIndex(p => p.id === playerId);
         const pl = s.players[seat];
+
+        // 광팔이 참가/빠짐 결정
+        if (s.prePhase && action.type === 'SITDECIDE') {
+            const join = action.payload?.join !== false; // 기본 참가
+            events.push({ type: 'sit_decide', payload: { seat, join } });
+            if (!join) { finalizeSitOut(s, seat, false, events); return { newState: s, events }; } // 자진 빠짐(위로금 없음)
+            s.prePhase.idx++;
+            if (s.prePhase.idx >= s.prePhase.queue.length) {
+                // seat1·2 둘 다 참가 → seat3 강제 빠짐(광팔기 가능)
+                finalizeSitOut(s, 3, true, events);
+            }
+            return { newState: s, events };
+        }
 
         if (s.pendingFlip && action.type === 'FLIPPICK') {
             const pf = s.pendingFlip; s.pendingFlip = null;
@@ -416,6 +474,7 @@ export const gostopPlugin: GamePlugin = {
 
     getCurrentTurn(state: GostopState): string | null {
         if (state.finished) return null;
+        if (state.prePhase) return state.players[state.prePhase.queue[state.prePhase.idx]]?.id || null;
         if (state.pendingFlip) return state.players[state.pendingFlip.seat]?.id || null;
         if (state.pending) return state.players[state.pending.seat]?.id || null;
         return state.players[state.currentTurn]?.id || null;
@@ -434,11 +493,13 @@ export const gostopPlugin: GamePlugin = {
 
     getPublicState(state: GostopState): any {
         return {
-            players: state.players.map(p => ({ id: p.id, nickname: p.nickname, seat: p.seat, handCount: p.hand.length, cap: p.cap.map(id => state.cardMap[id]) })),
+            players: state.players.map(p => ({ id: p.id, nickname: p.nickname, seat: p.seat, handCount: p.hand.length, cap: p.cap.map(id => state.cardMap[id]), out: !!p.out })),
             table: state.table.map(id => state.cardMap[id]),
             deckCount: state.deck.length,
             currentTurn: state.currentTurn,
             go: state.go, goBy: state.goBy,
+            prePhase: state.prePhase ? { decider: state.prePhase.queue[state.prePhase.idx] } : null,
+            out: state.out,
             pending: state.pending,
             pendingFlip: state.pendingFlip ? { seat: state.pendingFlip.seat, candidates: state.pendingFlip.candidates.map(id => state.cardMap[id]) } : null,
             finished: state.finished, winnerSeat: state.winnerSeat, scores: state.scores, endReason: state.endReason,
@@ -456,7 +517,7 @@ export const gostopPlugin: GamePlugin = {
             myHand: me ? me.hand.map(id => state.cardMap[id]) : [],
             myScore: sc,
             myFlipOwed: me && state.flipOwed ? (state.flipOwed[seat] || 0) : 0,
-            isMyTurn: state.pending ? state.pending.seat === seat : state.currentTurn === seat,
+            isMyTurn: state.prePhase ? state.prePhase.queue[state.prePhase.idx] === seat : (state.pending ? state.pending.seat === seat : state.currentTurn === seat),
         };
     },
 
@@ -464,6 +525,7 @@ export const gostopPlugin: GamePlugin = {
         if (state.finished) return null;
         const seat = state.players.findIndex(p => p.id === playerId);
         if (seat < 0) return null;
+        if (state.prePhase) { if (state.prePhase.queue[state.prePhase.idx] === seat) return { type: 'SITDECIDE', payload: { join: true } }; return null; }
         if (state.pendingFlip) { if (state.pendingFlip.seat === seat) return { type: 'FLIPPICK', payload: {} }; return null; }
         if (state.pending) { if (state.pending.seat === seat) return { type: 'STOP' }; return null; }
         if (state.currentTurn !== seat) return null;
@@ -476,6 +538,11 @@ export const gostopPlugin: GamePlugin = {
 
     getAIAction(state: GostopState, playerId: string): GameAction {
         const seat = state.players.findIndex(p => p.id === playerId);
+        if (state.prePhase && state.prePhase.queue[state.prePhase.idx] === seat) {
+            // 광팔이 봇 판단: 광 있으면 참가, 광 0장이면 빠짐(광박 회피). 자진 빠짐은 위로금 없음.
+            const join = state.players[seat].hand.filter(id => state.cardMap[id].gwang).length >= 1;
+            return { type: 'SITDECIDE', payload: { join } };
+        }
         if (state.pending && state.pending.seat === seat) {
             // 점수 낮으면 고, 높거나 덱 적으면 스톱
             const goAgain = state.pending.total < 5 && state.deck.length > 6 && Math.random() < 0.55;
