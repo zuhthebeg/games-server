@@ -16,24 +16,32 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   if (!isAuthed(ctx.request)) return unauthorized();
   const url = new URL(ctx.request.url);
   const q = (url.searchParams.get('q') || '').trim();
+  const botFilter = url.searchParams.get('bot') || ''; // human | suspect | bot
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10) || 50, 100);
   const offset = parseInt(url.searchParams.get('offset') || '0', 10) || 0;
 
-  let where = '';
+  const conds: string[] = [];
   const binds: string[] = [];
   if (q) {
-    where = `WHERE (id LIKE ? OR nickname LIKE ? OR email LIKE ?)`;
+    conds.push('(id LIKE ? OR nickname LIKE ? OR email LIKE ?)');
     const like = `%${q}%`;
     binds.push(like, like, like);
   }
+  if (['human', 'suspect', 'bot'].includes(botFilter)) {
+    conds.push('bot_status = ?');
+    binds.push(botFilter);
+  }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
-  const [rows, total] = await Promise.all([
+  const [rows, total, dist] = await Promise.all([
     ctx.env.DB.prepare(
       `SELECT id, nickname, email, is_anonymous, email_verified,
-              (google_id IS NOT NULL) AS has_google, avatar_url, created_at, last_seen_at
+              (google_id IS NOT NULL) AS has_google, avatar_url, created_at, last_seen_at,
+              bot_status, bot_reason, signup_ua
        FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
     ).bind(...binds, limit, offset).all(),
     ctx.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM users ${where}`).bind(...binds).first<{ cnt: number }>(),
+    ctx.env.DB.prepare(`SELECT bot_status, COUNT(*) AS cnt FROM users GROUP BY bot_status`).all(),
   ]);
 
   const users = (rows.results as any[]).map((u) => ({
@@ -45,20 +53,30 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     email_verified: !!u.email_verified,
     created_at: u.created_at,
     last_seen_at: u.last_seen_at,
+    bot_status: u.bot_status,
+    bot_reason: u.bot_reason,
   }));
 
-  return Response.json({ users, total: total?.cnt ?? 0, limit, offset }, { headers: CORS });
+  const botSummary = Object.fromEntries(
+    (dist.results as any[]).map((r) => [r.bot_status ?? 'unclassified', r.cnt])
+  );
+
+  return Response.json({ users, total: total?.cnt ?? 0, limit, offset, botSummary }, { headers: CORS });
 };
 
 export const onRequestPatch: PagesFunction<Env> = async (ctx) => {
   if (!isAuthed(ctx.request)) return unauthorized();
-  const body = await ctx.request.json().catch(() => null) as { id?: string; nickname?: string; email?: string } | null;
+  const body = await ctx.request.json().catch(() => null) as { id?: string; nickname?: string; email?: string; bot_status?: string } | null;
   if (!body?.id) return Response.json({ error: 'id required' }, { status: 400, headers: CORS });
 
   const sets: string[] = [];
   const binds: (string | null)[] = [];
   if (body.nickname !== undefined) { sets.push('nickname = ?'); binds.push(body.nickname || null); }
   if (body.email !== undefined) { sets.push('email = ?'); binds.push(body.email || null); }
+  if (body.bot_status !== undefined && ['human', 'suspect', 'bot'].includes(body.bot_status)) {
+    sets.push('bot_status = ?', "bot_reason = '수동 지정'");
+    binds.push(body.bot_status);
+  }
   if (!sets.length) return Response.json({ error: 'no fields' }, { status: 400, headers: CORS });
   sets.push("updated_at = datetime('now')");
 

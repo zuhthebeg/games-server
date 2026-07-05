@@ -11,17 +11,27 @@ interface PagesContext {
     env: Env;
 }
 
+// UA 기반 즉석 봇 판정. 여기서 못 잡는 정기 크롤러(headless가 아닌 척하는 것)는
+// /api/admin/bot-reclassify의 버스트 패턴 분석이 잡는다.
+const BOT_UA = /bot|crawl|spider|slurp|headless|python|curl|wget|scrapy|phantom|puppeteer|playwright|httpclient|axios|go-http/i;
+
 export const onRequestPost = async (context: PagesContext): Promise<Response> => {
-    const { env } = context;
+    const { env, request } = context;
 
     try {
         const userId = generateId();
         const now = new Date().toISOString();
+        const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
+        const isBot = BOT_UA.test(ua);
 
-        // Create anonymous user
         await env.DB.prepare(
-            'INSERT INTO users (id, is_anonymous, created_at, last_seen_at) VALUES (?, 1, ?, ?)'
-        ).bind(userId, now, now).run();
+            `INSERT INTO users (id, is_anonymous, created_at, last_seen_at, signup_ua, bot_status, bot_reason)
+             VALUES (?, 1, ?, ?, ?, ?, ?)`
+        ).bind(
+            userId, now, now, ua || null,
+            isBot ? 'bot' : 'suspect',
+            isBot ? 'UA 봇 시그니처' : '신규(무활동)'
+        ).run();
 
         // Generate token
         const token = createToken({ userId, isAnonymous: true });
