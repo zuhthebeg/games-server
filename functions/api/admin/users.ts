@@ -37,7 +37,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     ctx.env.DB.prepare(
       `SELECT id, nickname, email, is_anonymous, email_verified,
               (google_id IS NOT NULL) AS has_google, avatar_url, created_at, last_seen_at,
-              bot_status, bot_reason, signup_ua
+              bot_status, bot_reason, signup_ua, signup_game
        FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
     ).bind(...binds, limit, offset).all(),
     ctx.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM users ${where}`).bind(...binds).first<{ cnt: number }>(),
@@ -55,6 +55,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     last_seen_at: u.last_seen_at,
     bot_status: u.bot_status,
     bot_reason: u.bot_reason,
+    signup_game: u.signup_game,
   }));
 
   const botSummary = Object.fromEntries(
