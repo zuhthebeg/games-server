@@ -12,6 +12,12 @@ interface RoomRec {
 }
 interface Counter { created: number; finished: number; }
 
+// 레지스트리 좀비 방어: RoomDO의 'empty' 보고는 best-effort라 유실될 수 있다
+// (웹뷰 강제종료 등으로 close 프레임 없이 끊기면 마지막 보고가 영영 안 옴).
+// updatedAt이 이보다 오래된 방은 읽기 시점에 레지스트리에서 걷어낸다.
+// 방 자체(RoomDO)는 건드리지 않으므로, 살아있는 방이면 다음 보고 때 재등록된다.
+const STALE_ROOM_MS = 2 * 3600_000;
+
 const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
@@ -25,7 +31,14 @@ export class CoordinatorDO {
   constructor(ctx: DurableObjectState) { this.ctx = ctx; }
 
   async rooms(): Promise<Record<string, RoomRec>> {
-    return (await this.ctx.storage.get<Record<string, RoomRec>>('rooms')) || {};
+    const rooms = (await this.ctx.storage.get<Record<string, RoomRec>>('rooms')) || {};
+    const cutoff = Date.now() - STALE_ROOM_MS;
+    let dirty = false;
+    for (const [id, r] of Object.entries(rooms)) {
+      if (!r.updatedAt || r.updatedAt < cutoff) { delete rooms[id]; dirty = true; }
+    }
+    if (dirty) await this.ctx.storage.put('rooms', rooms);
+    return rooms;
   }
   async counters(): Promise<Record<string, Counter>> {
     return (await this.ctx.storage.get<Record<string, Counter>>('counters')) || {};
