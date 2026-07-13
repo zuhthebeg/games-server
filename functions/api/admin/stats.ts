@@ -1,6 +1,6 @@
 // 어드민 대시보드 News 서비스 카드 — 뉴스 팩트체크 지표 전용.
 // 게임별 지표는 /api/admin/game-stats (어드민 각 게임 페이지에서 사용).
-const ADMIN_SECRET = 'cocy-admin-2026';
+const ADMIN_SECRET = 'cocy-admin-2026-r1';
 
 export const onRequestGet: PagesFunction<{ DB: D1Database }> = async (ctx) => {
   if (ctx.request.headers.get('X-Admin-Secret') !== ADMIN_SECRET) {

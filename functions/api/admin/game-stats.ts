@@ -1,5 +1,5 @@
 // 게임별 지표 — 어드민 registry.json의 게임 id를 키로 반환. 각 게임 상세 페이지에서 표시.
-const ADMIN_SECRET = 'cocy-admin-2026';
+const ADMIN_SECRET = 'cocy-admin-2026-r1';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',

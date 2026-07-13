@@ -1,5 +1,5 @@
 // 어드민 유저 CRUD — games-relay-db users (game.cocy.io 전 게임 + log.cocy.io 공용 계정)
-const ADMIN_SECRET = 'cocy-admin-2026';
+const ADMIN_SECRET = 'cocy-admin-2026-r1';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',

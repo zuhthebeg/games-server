@@ -1,7 +1,7 @@
 /**
  * PUT /api/admin/rankings/:type  — 개별 설정 수정
  */
-const ADMIN_SECRET = 'cocy-admin-2026';
+const ADMIN_SECRET = 'cocy-admin-2026-r1';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Secret',

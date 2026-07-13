@@ -3,7 +3,7 @@
 //       ② 같은 분(minute)에 5개+ 생성된 무활동 익명 → bot (정기 크롤러 버스트)
 //       ③ 나머지 미분류 → suspect
 // '수동 지정'(어드민에서 직접 바꾼 것)은 건드리지 않는다.
-const ADMIN_SECRET = 'cocy-admin-2026';
+const ADMIN_SECRET = 'cocy-admin-2026-r1';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
