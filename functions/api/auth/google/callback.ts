@@ -100,7 +100,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
             if (existingEmail) {
                 // Link Google to existing account
                 await DB.prepare(`
-                    UPDATE users SET google_id = ?, email_verified = 1, updated_at = datetime('now')
+                    UPDATE users SET google_id = ?, email_verified = 1, is_anonymous = 0, updated_at = datetime('now')
                     WHERE id = ?
                 `).bind(googleUser.sub, existingEmail.id).run();
                 

@@ -30,15 +30,17 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (!user) {
       user = await env.DB.prepare('SELECT id, nickname FROM users WHERE email = ?').bind(email).first() as any;
       if (user) {
-        await env.DB.prepare('UPDATE users SET google_id = ?, avatar_url = ? WHERE id = ?').bind(googleId, picture, user.id).run();
+        await env.DB.prepare('UPDATE users SET google_id = ?, avatar_url = ?, is_anonymous = 0 WHERE id = ?').bind(googleId, picture, user.id).run();
       } else {
         const id = generateId();
         await env.DB.prepare(
-          "INSERT INTO users (id, email, nickname, email_verified, google_id, avatar_url, created_at) VALUES (?, ?, ?, 1, ?, ?, datetime('now'))"
+          "INSERT INTO users (id, email, nickname, email_verified, google_id, avatar_url, is_anonymous, created_at) VALUES (?, ?, ?, 1, ?, ?, 0, datetime('now'))"
         ).bind(id, email, name, googleId, picture).run();
         user = { id, nickname: name };
       }
     }
+    // 과거 가입분 self-heal: 구글 인증된 계정은 등록계정이다 (is_anonymous=1로 남으면 랭킹 제출이 403)
+    await env.DB.prepare('UPDATE users SET is_anonymous = 0 WHERE id = ? AND is_anonymous = 1').bind(user.id).run();
 
     const token = await createJWT({ sub: user.id, email }, env.JWT_SECRET, 30 * 24 * 3600);
     return Response.json({ token, user: { id: user.id, nickname: user.nickname, email } }, { headers: CORS });
