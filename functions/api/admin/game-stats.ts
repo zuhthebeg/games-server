@@ -13,12 +13,15 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async (ctx) => {
   }
 
   const db = ctx.env.DB;
-  const [linerushPlayers, linerushBest, bossKills, pvpGames, weaponPlayers] = await Promise.all([
+  const [linerushPlayers, linerushBest, bossKills, pvpGames, weaponPlayers, vmRankers, vmArtists, vmSignups] = await Promise.all([
     db.prepare('SELECT COUNT(*) as cnt FROM rankings WHERE linerush_best_stage > 0').first<{ cnt: number }>(),
     db.prepare('SELECT MAX(linerush_best_stage) as best FROM rankings').first<{ best: number }>(),
     db.prepare('SELECT COUNT(*) as cnt FROM boss_encounters').first<{ cnt: number }>(),
     db.prepare('SELECT SUM(pvp_wins + pvp_losses) as cnt FROM rankings').first<{ cnt: number }>(),
     db.prepare('SELECT COUNT(*) as cnt FROM rankings WHERE best_weapon_level > 0').first<{ cnt: number }>(),
+    db.prepare('SELECT COUNT(DISTINCT user_id) as cnt FROM voicematch_rankings').first<{ cnt: number }>().catch(() => ({ cnt: 0 })),
+    db.prepare('SELECT COUNT(DISTINCT artist) as cnt FROM voicematch_rankings').first<{ cnt: number }>().catch(() => ({ cnt: 0 })),
+    db.prepare("SELECT COUNT(*) as cnt FROM users WHERE signup_game = 'voicematch' AND is_anonymous = 0").first<{ cnt: number }>().catch(() => ({ cnt: 0 })),
   ]);
 
   return Response.json({
@@ -35,6 +38,13 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async (ctx) => {
           { label: '보스 처치', value: bossKills?.cnt ?? 0 },
           { label: 'PvP 게임', value: pvpGames?.cnt ?? 0 },
           { label: '강화 유저', value: weaponPlayers?.cnt ?? 0 },
+        ],
+      },
+      voicematch: {
+        metrics: [
+          { label: '랭커 수', value: vmRankers?.cnt ?? 0 },
+          { label: '참여 가수', value: vmArtists?.cnt ?? 0 },
+          { label: 'voicematch발 가입자', value: vmSignups?.cnt ?? 0 },
         ],
       },
     },
