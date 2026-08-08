@@ -4,6 +4,8 @@
 // 거의 모두 90%대로 나온다 → 순위가 갈리지 않고 사진만 바꿔 올리면 되는 무의미한 판이 된다.
 // 대신 여기서는 "무슨 동물상이 얼마나 나왔나"를 모아 희귀도를 보여준다. 이게 이 게임의 점수다.
 import type { D1Database } from '@cloudflare/workers-types';
+import { getUserFromRequest } from '../../types';
+import { ensureTraitsTable } from '../user/traits';
 
 interface Env { DB: D1Database; }
 
@@ -65,6 +67,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         await ensureTable(DB);
         await DB.prepare(`INSERT INTO animalface_stats (animal, sex, count) VALUES (?, ?, 1)
             ON CONFLICT(animal, sex) DO UPDATE SET count = count + 1`).bind(animal, sex).run();
+        // 로그인 상태면 "내 마지막 얼굴상"으로도 저장 — 프로필 페이지가 읽는다.
+        // 집계는 익명 유지(위), 개인 기록은 opt-in(토큰 있을 때만)이라 분리돼 있다.
+        const user = getUserFromRequest(context.request);
+        if (user) {
+            try {
+                await ensureTraitsTable(DB);
+                await DB.prepare(`INSERT INTO user_traits (user_id, trait, value, updated_at)
+                    VALUES (?, 'animalface', ?, datetime('now'))
+                    ON CONFLICT(user_id, trait) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`)
+                    .bind(user.userId, JSON.stringify({ animal })).run();
+            } catch { /* 개인 기록 실패는 집계 응답에 영향 주지 않는다 */ }
+        }
         const row = await DB.prepare('SELECT SUM(count) AS c FROM animalface_stats').first<{ c: number }>();
         const mine = await DB.prepare('SELECT SUM(count) AS c FROM animalface_stats WHERE animal = ?')
             .bind(animal).first<{ c: number }>();
