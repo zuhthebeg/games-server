@@ -37,6 +37,12 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
             game
         ).run();
 
+        // 국기 이모지용 국가코드 (CF 엣지 제공). 컬럼 없는 구DB면 조용히 스킵
+        const country = ((request as any).cf?.country as string | undefined) || null;
+        if (country) {
+            try { await env.DB.prepare('UPDATE users SET country = ? WHERE id = ?').bind(country, userId).run(); } catch { }
+        }
+
         // Generate token
         const token = createToken({ userId, isAnonymous: true });
 

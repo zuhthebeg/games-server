@@ -37,7 +37,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         if (!user) {
             return Response.json({ error: '사용자를 찾을 수 없습니다' }, { status: 404 });
         }
-        
+
+        // 국기 이모지용 국가코드 갱신 — 변경된 경우에만 쓰기, 실패해도 응답 무관
+        try {
+            const cfCountry = (context.request as any).cf?.country as string | undefined;
+            if (cfCountry) {
+                await DB.prepare('UPDATE users SET country = ? WHERE id = ? AND (country IS NULL OR country != ?)')
+                    .bind(cfCountry, payload.sub, cfCountry).run();
+            }
+        } catch { }
+
         return Response.json({
             id: user.id,
             email: user.email,
