@@ -22,6 +22,22 @@ export async function isRegisteredUser(DB: D1Database, userId: string): Promise<
   return !!row;
 }
 
+/** users.country 컬럼 보장 (없으면 추가) — 랭킹 국기 이모지 표시용. 이미 존재하면 no-op */
+export async function ensureCountryColumn(DB: D1Database) {
+  try { await DB.prepare('ALTER TABLE users ADD COLUMN country TEXT').run(); } catch { /* already exists */ }
+}
+
+/** Cloudflare가 요청에 넣어주는 국가 코드(ISO2) 추출 */
+export function extractCountry(request: Request): string | null {
+  return ((request as any).cf?.country as string | undefined) || null;
+}
+
+/** 유저의 country 갱신 (값이 있을 때만) */
+export async function updateUserCountry(DB: D1Database, userId: string, country: string | null) {
+  if (!country) return;
+  try { await DB.prepare('UPDATE users SET country = ? WHERE id = ?').bind(country, userId).run(); } catch { /* best-effort */ }
+}
+
 /** KST 오늘 날짜 (YYYY-MM-DD) */
 export function todayKST(): string {
   return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);

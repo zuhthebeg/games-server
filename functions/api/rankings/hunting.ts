@@ -1,6 +1,6 @@
 // GET/POST /api/rankings/hunting - 사냥 랭킹 조회/갱신
 import type { D1Database } from '@cloudflare/workers-types';
-import { upsertDailyScore, isRegisteredUser } from './_rank_utils';
+import { upsertDailyScore, isRegisteredUser, ensureCountryColumn, extractCountry, updateUserCountry } from './_rank_utils';
 
 interface Env {
   DB: D1Database;
@@ -16,7 +16,7 @@ function sanitizeNickname(nickname?: string): string | null {
   return n;
 }
 
-async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+async function ensureUser(DB: D1Database, userId: string, nickname?: string, country?: string | null) {
   const safeNick = sanitizeNickname(nickname);
   const existing = await DB.prepare('SELECT id, nickname FROM users WHERE id = ?').bind(userId).first<{id: string, nickname: string}>();
   if (!existing) {
@@ -24,6 +24,7 @@ async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
   } else if (safeNick && safeNick !== existing.nickname) {
     await DB.prepare('UPDATE users SET nickname = ?, updated_at = datetime("now") WHERE id = ?').bind(safeNick, userId).run();
   }
+  await updateUserCountry(DB, userId, country ?? null);
 }
 
 async function ensureBossKillsColumn(DB: D1Database) {
@@ -43,16 +44,18 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   try {
     await ensureBossKillsColumn(DB);
+    await ensureCountryColumn(DB);
 
-    const orderBy = type === 'streak' 
+    const orderBy = type === 'streak'
       ? 'r.max_kill_streak DESC' 
       : type === 'boss'
         ? 'r.boss_kills DESC'
         : 'r.total_kills DESC';
 
     const result = await DB.prepare(`
-      SELECT 
+      SELECT
         r.user_id,
+        u.country as country,
         COALESCE(u.nickname, '익명#' || substr(r.user_id, 1, 4)) as nickname,
         r.total_kills,
         r.max_kill_streak,
@@ -104,7 +107,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     // 유저 존재 확인 + 닉네임 업데이트
-    await ensureUser(DB, userId, nickname);
+    const country = extractCountry(context.request);
+    await ensureUser(DB, userId, nickname, country);
     await ensureBossKillsColumn(DB);
 
     const current = await DB.prepare(

@@ -1,5 +1,6 @@
 // GET/POST /api/rankings/linerush — 최고 스테이지 랭킹
 import type { D1Database } from '@cloudflare/workers-types';
+import { ensureCountryColumn, extractCountry, updateUserCountry } from './_rank_utils';
 
 interface Env { DB: D1Database; }
 
@@ -17,15 +18,17 @@ async function ensureColumn(DB: D1Database) {
   try {
     await DB.prepare('ALTER TABLE rankings ADD COLUMN linerush_updated_at TEXT').run();
   } catch { /* already exists */ }
+  await ensureCountryColumn(DB);
 }
 
-async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+async function ensureUser(DB: D1Database, userId: string, nickname?: string, country?: string | null) {
   await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)')
     .bind(userId, nickname || null).run();
   if (nickname) {
     await DB.prepare('UPDATE users SET nickname = ? WHERE id = ? AND (nickname IS NULL OR nickname != ?)')
       .bind(nickname, userId, nickname).run();
   }
+  await updateUserCountry(DB, userId, country ?? null);
 }
 
 export const onRequestOptions: PagesFunction = async () =>
@@ -42,6 +45,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     const result = await DB.prepare(`
       SELECT
         r.user_id,
+        u.country AS country,
         COALESCE(u.nickname, '익명#' || substr(r.user_id, 1, 6)) AS nickname,
         COALESCE(r.linerush_best_stage, 0) AS best_stage,
         r.linerush_updated_at AS updated_at
@@ -72,7 +76,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     await ensureColumn(DB);
-    await ensureUser(DB, userId, body.nickname);
+    const country = extractCountry(context.request);
+    await ensureUser(DB, userId, body.nickname, country);
 
     // 익명 ID → 계정 ID 마이그레이션
     const migrateFrom = (body as any).migrateFrom;

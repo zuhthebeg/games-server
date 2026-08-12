@@ -3,6 +3,7 @@
 // GET  ?summary=1                        → 가수별 1위/참가자수 요약
 // POST {userId, nickname, artist, pct}  → 등록계정만, 유저당 가수별 최고 % 갱신
 import type { D1Database } from '@cloudflare/workers-types';
+import { ensureCountryColumn, extractCountry, updateUserCountry } from './_rank_utils';
 interface Env { DB: D1Database; }
 
 const CORS = {
@@ -49,7 +50,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         const result = await DB.prepare(`
             SELECT v.user_id,
                    COALESCE(u.nickname, '익명#' || substr(v.user_id,1,6)) AS nickname,
-                   v.pct, v.updated_at
+                   v.pct, v.updated_at, u.country AS country
             FROM voicematch_rankings v
             LEFT JOIN users u ON v.user_id = u.id
             WHERE v.artist = ?
@@ -92,6 +93,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         if (!u || u.is_anonymous)
             return Response.json({ success: false, error: 'need_login' }, { status: 403, headers: CORS });
 
+        await ensureCountryColumn(DB);
+        await updateUserCountry(DB, userId, extractCountry(context.request));
         await ensureTable(DB);
         await DB.prepare(`
             INSERT INTO voicematch_rankings (user_id, artist, pct, updated_at)

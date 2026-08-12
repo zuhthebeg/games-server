@@ -1,5 +1,6 @@
 // GET/POST /api/rankings/gostop — 최고 점수 랭킹
 import type { D1Database } from '@cloudflare/workers-types';
+import { ensureCountryColumn, extractCountry, updateUserCountry } from './_rank_utils';
 
 interface Env { DB: D1Database; }
 
@@ -15,15 +16,17 @@ async function ensureColumns(DB: D1Database) {
     for (const col of cols) {
         try { await DB.prepare(`ALTER TABLE rankings ADD COLUMN ${col}`).run(); } catch { }
     }
+    await ensureCountryColumn(DB);
 }
 
-async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+async function ensureUser(DB: D1Database, userId: string, nickname?: string, country?: string | null) {
     await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)')
         .bind(userId, nickname || null).run();
     if (nickname) {
         await DB.prepare('UPDATE users SET nickname = ? WHERE id = ? AND (nickname IS NULL OR nickname != ?)')
             .bind(nickname, userId, nickname).run();
     }
+    await updateUserCountry(DB, userId, country ?? null);
 }
 
 export const onRequestOptions: PagesFunction = async () =>
@@ -40,6 +43,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         const result = await DB.prepare(`
             SELECT
                 r.user_id,
+                u.country AS country,
                 COALESCE(u.nickname, '익명#' || substr(r.user_id, 1, 6)) AS nickname,
                 COALESCE(r.gostop_best_score, 0) AS best_score,
                 r.gostop_updated_at AS updated_at
@@ -69,7 +73,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         }
 
         await ensureColumns(DB);
-        await ensureUser(DB, userId, body.nickname);
+        const country = extractCountry(context.request);
+        await ensureUser(DB, userId, body.nickname, country);
 
         await DB.prepare('INSERT OR IGNORE INTO rankings (user_id) VALUES (?)').bind(userId).run();
         const updated = await DB.prepare(`
