@@ -20,14 +20,21 @@ async function ensureTable(DB: D1Database) {
         updated_at TEXT,
         PRIMARY KEY (user_id, level)
     )`).run();
+    // 국기 표시용. 기존 배포 테이블에는 없으므로 ALTER (있으면 no-op)
+    try { await DB.prepare('ALTER TABLE tileslider_scores ADD COLUMN country TEXT').run(); } catch { }
+    // users.country — 다른 게임 랭킹도 국기를 재사용할 수 있게 유저 속성으로도 저장
+    try { await DB.prepare('ALTER TABLE users ADD COLUMN country TEXT').run(); } catch { }
 }
 
-async function ensureUser(DB: D1Database, userId: string, nickname?: string) {
+async function ensureUser(DB: D1Database, userId: string, nickname?: string, country?: string | null) {
     await DB.prepare('INSERT OR IGNORE INTO users (id, nickname, is_anonymous) VALUES (?, ?, 1)')
         .bind(userId, nickname || null).run();
     if (nickname) {
         await DB.prepare('UPDATE users SET nickname = ? WHERE id = ? AND (nickname IS NULL OR nickname != ?)')
             .bind(nickname, userId, nickname).run();
+    }
+    if (country) {
+        try { await DB.prepare('UPDATE users SET country = ? WHERE id = ?').bind(country, userId).run(); } catch { }
     }
 }
 
@@ -50,7 +57,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         const result = await DB.prepare(`
             SELECT s.user_id,
                    COALESCE(u.nickname, '익명#' || substr(s.user_id, 1, 6)) AS nickname,
-                   s.moves, s.seconds, s.updated_at
+                   s.country, s.moves, s.seconds, s.updated_at
             FROM tileslider_scores s
             LEFT JOIN users u ON s.user_id = u.id
             WHERE s.level = ?
@@ -87,16 +94,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             return Response.json({ success: false, error: 'userId, level(3-9), moves, seconds required' }, { status: 400, headers: CORS });
         }
 
+        // Cloudflare가 요청 국가(ISO2)를 넣어준다 — 국기 이모지용
+        const country = ((context.request as any).cf?.country as string | undefined) || null;
         await ensureTable(DB);
-        await ensureUser(DB, userId, body.nickname);
+        await ensureUser(DB, userId, body.nickname, country);
 
         await DB.prepare(`
-            INSERT INTO tileslider_scores (user_id, level, moves, seconds, updated_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
+            INSERT INTO tileslider_scores (user_id, level, moves, seconds, country, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(user_id, level) DO UPDATE SET
-                moves = excluded.moves, seconds = excluded.seconds, updated_at = excluded.updated_at
+                moves = excluded.moves, seconds = excluded.seconds,
+                country = COALESCE(excluded.country, country), updated_at = excluded.updated_at
             WHERE excluded.moves < moves OR (excluded.moves = moves AND excluded.seconds < seconds)
-        `).bind(userId, level, Math.floor(moves), Math.floor(seconds)).run();
+        `).bind(userId, level, Math.floor(moves), Math.floor(seconds), country).run();
 
         const row = await DB.prepare('SELECT moves, seconds FROM tileslider_scores WHERE user_id = ? AND level = ?')
             .bind(userId, level).first<{ moves: number; seconds: number }>();
