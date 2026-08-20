@@ -18,6 +18,14 @@ const CORS = {
 const GROUPS: Record<string, string[]> = {
   bts: ['rm_bts', 'jin_bts', 'suga', 'jhope', 'jimin', 'v_bts', 'jungkook'],
   blackpink: ['jisoo', 'jennie', 'rose', 'lisa'],
+  // 2026-08-20 멤버 24명 수집 배치(group_members2.tsv)로 확장.
+  // 빅뱅은 현 3인 체제(TOP 탈퇴) — top_bigbang은 개인 매칭 풀에만 존재.
+  bigbang: ['gdragon', 'taeyang', 'daesung'],
+  aespa: ['karina', 'winter', 'giselle', 'ningning'],
+  newjeans: ['minji_njz', 'hanni_njz', 'danielle_njz', 'haerin_njz', 'hyein_njz'],
+  ive: ['yujin_ive', 'gaeul_ive', 'rei_ive', 'wonyoung_ive', 'liz_ive', 'leeseo_ive'],
+  lesserafim: ['chaewon_lsf', 'sakura_lsf', 'yunjin_lsf', 'kazuha_lsf', 'eunchae_lsf'],
+  gidle: ['soyeon_idle', 'miyeon_idle', 'minnie', 'yuqi', 'shuhua_idle'],
 };
 
 async function ensureTables(db: D1Database) {
