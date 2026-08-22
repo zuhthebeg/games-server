@@ -17,6 +17,8 @@ async function ensureColumns(DB: D1Database) {
         'footprints_tier INTEGER DEFAULT 0',
         'footprints_title TEXT',
         'footprints_updated_at TEXT',
+        'footprints_km INTEGER DEFAULT 0',   // 클라가 온디바이스 반올림한 근사 거리(km) — 정밀값 아님
+        'footprints_days INTEGER DEFAULT 0', // 근사 기록일수
     ];
     for (const col of cols) {
         try { await DB.prepare(`ALTER TABLE rankings ADD COLUMN ${col}`).run(); } catch { }
@@ -52,11 +54,13 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
                 COALESCE(u.nickname, '익명#' || substr(r.user_id, 1, 6)) AS nickname,
                 COALESCE(r.footprints_tier, 0) AS tier,
                 r.footprints_title AS title,
+                COALESCE(r.footprints_km, 0) AS km,
+                COALESCE(r.footprints_days, 0) AS days,
                 r.footprints_updated_at AS updated_at
             FROM rankings r
             LEFT JOIN users u ON r.user_id = u.id
             WHERE COALESCE(r.footprints_tier, 0) > 0
-            ORDER BY r.footprints_tier DESC, r.footprints_updated_at ASC
+            ORDER BY r.footprints_tier DESC, COALESCE(r.footprints_km, 0) DESC, r.footprints_updated_at ASC
             LIMIT ?
         `).bind(limit).all();
 
@@ -70,12 +74,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 export const onRequestPost: PagesFunction<Env> = async (context) => {
     const { DB } = context.env;
     try {
-        const body: { userId?: string; nickname?: string; tier: number; title: string } =
+        const body: { userId?: string; nickname?: string; tier: number; title: string; km?: number; days?: number } =
             await context.request.json();
 
         const userId = body.userId || context.request.headers.get('x-user-id');
         const tier = Number(body.tier);
         const title = String(body.title || '').slice(0, 40);
+        const km = Math.max(0, Math.min(2_000_000, Math.round(Number(body.km) || 0)));
+        const days = Math.max(0, Math.min(20_000, Math.round(Number(body.days) || 0)));
         if (!userId || !tier || tier <= 0 || !title) {
             return Response.json({ success: false, error: 'userId, tier, title required' }, { status: 400, headers: CORS });
         }
@@ -85,11 +91,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         await ensureUser(DB, userId, body.nickname, country);
 
         await DB.prepare('INSERT OR IGNORE INTO rankings (user_id) VALUES (?)').bind(userId).run();
+        // 갱신 조건: 티어 상승 or 같은 티어에서 거리 증가
         const updated = await DB.prepare(`
             UPDATE rankings
-            SET footprints_tier = ?, footprints_title = ?, footprints_updated_at = datetime('now')
-            WHERE user_id = ? AND (COALESCE(footprints_tier, 0) < ?)
-        `).bind(tier, title, userId, tier).run();
+            SET footprints_tier = ?, footprints_title = ?, footprints_km = ?, footprints_days = ?, footprints_updated_at = datetime('now')
+            WHERE user_id = ? AND (
+                COALESCE(footprints_tier, 0) < ?
+                OR (COALESCE(footprints_tier, 0) = ? AND COALESCE(footprints_km, 0) < ?)
+            )
+        `).bind(tier, title, km, days, userId, tier, tier, km).run();
 
         const row = await DB.prepare(
             'SELECT footprints_tier, footprints_title FROM rankings WHERE user_id = ?'
