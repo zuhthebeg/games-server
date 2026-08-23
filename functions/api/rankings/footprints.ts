@@ -78,10 +78,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             await context.request.json();
 
         const userId = body.userId || context.request.headers.get('x-user-id');
-        const tier = Number(body.tier);
         const title = String(body.title || '').slice(0, 40);
         const km = Math.max(0, Math.min(2_000_000, Math.round(Number(body.km) || 0)));
         const days = Math.max(0, Math.min(20_000, Math.round(Number(body.days) || 0)));
+        // 거리 티어(T7/T8)는 신고 km으로 서버에서도 검증 — 구버전 클라(옛 임계값)와 값 조작 방지 (T8≥30만km, T7≥10만km)
+        const kmTierCap = km >= 300_000 ? 8 : km >= 100_000 ? 7 : 6;
+        const tier = Math.min(Number(body.tier), kmTierCap);
         if (!userId || !tier || tier <= 0 || !title) {
             return Response.json({ success: false, error: 'userId, tier, title required' }, { status: 400, headers: CORS });
         }
