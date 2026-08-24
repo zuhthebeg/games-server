@@ -19,6 +19,7 @@ async function ensureColumns(DB: D1Database) {
         'footprints_updated_at TEXT',
         'footprints_km INTEGER DEFAULT 0',   // 클라가 온디바이스 반올림한 근사 거리(km) — 정밀값 아님
         'footprints_days INTEGER DEFAULT 0', // 근사 기록일수
+        'footprints_years REAL DEFAULT 0',   // 기록 기간(년, 소수1자리) — 1/3/5/10년 리그 분류용
     ];
     for (const col of cols) {
         try { await DB.prepare(`ALTER TABLE rankings ADD COLUMN ${col}`).run(); } catch { }
@@ -56,6 +57,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
                 r.footprints_title AS title,
                 COALESCE(r.footprints_km, 0) AS km,
                 COALESCE(r.footprints_days, 0) AS days,
+                COALESCE(r.footprints_years, 0) AS years,
                 r.footprints_updated_at AS updated_at
             FROM rankings r
             LEFT JOIN users u ON r.user_id = u.id
@@ -74,13 +76,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 export const onRequestPost: PagesFunction<Env> = async (context) => {
     const { DB } = context.env;
     try {
-        const body: { userId?: string; nickname?: string; tier: number; title: string; km?: number; days?: number } =
+        const body: { userId?: string; nickname?: string; tier: number; title: string; km?: number; days?: number; years?: number } =
             await context.request.json();
 
         const userId = body.userId || context.request.headers.get('x-user-id');
         const title = String(body.title || '').slice(0, 40);
         const km = Math.max(0, Math.min(2_000_000, Math.round(Number(body.km) || 0)));
         const days = Math.max(0, Math.min(20_000, Math.round(Number(body.days) || 0)));
+        const years = Math.max(0, Math.min(50, Math.round((Number(body.years) || 0) * 10) / 10));
         // 거리 티어(T7/T8)는 신고 km으로 서버에서도 검증 — 구버전 클라(옛 임계값)와 값 조작 방지 (T8≥30만km, T7≥10만km)
         const kmTierCap = km >= 300_000 ? 8 : km >= 100_000 ? 7 : 6;
         const tier = Math.min(Number(body.tier), kmTierCap);
@@ -96,12 +99,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         // 갱신 조건: 티어 상승 or 같은 티어에서 거리 증가
         const updated = await DB.prepare(`
             UPDATE rankings
-            SET footprints_tier = ?, footprints_title = ?, footprints_km = ?, footprints_days = ?, footprints_updated_at = datetime('now')
+            SET footprints_tier = ?, footprints_title = ?, footprints_km = ?, footprints_days = ?, footprints_years = ?, footprints_updated_at = datetime('now')
             WHERE user_id = ? AND (
                 COALESCE(footprints_tier, 0) < ?
                 OR (COALESCE(footprints_tier, 0) = ? AND COALESCE(footprints_km, 0) < ?)
             )
-        `).bind(tier, title, km, days, userId, tier, tier, km).run();
+        `).bind(tier, title, km, days, years, userId, tier, tier, km).run();
 
         const row = await DB.prepare(
             'SELECT footprints_tier, footprints_title FROM rankings WHERE user_id = ?'
