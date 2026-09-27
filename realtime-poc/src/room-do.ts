@@ -116,6 +116,16 @@ export class RoomDO {
     if (msg?.type === 'start') return void this.exclusive(() => this.handleStart(msg.config));
     if (msg?.type === 'action') return this.handleAction(user, msg.action, ws);
     if (msg?.type === 'leave') return this.handleLeave(user, ws);
+    if (msg?.type === 'rt') return this.handleRt(user, msg.data, ws);
+  }
+
+  // 실시간 액션 게임(spudsquad 등)용 휘발성 중계: 발신자 제외 전원에 즉시 브로드캐스트.
+  // storage 쓰기·seq·스냅샷 없음(초당 10~20회라 저장하면 DO 쓰기 한도 소진). 유실돼도 다음 틱이 덮는다.
+  handleRt(user: string, data: any, ws: WebSocket): void {
+    if (data == null) return;
+    const payload = JSON.stringify({ type: 'rt', from: user, data });
+    if (payload.length > 32_768) return; // 비정상 대형 페이로드 차단
+    this.broadcast(payload, ws);
   }
 
   // 의도적 '나가기'(튕김과 구분). 진행 중이면 남은 사람에게 opponent_left 통보 + 좀비 game 정리.
@@ -295,6 +305,12 @@ export class RoomDO {
       seq += 1;
       await this.ctx.storage.put('seq', seq);
       if (action && action.__snapshot != null) await this.ctx.storage.put('lastSnapshot', action.__snapshot); // 재접속 resync용
+      // 호스트가 판 종료를 선언(__final) → 센티넬 finished. 이후 start가 resync 대신 새 판(재대결)을 연다.
+      if (action && action.__final === true && !game.finished) {
+        game.finished = true;
+        await this.ctx.storage.put('game', game);
+        await this.reportToCoord('finish');
+      }
       // sender 포함 전체 브로드캐스트 — 수신측 dedup(actionId/seq)은 클라가 담당.
       this.broadcast(JSON.stringify({ type: 'event', event: { seq, type: 'action', data: action } }));
       return;
