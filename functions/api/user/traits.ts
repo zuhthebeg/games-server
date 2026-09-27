@@ -9,7 +9,7 @@
 import { Env, jsonResponse, errorResponse, getUserFromRequest } from '../../types';
 
 // 클라이언트가 아무 키나 쌓지 못하게 허용 목록으로 막는다. 새 서비스 = 여기에 한 줄.
-const ALLOWED_TRAITS = ['animalface', 'voicematch', 'mbti', 'food_worldcup'];
+const ALLOWED_TRAITS = ['animalface', 'voicematch', 'mbti', 'food_worldcup', 'spudsquad'];
 const MAX_VALUE_LEN = 2000;
 
 export async function ensureTraitsTable(db: D1Database) {
