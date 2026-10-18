@@ -84,3 +84,5 @@ registerGame(mahjongPlugin, { timeLimit: 20, bet: 100000 });
 registerGame(gostopPlugin, { timeLimit: 30, bet: 1 });
 registerGame(spudsquadPlugin, {});
 registerGame(arpgPlugin, {});
+// Separate opt-in hostile room namespace; never match ordinary cooperative rooms.
+registerGame({ ...arpgPlugin, id: 'arpg-invasion', name: 'ARPG 침입 동의방' }, { invasion: true });
