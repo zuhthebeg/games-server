@@ -110,7 +110,7 @@ export function parseToken(token: string): TokenPayload | null {
     try {
         const parts = token.split('.');
         if (parts.length !== 3) return null;
-        const payload = JSON.parse(atob(parts[1])) as TokenPayload;
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))) as TokenPayload;
         if (payload.exp < (payload.exp < 1e12 ? Date.now() / 1000 : Date.now())) return null;
         return payload;
     } catch {
