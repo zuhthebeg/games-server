@@ -4,7 +4,8 @@
  */
 
 import type { Env } from '../../types';
-import { jsonResponse, errorResponse, generateId, createToken } from '../../types';
+import { createJWT } from '../../lib/auth';
+import { jsonResponse, errorResponse, generateId } from '../../types';
 
 interface PagesContext {
     request: Request;
@@ -44,7 +45,7 @@ export const onRequestPost = async (context: PagesContext): Promise<Response> =>
         }
 
         // Generate token
-        const token = createToken({ userId, isAnonymous: true });
+        const token = await createJWT({ sub: userId, userId, isAnonymous: true }, (env as Env & { JWT_SECRET: string }).JWT_SECRET, 24 * 60 * 60);
 
         return jsonResponse({
             token,

@@ -111,7 +111,7 @@ export function parseToken(token: string): TokenPayload | null {
         const parts = token.split('.');
         if (parts.length !== 3) return null;
         const payload = JSON.parse(atob(parts[1])) as TokenPayload;
-        if (payload.exp < Date.now()) return null;
+        if (payload.exp < (payload.exp < 1e12 ? Date.now() / 1000 : Date.now())) return null;
         return payload;
     } catch {
         return null;
