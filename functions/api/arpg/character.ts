@@ -4,7 +4,7 @@ import { updateUserCountry, extractCountry, ensureCountryColumn } from '../ranki
 interface Env { DB: D1Database; JWT_SECRET: string }
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS' };
 const reply = (value: unknown, status = 200) => Response.json(value, { status, headers });
-const stages = new Set([...Array.from({ length: 57 }, (_, i) => `S${i + 1}`), 'TD1', 'M_MINE_CART', 'M_MARSH_MARKERS', 'M_THRONE_GARGOYLE']);
+const stages = new Set([...Array.from({ length: 57 }, (_, i) => `S${i + 1}`), 'TD1', 'D_EMBER', 'D_FROST', 'D_VENOM', 'M_MINE_CART', 'M_MARSH_MARKERS', 'M_THRONE_GARGOYLE']);
 const integer = (v: unknown, min = 0, max = 1e9) => Number.isSafeInteger(v) && (v as number) >= min && (v as number) <= max;
 const object = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
 export async function ensureTable(DB: D1Database) {
