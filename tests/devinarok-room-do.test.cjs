@@ -143,10 +143,14 @@ async function run() {
     assert(snap0.ents.length >= 5);
     assert(Array.isArray(snap0.ents[0]), 'snapshot entities use compact protocol arrays');
 
+    p0.send({ t: 'ping', c: 122 });
+    const lobbyPong = await p0.waitFor((message) => message.t === 'pong' && message.c === 122, 'lobby clock pong');
+    assert.equal(lobbyPong.tick, 0);
+
     p0.send({ t: 'ping', c: 123 });
     const pong = await p0.waitFor((message) => message.t === 'pong', 'clock pong');
     assert.equal(pong.c, 123);
-    assert(Number.isSafeInteger(pong.tick));
+    assert.equal(pong.tick, snap0.tick);
 
     p0.send({ t: 'in', ae: 0, sa: snap0.tick, inputs: [{ seq: 1, mx: 127, mz: 0, aim: 64, b: 0, vt: 0 }] });
     const applied = await p0.waitFor((message) => message.t === 'snap' && message.ack >= 1, 'input acknowledgement');

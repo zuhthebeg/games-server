@@ -518,7 +518,8 @@ export class DevinarokRoomDO {
     }
     if (message.t === 'hello') return;
     if (message.t === 'ping') {
-      this.send(socket, { t: 'pong', c: message.c, tick: this.world?.tick ?? 0 });
+      const tick = this.world && this.runId && !this.world.outcome ? this.world.tick : 0;
+      this.send(socket, { t: 'pong', c: message.c, tick });
     } else if (message.t === 'in') {
       await this.handleInput(playerId, message);
     } else if (message.t === 'lobby.ready' || message.t === 'lobby.stage' || message.t === 'lobby.start') {
