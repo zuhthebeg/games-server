@@ -14,6 +14,10 @@ class_name = "RoomDO"
 name = "COORD"
 class_name = "CoordinatorDO"
 
+[[durable_objects.bindings]]
+name = "DEVINAROK_ROOM"
+class_name = "DevinarokRoomDO"
+
 # SQLite 백엔드 DO (Workers Free 플랜에서 사용 가능한 유일한 종류)
 [[migrations]]
 tag = "v1"
@@ -22,3 +26,7 @@ new_sqlite_classes = ["RoomDO"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["CoordinatorDO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["DevinarokRoomDO"]
