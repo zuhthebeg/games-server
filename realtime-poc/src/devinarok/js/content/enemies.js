@@ -19,6 +19,23 @@ export const ENEMIES = {
     behavior: 'ground-circle', keepDistance: 6, circleRadius: 1.3, windupTicks: 24, activeTicks: 3,
     cooldownTicks: 48, xp: 22, gold: [2, 5], dropChance: 0.12,
   },
+  ashcaller: {
+    id: 'ashcaller', model: 'Skeleton_Mage', hp: 35, attack: 12, speed: 1.4, radius: 0.38,
+    tint: 0x949a93,
+    behavior: 'summoner', keepDistance: 7, circleRadius: 1.3, windupTicks: 24, activeTicks: 3,
+    cooldownTicks: 48, xp: 22, gold: [2, 5], dropChance: 0.12,
+    summon: { enemy: 'minion', count: 2, windupTicks: 30, cooldownTicks: 240, maxAlive: 4 },
+  },
+  bonearcher: {
+    id: 'bonearcher', model: 'Skeleton_Rogue', hp: 40, attack: 10, speed: 2.1, radius: 0.38,
+    behavior: 'ranged-line', keepDistance: 6, length: 10, width: 0.6, windupTicks: 20,
+    activeTicks: 2, cooldownTicks: 60, xp: 20, gold: [2, 5], dropChance: 0.12,
+  },
+  brute: {
+    id: 'brute', model: 'Skeleton_Warrior', hp: 160, attack: 20, speed: 0.9, radius: 0.62, scale: 1.3,
+    behavior: 'slam', slamRadius: 2.2, windupTicks: 28, activeTicks: 3, cooldownTicks: 90,
+    knockback: 0.8, xp: 48, gold: [3, 7], dropChance: 0.18,
+  },
   commander: {
     id: 'commander', model: 'Skeleton_Warrior', hp: 900, attack: 20, speed: 1.5, radius: 0.75,
     behavior: 'boss-patterns', scale: 1.6, xp: 420, gold: [2, 5], dropChance: 1,
@@ -31,6 +48,19 @@ export const ENEMIES = {
       phaseTwoWindupTicks: 18,
       motionMult: 1.2,
       cooldownTicks: 150,
+    },
+  },
+  ashwarden: {
+    id: 'ashwarden', model: 'Skeleton_Mage', hp: 1300, attack: 22, speed: 1.2, radius: 0.85,
+    behavior: 'boss-patterns', scale: 1.8, xp: 620, gold: [4, 9], dropChance: 1,
+    patterns: {
+      'summon-wave': { count: 4, windupTicks: 30, maxAliveWaves: 1 },
+      'ash-rain': { radius: 1.6, windupTicks: 24, randomCircles: 2, phaseTwoExtra: 2 },
+      'bone-spear': {
+        minTargetDistance: 5.5, length: 14, width: 1, windupTicks: 24,
+        phaseTwoWindupTicks: 18, motionMult: 1.2, cooldownTicks: 150,
+      },
+      'blink-away': { hitThreshold: 12, tickInterval: 300, windupTicks: 18, minPlayerDistance: 6 },
     },
   },
 };

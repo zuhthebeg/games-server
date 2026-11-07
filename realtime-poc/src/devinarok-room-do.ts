@@ -10,7 +10,7 @@ import { decodeMessage, encodeMessage, PROTOCOL_VERSION } from './devinarok/js/n
 import { SIM_HASH } from './devinarok/js/net/sim-version.js';
 
 const ROOM_CODE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
-const STAGE_IDS = ['C1', 'C2', 'C3', 'CB'];
+const STAGE_IDS = ['C1', 'C2', 'C3', 'CB', 'F1', 'F2', 'F3', 'FB'];
 const TICK_MS = 1000 / 30;
 const SNAPSHOT_INTERVAL = 2;
 const FULL_INTERVAL = 30;

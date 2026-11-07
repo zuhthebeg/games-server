@@ -27,6 +27,19 @@ export const PROP_FOOTPRINTS = {
   'assets/env/table_medium_decorated_A.glb': { type: 'rect', width: 1.7, depth: 1.7 },
   'assets/env/chair.glb': { type: 'circle', radius: 0.32 },
   'assets/env/stool.glb': { type: 'circle', radius: 0.32 },
+  'assets/env/forest/log.glb': { type: 'rect', width: 0.8, depth: 3 },
+  'assets/env/forest/log_large.glb': { type: 'rect', width: 1.3, depth: 2.4 },
+  'assets/env/forest/rock_largeA.glb': { type: 'circle', radius: 0.9 },
+  'assets/env/forest/rock_largeD.glb': { type: 'circle', radius: 0.9 },
+  'assets/env/forest/rock_smallB.glb': { type: 'circle', radius: 0.55 },
+  'assets/env/forest/stump_old.glb': { type: 'circle', radius: 0.5 },
+  'assets/env/forest/stump_round.glb': { type: 'circle', radius: 0.5 },
+  'assets/env/forest/fence_planks.glb': { type: 'rect', width: 2.8, depth: 0.5 },
+  'assets/env/forest/fence_gate.glb': { type: 'rect', width: 2.8, depth: 0.8 },
+  'assets/env/forest/tree_default_fall.glb': { type: 'rect', width: 2.8, depth: 2.6 },
+  'assets/env/forest/tree_oak_fall.glb': { type: 'rect', width: 3, depth: 3 },
+  'assets/env/forest/tree_pineTallA.glb': { type: 'circle', radius: 1.25 },
+  'assets/env/forest/tree_pineTallB.glb': { type: 'circle', radius: 1.4 },
 };
 
 const NON_SOLID_PROP_MODELS = new Set([
@@ -39,6 +52,12 @@ const NON_SOLID_PROP_MODELS = new Set([
   'assets/env/torch_mounted.glb',
   'assets/env/rubble_half.glb',
   'assets/env/wall_doorway.glb',
+  'assets/env/forest/mushroom_redGroup.glb',
+  'assets/env/forest/mushroom_tanGroup.glb',
+  'assets/env/forest/plant_bushLarge.glb',
+  'assets/env/forest/campfire_logs.glb',
+  'assets/env/forest/ground_pathStraight.glb',
+  'assets/env/forest/ground_grass.glb',
 ]);
 
 const CENTERED_DECOR_MODELS = new Set([
@@ -171,6 +190,38 @@ function floorForRoom(room, width, depth) {
       });
       if (room.theme !== 'inn' && (column + row * 2) % 5 === 0) {
         props.push({ model: FLOOR_MODELS.brokenSmall, x: x + 1, y: 0.035, z: z + 1, rotY: ((column + row) % 4) * Math.PI / 2, roomId: room.id });
+      }
+    }
+  }
+  return props;
+}
+
+function forestFloorForRoom(room, width, depth) {
+  const props = [];
+  const columns = Math.ceil(width / 4);
+  const rows = Math.ceil(depth / 4);
+  for (let column = 0; column < columns; column += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      const x = -width / 2 + 2 + column * 4;
+      const z = room.centerZ - depth / 2 + 2 + row * 4;
+      props.push({
+        model: (column + row * 2) % 7 === 0 ? FLOOR_MODELS.rockyDirt : FLOOR_MODELS.dirt,
+        x,
+        z,
+        roomId: room.id,
+      });
+      if ((column + row) % 3 === 0) {
+        props.push({
+          model: 'assets/env/forest/ground_grass.glb',
+          x: x + 1,
+          y: 0.025,
+          z: z + 1,
+          scaleX: 0.9,
+          scaleZ: 0.9,
+          rotY: ((column + row) % 4) * Math.PI / 2,
+          solid: false,
+          roomId: room.id,
+        });
       }
     }
   }
@@ -355,7 +406,134 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
   return { props, obstacles, doors };
 }
 
-function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false } = {}) {
+function buildForestRoomArt(room, { width, depth, lastRoom, stageId }) {
+  const props = forestFloorForRoom(room, width, depth);
+  const obstacles = [];
+  const doors = [];
+  const treeModels = ['assets/env/forest/tree_pineTallA.glb', 'assets/env/forest/tree_pineTallB.glb'];
+  const spacing = 2.4;
+  const boundaryTrees = [];
+  for (const [row, offset] of [-0.75, 1.65].entries()) {
+    const stagger = row * spacing / 2;
+    for (let x = -width / 2 - offset; x <= width / 2 + offset; x += spacing) {
+      for (const side of [-1, 1]) {
+        boundaryTrees.push({
+          model: treeModels[(Math.round((x + stagger) / spacing) + row) & 1],
+          x: x + stagger,
+          z: room.centerZ + side * (depth / 2 + offset),
+          forestBoundaryRow: row,
+          forestBoundaryAxis: 'horizontal',
+          forestBoundarySide: side,
+        });
+      }
+    }
+    for (let z = room.centerZ - depth / 2 - offset; z <= room.centerZ + depth / 2 + offset; z += spacing) {
+      for (const side of [-1, 1]) {
+        boundaryTrees.push({
+          model: treeModels[(Math.round((z + stagger) / spacing) + row) & 1],
+          x: side * (4.4 + row * 1.2),
+          z: z + stagger,
+          forestBoundaryRow: row,
+          forestBoundaryAxis: 'vertical',
+          forestBoundarySide: side,
+        });
+      }
+    }
+  }
+  props.push(...boundaryTrees.map((tree) => ({ ...tree, forestBoundary: true, solid: false, roomId: room.id })));
+  if (room.nextRoomId) {
+    const door = { id: `${room.id}-door`, fromRoom: room.id, toRoom: room.nextRoomId, x: 0, z: room.centerZ - depth / 2, open: false };
+    doors.push(door);
+    obstacles.push({ id: `${door.id}-gate`, type: 'rect', x: 0, z: door.z, width: 2.8, depth: 0.8, doorId: door.id, roomId: room.id });
+    props.push({ model: 'assets/env/forest/fence_gate.glb', x: 0, z: door.z, rotY: 0, doorId: door.id, obstacleId: `${door.id}-gate`, solid: false, roomId: room.id });
+    props.push({ model: 'assets/env/forest/log_large.glb', x: 0, y: 2.3, z: door.z, rotY: Math.PI / 2, solid: false, roomId: room.id });
+    props.push(
+      { model: 'assets/env/forest/stump_old.glb', x: -1.8, z: door.z, roomId: room.id },
+      { model: 'assets/env/forest/stump_old.glb', x: 1.8, z: door.z, roomId: room.id },
+    );
+  }
+  const center = room.centerZ;
+  const interior = stageId === 'F1'
+    ? [
+      ['log_large.glb', -6, center - 5, 0, true], ['log_large.glb', 6, center - 5, 0, true],
+      ['log_large.glb', -6, center + 5, 0, true], ['log_large.glb', 6, center + 5, 0, true],
+      ['log.glb', -3.2, center - 6, 0.2, true], ['log.glb', 3.2, center + 6, -0.2, true],
+      ['stump_round.glb', -4, center - 1, 0, true], ['stump_old.glb', 4, center + 1, 0, true],
+      ['rock_smallB.glb', -5.3, center + 2, 0, true], ['rock_smallB.glb', 5.3, center - 2, 0, true],
+      ['mushroom_redGroup.glb', -3.6, center + 4, 0, false], ['mushroom_tanGroup.glb', 3.6, center - 4, 0, false],
+    ]
+    : stageId === 'F2'
+      ? [
+        ['ground_pathStraight.glb', -4, center + 4, 0, false, true], ['ground_pathStraight.glb', 4, center + 4, 0, false, true],
+        ['ground_pathStraight.glb', -4, center + 10, 0, false, true], ['ground_pathStraight.glb', 4, center + 10, 0, false, true],
+        ['mushroom_redGroup.glb', -2.5, center + 4, 0, false], ['mushroom_tanGroup.glb', 2.5, center + 4, 0, false],
+        ['mushroom_tanGroup.glb', -2.5, center + 10, 0, false], ['mushroom_redGroup.glb', 2.5, center + 10, 0, false],
+        ['rock_largeA.glb', -5, center + 5, 0, true], ['rock_largeD.glb', 5, center + 5, 0, true],
+        ['rock_smallB.glb', -4.5, center + 10, 0, true], ['rock_smallB.glb', 4.5, center + 10, 0, true],
+      ]
+      : stageId === 'F3'
+        ? [
+          ['campfire_logs.glb', 0, center + 4, 0, false],
+          ['fence_planks.glb', -4.5, center + 3, 0, true], ['fence_planks.glb', 4.5, center + 3, 0, true],
+          ['fence_planks.glb', -4.5, center + 9, 0, true], ['fence_planks.glb', 4.5, center + 9, 0, true],
+          ['fence_gate.glb', -2.8, center + 10, Math.PI / 2, true], ['fence_gate.glb', 2.8, center + 10, Math.PI / 2, true],
+          ['rock_smallB.glb', -5, center + 6, 0, true], ['rock_smallB.glb', 5, center + 6, 0, true],
+          ['plant_bushLarge.glb', -2.5, center + 4, 0, false], ['plant_bushLarge.glb', 2.5, center + 4, 0, false],
+          ['ground_grass.glb', 0, center + 9, 0, false],
+        ]
+        : [
+          ['tree_default_fall.glb', -6, center - 5, 0, false], ['tree_oak_fall.glb', 6, center - 5, 0, false],
+          ['tree_oak_fall.glb', -6, center + 5, 0, false], ['tree_default_fall.glb', 6, center + 5, 0, false],
+          ['tree_default_fall.glb', -5, center - 6.5, Math.PI / 2, false], ['tree_oak_fall.glb', 5, center - 6.5, Math.PI / 2, false],
+          ['tree_oak_fall.glb', -5, center + 6.5, Math.PI / 2, false], ['tree_default_fall.glb', 5, center + 6.5, Math.PI / 2, false],
+          ['rock_largeA.glb', -4, center + 5, 0, true], ['rock_largeD.glb', 4, center + 5, 0, true],
+          ['rock_smallB.glb', -4, center + 9, 0, true], ['rock_smallB.glb', 4, center + 9, 0, true],
+        ];
+  for (const [name, x, z, rotY, solid, bogPool = false] of interior) {
+    const model = `assets/env/forest/${name}`;
+    props.push({
+      model, x, z, rotY, solid, bogPool, forestInterior: true, roomId: room.id,
+      ...(bogPool ? { scaleX: 1.7, scaleZ: 1.3 } : {}),
+      ...(name === 'ground_grass' ? { scaleX: 0.9, scaleZ: 0.9, y: 0.04 } : {}),
+    });
+  }
+  if (stageId === 'F1') {
+    const pathDetails = [
+      ['log_large.glb', -5, center + 7, 0, false],
+      ['log_large.glb', 5, center + 7, 0, false],
+      ['stump_round.glb', -3, center + 5, 0, false],
+      ['stump_old.glb', 3, center + 9, 0, false],
+      ['rock_smallB.glb', -3.2, center + 9, 0, false],
+      ['rock_smallB.glb', 3.2, center + 5, 0, false],
+      ['mushroom_redGroup.glb', -1.6, center + 5, 0, false],
+      ['mushroom_tanGroup.glb', 1.6, center + 9, 0, false],
+    ];
+    for (const [name, x, z, rotY, solid] of pathDetails) {
+      props.push({
+        model: `assets/env/forest/${name}`,
+        x, z, rotY, solid, forestInterior: true, roomId: room.id,
+      });
+    }
+    for (const zOffset of [4, 7, 10]) {
+      props.push({
+        model: 'assets/env/forest/ground_pathStraight.glb',
+        x: 0,
+        z: center + zOffset,
+        scaleX: 2.2,
+        scaleZ: 3,
+        y: 0.03,
+        solid: false,
+        forestInterior: true,
+        roomId: room.id,
+      });
+    }
+  }
+  keepRoomSpawnsClear(props, room, width, depth);
+  addPropObstacles(props, obstacles, room.id);
+  return { props, obstacles, doors };
+}
+
+function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false, region = 1 } = {}) {
   const width = boss ? 20 : 16;
   const depth = 20;
   const roomGap = depth;
@@ -370,7 +548,9 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
   const obstacles = [];
   const doors = [];
   for (const [index, room] of arranged.entries()) {
-    const art = buildRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1 });
+    const art = region === 2
+      ? buildForestRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1, stageId: id })
+      : buildRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1 });
     props.push(...art.props);
     obstacles.push(...art.obstacles);
     doors.push(...art.doors);
@@ -385,6 +565,8 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
     name,
     stageLevel,
     recommendedLevel,
+    region,
+    ...(region === 2 ? { theme: 'forest' } : {}),
     boss,
     width,
     depth: arranged.length * depth,
@@ -416,7 +598,31 @@ export const STAGE_LIST = [
   makeStage('CB', '기사단장의 전당', 7, 7, [
     { theme: 'hall', waves: [{ enemy: 'commander', count: 1 }] },
   ], { boss: true }),
+  makeStage('F1', '재가 내리는 숲길', 7, 7, [
+    { theme: 'forest-path', waves: [{ enemy: 'minion', count: 3 }, { enemy: 'ashcaller', count: 1 }] },
+    { theme: 'forest-path', waves: [{ enemy: 'bonearcher', count: 2 }, { enemy: 'minion', count: 3 }] },
+  ], { region: 2 }),
+  makeStage('F2', '검은 늪지', 8, 8, [
+    { theme: 'forest-bog', waves: [{ enemy: 'bonearcher', count: 2 }, { enemy: 'ashcaller', count: 1 }] },
+    { theme: 'forest-bog', waves: [{ enemy: 'brute', count: 1 }, { enemy: 'minion', count: 4 }] },
+  ], { region: 2 }),
+  makeStage('F3', '불탄 사냥터', 9, 9, [
+    { theme: 'forest-clearing', waves: [{ enemy: 'brute', count: 1 }, { enemy: 'bonearcher', count: 2 }] },
+    { theme: 'forest-clearing', waves: [{ enemy: 'ashcaller', count: 1 }, { enemy: 'brute', count: 2 }] },
+  ], { region: 2 }),
+  makeStage('FB', '잿빛 숲의 사령술사', 10, 10, [
+    { theme: 'forest-boss', waves: [{ enemy: 'ashwarden', count: 1 }] },
+  ], { boss: true, region: 2 }),
 ];
+
+export function isStageUnlocked(stageId, clearedStages = []) {
+  const index = STAGE_LIST.findIndex((stage) => stage.id === stageId);
+  if (index < 0) return false;
+  if (index === 0) return true;
+  const stage = STAGE_LIST[index];
+  if (stage.region === 2 && !clearedStages.includes('CB')) return false;
+  return clearedStages.includes(STAGE_LIST[index - 1].id);
+}
 
 export const STAGES = Object.fromEntries(STAGE_LIST.map((stage) => [stage.id, stage]));
 
