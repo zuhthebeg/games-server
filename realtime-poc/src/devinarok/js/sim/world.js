@@ -1026,7 +1026,7 @@ function attackShapeHit(shape, target, targetRadius = 0) {
 
 function enemyHistoryFrame(world, viewLag) {
   if (!Number.isFinite(viewLag)) return null;
-  const clampedTick = world.tick - clamp(Math.trunc(viewLag), 0, 8);
+  const clampedTick = world.tick - clamp(Math.trunc(viewLag), 0, 12);
   if (clampedTick >= world.tick) return null;
   return world.enemyHistory.find((frame) => frame.tick === clampedTick) ?? null;
 }
@@ -1048,7 +1048,7 @@ function recordEnemyHistory(world) {
   const previous = world.enemyHistory.at(-1);
   if (previous?.tick === world.tick) world.enemyHistory[world.enemyHistory.length - 1] = frame;
   else world.enemyHistory.push(frame);
-  if (world.enemyHistory.length > 9) world.enemyHistory.splice(0, world.enemyHistory.length - 9);
+  if (world.enemyHistory.length > 13) world.enemyHistory.splice(0, world.enemyHistory.length - 13);
 }
 
 function makeLineShape(x, z, angle, length, width) {
@@ -1215,7 +1215,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   const viewTick = Number.isSafeInteger(rawInput?.viewTick) ? rawInput.viewTick : undefined;
   player.viewLag = viewTick === undefined
     ? 0
-    : clamp((Number.isSafeInteger(ctx.tick) ? ctx.tick : 0) - viewTick, 0, 8);
+    : clamp((Number.isSafeInteger(ctx.tick) ? ctx.tick : 0) - viewTick, 0, 12);
   const events = [];
   let skillStrike = null;
   let attackStrike = null;
