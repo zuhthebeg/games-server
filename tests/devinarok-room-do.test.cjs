@@ -190,10 +190,61 @@ async function testMixedFamilyStageSnapshot() {
   }
 }
 
+async function testGuestCanJoinHostUnlockedForestStage() {
+  const mf = new Miniflare({
+    modules: true,
+    script: bundleWorker(),
+    compatibilityDate: '2025-01-01',
+    durableObjects: {
+      ROOM: { className: 'RoomDO', useSQLite: true },
+      COORD: { className: 'CoordinatorDO', useSQLite: true },
+      DEVINAROK_ROOM: { className: 'DevinarokRoomDO', useSQLite: true },
+    },
+  });
+  const clients = [];
+  try {
+    await mf.ready;
+    const host = await connect(mf, 'FST234', 'ForestHost', null, SIM_HASH, {
+      level: 7, equipment: [], potions: 2, clearedStages: ['CB'],
+    });
+    clients.push(host);
+    await host.waitFor((message) => message.t === 'welcome', 'forest host welcome');
+    await host.waitFor((message) => message.t === 'lobby', 'forest host lobby');
+    const guest = await connect(mf, 'FST234', 'ForestGuest', null, SIM_HASH, {
+      level: 1, equipment: [], potions: 2, clearedStages: [],
+    });
+    clients.push(guest);
+    await guest.waitFor((message) => message.t === 'welcome', 'forest guest welcome');
+    await host.waitFor((message) => message.t === 'lobby' && message.players.length === 2, 'forest guest joined');
+
+    host.send({ t: 'lobby.stage', stageId: 'F2' });
+    assert.equal((await host.waitFor((message) => message.t === 'error', 'locked forest stage error')).code, 'stage-locked');
+    host.send({ t: 'lobby.stage', stageId: 'F1' });
+    await host.waitFor((message) => message.t === 'lobby' && message.stageId === 'F1', 'host selected unlocked forest stage');
+    host.send({ t: 'lobby.ready', ready: true });
+    guest.send({ t: 'lobby.ready', ready: true });
+    await host.waitFor(
+      (message) => message.t === 'lobby' && message.players.every((player) => player.ready),
+      'forest party ready',
+    );
+    host.send({ t: 'lobby.start' });
+    const [hostStart, guestStart] = await Promise.all([
+      host.waitFor((message) => message.t === 'start', 'forest host start'),
+      guest.waitFor((message) => message.t === 'start', 'forest guest start'),
+    ]);
+    assert.equal(hostStart.stageId, 'F1');
+    assert.equal(guestStart.stageId, 'F1');
+  } finally {
+    for (const client of clients) client.close();
+    await mf.dispose();
+  }
+}
+
 async function run() {
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
   testNewPlayerStaticFieldsInDelta();
   await testMixedFamilyStageSnapshot();
+  await testGuestCanJoinHostUnlockedForestStage();
   const mf = new Miniflare({
     modules: true,
     script: bundleWorker(),

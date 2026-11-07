@@ -27,19 +27,19 @@ export const PROP_FOOTPRINTS = {
   'assets/env/table_medium_decorated_A.glb': { type: 'rect', width: 1.7, depth: 1.7 },
   'assets/env/chair.glb': { type: 'circle', radius: 0.32 },
   'assets/env/stool.glb': { type: 'circle', radius: 0.32 },
-  'assets/env/forest/log.glb': { type: 'rect', width: 2.2, depth: 0.5 },
-  'assets/env/forest/log_large.glb': { type: 'rect', width: 3.2, depth: 0.7 },
-  'assets/env/forest/rock_largeA.glb': { type: 'circle', radius: 0.8 },
-  'assets/env/forest/rock_largeD.glb': { type: 'circle', radius: 0.75 },
-  'assets/env/forest/rock_smallB.glb': { type: 'circle', radius: 0.4 },
-  'assets/env/forest/stump_old.glb': { type: 'circle', radius: 0.55 },
-  'assets/env/forest/stump_round.glb': { type: 'circle', radius: 0.42 },
-  'assets/env/forest/fence_planks.glb': { type: 'rect', width: 2.8, depth: 0.35 },
-  'assets/env/forest/fence_gate.glb': { type: 'rect', width: 2.6, depth: 0.55 },
-  'assets/env/forest/tree_default_fall.glb': { type: 'rect', width: 3.2, depth: 0.7 },
-  'assets/env/forest/tree_oak_fall.glb': { type: 'rect', width: 3.6, depth: 0.8 },
-  'assets/env/forest/tree_pineTallA.glb': { type: 'circle', radius: 0.45 },
-  'assets/env/forest/tree_pineTallB.glb': { type: 'circle', radius: 0.45 },
+  'assets/env/forest/log.glb': { type: 'rect', width: 0.8, depth: 3 },
+  'assets/env/forest/log_large.glb': { type: 'rect', width: 1.3, depth: 2.4 },
+  'assets/env/forest/rock_largeA.glb': { type: 'circle', radius: 0.9 },
+  'assets/env/forest/rock_largeD.glb': { type: 'circle', radius: 0.9 },
+  'assets/env/forest/rock_smallB.glb': { type: 'circle', radius: 0.55 },
+  'assets/env/forest/stump_old.glb': { type: 'circle', radius: 0.5 },
+  'assets/env/forest/stump_round.glb': { type: 'circle', radius: 0.5 },
+  'assets/env/forest/fence_planks.glb': { type: 'rect', width: 2.8, depth: 0.5 },
+  'assets/env/forest/fence_gate.glb': { type: 'rect', width: 2.8, depth: 0.8 },
+  'assets/env/forest/tree_default_fall.glb': { type: 'rect', width: 2.8, depth: 2.6 },
+  'assets/env/forest/tree_oak_fall.glb': { type: 'rect', width: 3, depth: 3 },
+  'assets/env/forest/tree_pineTallA.glb': { type: 'circle', radius: 1.25 },
+  'assets/env/forest/tree_pineTallB.glb': { type: 'circle', radius: 1.4 },
 };
 
 const NON_SOLID_PROP_MODELS = new Set([
@@ -216,7 +216,8 @@ function forestFloorForRoom(room, width, depth) {
           x: x + 1,
           y: 0.025,
           z: z + 1,
-          scale: 0.72,
+          scaleX: 0.9,
+          scaleZ: 0.9,
           rotY: ((column + row) % 4) * Math.PI / 2,
           solid: false,
           roomId: room.id,
@@ -409,71 +410,123 @@ function buildForestRoomArt(room, { width, depth, lastRoom, stageId }) {
   const props = forestFloorForRoom(room, width, depth);
   const obstacles = [];
   const doors = [];
-  const bounds = [
-    ...[-1, 1].flatMap((side) => Array.from({ length: 5 }, (_, index) => ({
-      model: index % 2 ? 'assets/env/forest/tree_oak_fall.glb' : 'assets/env/forest/tree_default_fall.glb',
-      x: side * (width / 2 + 1.2),
-      z: room.centerZ - 8 + index * 4,
-      scale: 1.25,
-      solid: false,
-      roomId: room.id,
-    }))),
-    ...[-1, 1].flatMap((side) => Array.from({ length: 5 }, (_, index) => ({
-      model: index % 2 ? 'assets/env/forest/tree_pineTallA.glb' : 'assets/env/forest/tree_pineTallB.glb',
-      x: -width / 2 - 1 + index * (width / 4),
-      z: room.centerZ + side * (depth / 2 + 1.4),
-      scale: 1.1,
-      solid: false,
-      roomId: room.id,
-    }))),
-  ];
-  props.push(...bounds);
+  const treeModels = ['assets/env/forest/tree_pineTallA.glb', 'assets/env/forest/tree_pineTallB.glb'];
+  const spacing = 2.4;
+  const boundaryTrees = [];
+  for (const [row, offset] of [-0.75, 1.65].entries()) {
+    const stagger = row * spacing / 2;
+    for (let x = -width / 2 - offset; x <= width / 2 + offset; x += spacing) {
+      for (const side of [-1, 1]) {
+        boundaryTrees.push({
+          model: treeModels[(Math.round((x + stagger) / spacing) + row) & 1],
+          x: x + stagger,
+          z: room.centerZ + side * (depth / 2 + offset),
+          forestBoundaryRow: row,
+          forestBoundaryAxis: 'horizontal',
+          forestBoundarySide: side,
+        });
+      }
+    }
+    for (let z = room.centerZ - depth / 2 - offset; z <= room.centerZ + depth / 2 + offset; z += spacing) {
+      for (const side of [-1, 1]) {
+        boundaryTrees.push({
+          model: treeModels[(Math.round((z + stagger) / spacing) + row) & 1],
+          x: side * (4.4 + row * 1.2),
+          z: z + stagger,
+          forestBoundaryRow: row,
+          forestBoundaryAxis: 'vertical',
+          forestBoundarySide: side,
+        });
+      }
+    }
+  }
+  props.push(...boundaryTrees.map((tree) => ({ ...tree, forestBoundary: true, solid: false, roomId: room.id })));
   if (room.nextRoomId) {
     const door = { id: `${room.id}-door`, fromRoom: room.id, toRoom: room.nextRoomId, x: 0, z: room.centerZ - depth / 2, open: false };
     doors.push(door);
-    obstacles.push({ id: `${door.id}-gate`, type: 'rect', x: 0, z: door.z, width: 2.6, depth: 0.55, doorId: door.id, roomId: room.id });
+    obstacles.push({ id: `${door.id}-gate`, type: 'rect', x: 0, z: door.z, width: 2.8, depth: 0.8, doorId: door.id, roomId: room.id });
     props.push({ model: 'assets/env/forest/fence_gate.glb', x: 0, z: door.z, rotY: 0, doorId: door.id, obstacleId: `${door.id}-gate`, solid: false, roomId: room.id });
     props.push({ model: 'assets/env/forest/log_large.glb', x: 0, y: 2.3, z: door.z, rotY: Math.PI / 2, solid: false, roomId: room.id });
     props.push(
-      { model: 'assets/env/forest/stump_old.glb', x: -1.65, z: door.z, scale: 1.4, roomId: room.id },
-      { model: 'assets/env/forest/stump_old.glb', x: 1.65, z: door.z, scale: 1.4, roomId: room.id },
+      { model: 'assets/env/forest/stump_old.glb', x: -1.8, z: door.z, roomId: room.id },
+      { model: 'assets/env/forest/stump_old.glb', x: 1.8, z: door.z, roomId: room.id },
     );
   }
   const center = room.centerZ;
-  const decorative = stageId === 'F1'
+  const interior = stageId === 'F1'
     ? [
-      ['assets/env/forest/ground_pathStraight.glb', 0, center - 3, 0],
-      ['assets/env/forest/log_large.glb', -3.8, center + 1.8, 0.1],
-      ['assets/env/forest/log.glb', 4.5, center - 0.5, -0.2],
-      ['assets/env/forest/stump_round.glb', 5.6, center + 5, 0],
+      ['log_large.glb', -6, center - 5, 0, true], ['log_large.glb', 6, center - 5, 0, true],
+      ['log_large.glb', -6, center + 5, 0, true], ['log_large.glb', 6, center + 5, 0, true],
+      ['log.glb', -3.2, center - 6, 0.2, true], ['log.glb', 3.2, center + 6, -0.2, true],
+      ['stump_round.glb', -4, center - 1, 0, true], ['stump_old.glb', 4, center + 1, 0, true],
+      ['rock_smallB.glb', -5.3, center + 2, 0, true], ['rock_smallB.glb', 5.3, center - 2, 0, true],
+      ['mushroom_redGroup.glb', -3.6, center + 4, 0, false], ['mushroom_tanGroup.glb', 3.6, center - 4, 0, false],
     ]
     : stageId === 'F2'
       ? [
-        ['assets/env/forest/mushroom_redGroup.glb', -5.5, center - 4, 0],
-        ['assets/env/forest/mushroom_tanGroup.glb', 5, center + 2.5, 0],
-        ['assets/env/forest/rock_largeA.glb', 4.8, center - 5, 0],
-        ['assets/env/forest/rock_largeD.glb', -4.8, center - 0.5, 0],
-        ['assets/env/forest/rock_smallB.glb', -5, center + 4.2, 0],
+        ['ground_pathStraight.glb', -4, center + 4, 0, false, true], ['ground_pathStraight.glb', 4, center + 4, 0, false, true],
+        ['ground_pathStraight.glb', -4, center + 10, 0, false, true], ['ground_pathStraight.glb', 4, center + 10, 0, false, true],
+        ['mushroom_redGroup.glb', -2.5, center + 4, 0, false], ['mushroom_tanGroup.glb', 2.5, center + 4, 0, false],
+        ['mushroom_tanGroup.glb', -2.5, center + 10, 0, false], ['mushroom_redGroup.glb', 2.5, center + 10, 0, false],
+        ['rock_largeA.glb', -5, center + 5, 0, true], ['rock_largeD.glb', 5, center + 5, 0, true],
+        ['rock_smallB.glb', -4.5, center + 10, 0, true], ['rock_smallB.glb', 4.5, center + 10, 0, true],
       ]
       : stageId === 'F3'
         ? [
-          ['assets/env/forest/campfire_logs.glb', 0, center - 0.5, 0],
-          ['assets/env/forest/fence_planks.glb', -5.5, center + 4, 0],
-          ['assets/env/forest/fence_planks.glb', 5.5, center + 4, 0],
-          ['assets/env/forest/plant_bushLarge.glb', -5, center - 4, 0],
-          ['assets/env/forest/ground_grass.glb', 4.8, center - 4, 0],
+          ['campfire_logs.glb', 0, center + 4, 0, false],
+          ['fence_planks.glb', -4.5, center + 3, 0, true], ['fence_planks.glb', 4.5, center + 3, 0, true],
+          ['fence_planks.glb', -4.5, center + 9, 0, true], ['fence_planks.glb', 4.5, center + 9, 0, true],
+          ['fence_gate.glb', -2.8, center + 10, Math.PI / 2, true], ['fence_gate.glb', 2.8, center + 10, Math.PI / 2, true],
+          ['rock_smallB.glb', -5, center + 6, 0, true], ['rock_smallB.glb', 5, center + 6, 0, true],
+          ['plant_bushLarge.glb', -2.5, center + 4, 0, false], ['plant_bushLarge.glb', 2.5, center + 4, 0, false],
+          ['ground_grass.glb', 0, center + 9, 0, false],
         ]
         : [
-          ['assets/env/forest/tree_default_fall.glb', -6, center - 5, 0],
-          ['assets/env/forest/tree_oak_fall.glb', 6, center - 5, 0],
-          ['assets/env/forest/tree_oak_fall.glb', -6, center + 5, 0],
-          ['assets/env/forest/tree_default_fall.glb', 6, center + 5, 0],
+          ['tree_default_fall.glb', -6, center - 5, 0, false], ['tree_oak_fall.glb', 6, center - 5, 0, false],
+          ['tree_oak_fall.glb', -6, center + 5, 0, false], ['tree_default_fall.glb', 6, center + 5, 0, false],
+          ['tree_default_fall.glb', -5, center - 6.5, Math.PI / 2, false], ['tree_oak_fall.glb', 5, center - 6.5, Math.PI / 2, false],
+          ['tree_oak_fall.glb', -5, center + 6.5, Math.PI / 2, false], ['tree_default_fall.glb', 5, center + 6.5, Math.PI / 2, false],
+          ['rock_largeA.glb', -4, center + 5, 0, true], ['rock_largeD.glb', 4, center + 5, 0, true],
+          ['rock_smallB.glb', -4, center + 9, 0, true], ['rock_smallB.glb', 4, center + 9, 0, true],
         ];
-  for (const [model, x, z, rotY] of decorative) {
-    props.push({ model, x, z, rotY, solid: !NON_SOLID_PROP_MODELS.has(model), roomId: room.id });
+  for (const [name, x, z, rotY, solid, bogPool = false] of interior) {
+    const model = `assets/env/forest/${name}`;
+    props.push({
+      model, x, z, rotY, solid, bogPool, forestInterior: true, roomId: room.id,
+      ...(bogPool ? { scaleX: 1.7, scaleZ: 1.3 } : {}),
+      ...(name === 'ground_grass' ? { scaleX: 0.9, scaleZ: 0.9, y: 0.04 } : {}),
+    });
   }
-  if (stageId === 'F2') {
-    props.push({ model: 'assets/env/forest/ground_pathStraight.glb', x: 0, z: center, scaleX: 2.4, scaleZ: 2.4, solid: false, roomId: room.id });
+  if (stageId === 'F1') {
+    const pathDetails = [
+      ['log_large.glb', -5, center + 7, 0, false],
+      ['log_large.glb', 5, center + 7, 0, false],
+      ['stump_round.glb', -3, center + 5, 0, false],
+      ['stump_old.glb', 3, center + 9, 0, false],
+      ['rock_smallB.glb', -3.2, center + 9, 0, false],
+      ['rock_smallB.glb', 3.2, center + 5, 0, false],
+      ['mushroom_redGroup.glb', -1.6, center + 5, 0, false],
+      ['mushroom_tanGroup.glb', 1.6, center + 9, 0, false],
+    ];
+    for (const [name, x, z, rotY, solid] of pathDetails) {
+      props.push({
+        model: `assets/env/forest/${name}`,
+        x, z, rotY, solid, forestInterior: true, roomId: room.id,
+      });
+    }
+    for (const zOffset of [4, 7, 10]) {
+      props.push({
+        model: 'assets/env/forest/ground_pathStraight.glb',
+        x: 0,
+        z: center + zOffset,
+        scaleX: 2.2,
+        scaleZ: 3,
+        y: 0.03,
+        solid: false,
+        forestInterior: true,
+        roomId: room.id,
+      });
+    }
   }
   keepRoomSpawnsClear(props, room, width, depth);
   addPropObstacles(props, obstacles, room.id);

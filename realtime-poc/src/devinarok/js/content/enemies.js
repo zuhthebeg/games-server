@@ -51,7 +51,7 @@ export const ENEMIES = {
     },
   },
   ashwarden: {
-    id: 'ashwarden', model: 'Skeleton_Mage', hp: 1300, attack: 19, speed: 1.2, radius: 0.85,
+    id: 'ashwarden', model: 'Skeleton_Mage', hp: 1300, attack: 22, speed: 1.2, radius: 0.85,
     behavior: 'boss-patterns', scale: 1.8, xp: 620, gold: [4, 9], dropChance: 1,
     patterns: {
       'summon-wave': { count: 4, windupTicks: 30, maxAliveWaves: 1 },
