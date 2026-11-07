@@ -22,5 +22,15 @@ export const ENEMIES = {
   commander: {
     id: 'commander', model: 'Skeleton_Warrior', hp: 900, attack: 20, speed: 1.5, radius: 0.75,
     behavior: 'boss-patterns', scale: 1.6, xp: 420, gold: [2, 5], dropChance: 1,
+    boneSpear: {
+      name: '뼈 창 투척',
+      minTargetDistance: 5.5,
+      length: 14,
+      width: 1,
+      windupTicks: 24,
+      phaseTwoWindupTicks: 18,
+      motionMult: 1.2,
+      cooldownTicks: 150,
+    },
   },
 };

@@ -678,13 +678,14 @@ function damagePlayer(world, enemy, player, shape, damage) {
   });
 }
 
-function queueEnemyHit(world, enemy, player, shape, damage = null) {
+function queueEnemyHit(world, enemy, player, shape, damage = null, motionMult = 1) {
   world.pendingHits.push({
     resolveTick: world.tick + 1,
     sourceId: enemy.id,
     targetId: player.id,
     shape: copyShape(shape),
     damage,
+    motionMult,
   });
 }
 
@@ -707,8 +708,8 @@ function resolvePendingHits(world, iFramesAtTickStart = new Map()) {
       player.iFrames > 0 ||
       (iFramesAtTickStart.get(player.id) ?? 0) > 0
     ) continue;
-    if (world.mode === 'stage') damagePlayerM1(world, enemy, player, hit.shape);
-    else damagePlayer(world, enemy, player, hit.shape, hit.damage ?? enemy.attack);
+    if (world.mode === 'stage') damagePlayerM1(world, enemy, player, hit.shape, hit.motionMult ?? 1);
+    else damagePlayer(world, enemy, player, hit.shape, hit.damage ?? Math.round(enemy.attack * (hit.motionMult ?? 1)));
   }
 }
 
@@ -998,6 +999,7 @@ function spawnStageEnemy(world, enemyType, index, elite = false) {
     attackTargetId: null,
     attackPattern: null,
     attackPatternIndex: 0,
+    boneSpearCooldownTicks: 0,
     stunnedTicks: 0,
     slowTicks: 0,
     elite,
@@ -1574,7 +1576,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
       } else if (family === 'crossbow') {
         attackStrike = {
           shape: makeLineShape(player.x, player.z, player.facing, timeline.range, timeline.width),
-          motionMult: [0.45, 0.45, 0.72][attack.step - 1],
+          motionMult: [0.6, 0.6, 0.95][attack.step - 1],
           castId: attack.castId,
           hitTargets: attack.hitTargets,
           maxTargets: 1,
@@ -1594,7 +1596,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
           castSeq: attack.seq,
           resolveTick: ctx.tick + 7,
           shape: { type: 'circle', originX: point.x, originZ: point.z, radius },
-          motionMult: [0.55, 0.55, 0.9][attack.step - 1],
+          motionMult: [0.8, 0.8, 1.3][attack.step - 1],
           kind: 'staff-basic',
           skillId: 0,
           sourceX: player.x,
@@ -1675,13 +1677,13 @@ function advanceStagePlayer(world, player, rawInput) {
   }
 }
 
-function damagePlayerM1(world, enemy, player, shape) {
+function damagePlayerM1(world, enemy, player, shape, motionMult = 1) {
   if (player.dead || player.iFrames > 0) return false;
   const incomingAngle = Math.atan2(shape.originZ - player.z, shape.originX - player.x);
   const facingAngle = angleDifference(incomingAngle, player.facing);
   const guarding = player.guardTicks > 0 && Math.abs(facingAngle) <= SKILLS.guard.halfAngle;
   const perfect = guarding && player.guardTicks >= SKILLS.guard.durationTicks - SKILLS.guard.perfectTicks + 1;
-  let damage = calculateDamage(enemy.attack, 1, false, 1, player.stats.defense);
+  let damage = calculateDamage(enemy.attack, motionMult, false, 1, player.stats.defense);
   if (guarding) {
     damage = Math.max(1, Math.round(damage * SKILLS.guard.damageMultiplier));
     if (perfect) {
@@ -1723,8 +1725,8 @@ function beginEnemyTelegraph(world, enemy, target, shape, pattern, windupTicks) 
   emit(world, 'telegraph', { entityId: enemy.id, shape, pattern });
 }
 
-function bossWindup(base, phaseTwo) {
-  return phaseTwo ? Math.max(12, Math.floor(base * 0.8)) : base;
+function bossWindup(base, phaseTwo, phaseTwoTicks = Math.floor(base * 0.8)) {
+  return phaseTwo ? Math.max(12, phaseTwoTicks) : base;
 }
 
 function maybeBossSummon(world, boss) {
@@ -1745,11 +1747,26 @@ function maybeBossSummon(world, boss) {
 function startBossPattern(world, boss, target) {
   const phaseTwo = boss.hp / boss.maxHp < 0.5;
   const patterns = phaseTwo ? ['combo', 'charge', 'slam', 'circles'] : ['combo', 'charge', 'slam'];
-  const pattern = patterns[boss.attackPatternIndex % patterns.length];
+  const selectedPattern = patterns[boss.attackPatternIndex % patterns.length];
   boss.attackPatternIndex += 1;
+  const rule = ENEMIES.commander.boneSpear;
+  const distance = Math.hypot(target.x - boss.x, target.z - boss.z);
+  const pattern = distance > rule.minTargetDistance && boss.boneSpearCooldownTicks === 0
+    ? 'bone-spear'
+    : selectedPattern;
   const angle = Math.atan2(target.z - boss.z, target.x - boss.x);
   boss.facing = angle;
-  if (pattern === 'combo') {
+  if (pattern === 'bone-spear') {
+    boss.boneSpearCooldownTicks = rule.cooldownTicks;
+    beginEnemyTelegraph(
+      world,
+      boss,
+      target,
+      makeLineShape(boss.x, boss.z, angle, rule.length, rule.width),
+      pattern,
+      bossWindup(rule.windupTicks, phaseTwo, rule.phaseTwoWindupTicks),
+    );
+  } else if (pattern === 'combo') {
     boss.comboSwing = 0;
     beginEnemyTelegraph(world, boss, target, { type: 'sector', originX: boss.x, originZ: boss.z, angle, range: 2.6, halfAngle: 0.82 }, pattern, bossWindup([18, 12, 12][0], phaseTwo));
   } else if (pattern === 'charge') {
@@ -1777,10 +1794,12 @@ function startBossPattern(world, boss, target) {
 function activeEnemyAttack(world, enemy, target) {
   if (enemy.attackHit || !attackShapeHit(enemy.attackShape, target, target.radius)) return;
   enemy.attackHit = true;
-  queueEnemyHit(world, enemy, target, enemy.attackShape);
+  const motionMult = enemy.attackPattern === 'bone-spear' ? ENEMIES.commander.boneSpear.motionMult : 1;
+  queueEnemyHit(world, enemy, target, enemy.attackShape, null, motionMult);
 }
 
 function stepStageEnemy(world, enemy, players) {
+  if (enemy.boss && enemy.boneSpearCooldownTicks > 0) enemy.boneSpearCooldownTicks -= 1;
   if (enemy.spawnTicksLeft > 0) {
     enemy.spawnTicksLeft -= 1;
     enemy.invulnerable = enemy.spawnTicksLeft > 0;
