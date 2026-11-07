@@ -8,6 +8,12 @@ export const ITEM_BASES = [
   { id: 'apprentice-wand', name: '견습자의 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 4, requiredLevel: 1 },
   { id: 'grave-staff', name: '사제의 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 8, requiredLevel: 3 },
   { id: 'elder-staff', name: '묘지기의 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 14, requiredLevel: 5 },
+  { id: 'ash-sword', name: '잿빛 장검', slot: 'weapon', family: 'sword', stat: 'attack', value: 20, requiredLevel: 7 },
+  { id: 'ash-crossbow', name: '잿빛 석궁', slot: 'weapon', family: 'crossbow', stat: 'attack', value: 20, requiredLevel: 7 },
+  { id: 'ash-staff', name: '잿빛 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 20, requiredLevel: 7 },
+  { id: 'necromancer-sword', name: '사령의 대검', slot: 'weapon', family: 'sword', stat: 'attack', value: 26, requiredLevel: 9 },
+  { id: 'necromancer-crossbow', name: '사령의 쇠뇌', slot: 'weapon', family: 'crossbow', stat: 'attack', value: 26, requiredLevel: 9 },
+  { id: 'necromancer-staff', name: '사령의 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 26, requiredLevel: 9 },
   { id: 'patched-hood', name: '기운 두건', slot: 'head', stat: 'defense', value: 1, requiredLevel: 1 },
   { id: 'guard-helm', name: '수호 투구', slot: 'head', stat: 'defense', value: 3, requiredLevel: 3 },
   { id: 'ossuary-helm', name: '납골당 투구', slot: 'head', stat: 'maxHp', value: 12, requiredLevel: 5 },
@@ -20,6 +26,14 @@ export const ITEM_BASES = [
   { id: 'worn-boots', name: '해진 장화', slot: 'feet', stat: 'maxHp', value: 5, requiredLevel: 1 },
   { id: 'guard-boots', name: '수호 장화', slot: 'feet', stat: 'defense', value: 2, requiredLevel: 3 },
   { id: 'ossuary-greaves', name: '납골당 각반', slot: 'feet', stat: 'maxHp', value: 16, requiredLevel: 5 },
+  { id: 'ash-hood', name: '잿빛 두건', slot: 'head', stat: 'maxHp', value: 17, requiredLevel: 7 },
+  { id: 'ash-coat', name: '잿빛 외투', slot: 'body', stat: 'maxHp', value: 34, requiredLevel: 7 },
+  { id: 'ash-gloves', name: '잿빛 장갑', slot: 'hands', stat: 'defense', value: 6, requiredLevel: 7 },
+  { id: 'ash-greaves', name: '잿빛 각반', slot: 'feet', stat: 'maxHp', value: 22, requiredLevel: 7 },
+  { id: 'necromancer-hood', name: '사령의 두건', slot: 'head', stat: 'maxHp', value: 22, requiredLevel: 9 },
+  { id: 'necromancer-robe', name: '사령의 로브', slot: 'body', stat: 'maxHp', value: 44, requiredLevel: 9 },
+  { id: 'necromancer-gloves', name: '사령의 장갑', slot: 'hands', stat: 'defense', value: 7, requiredLevel: 9 },
+  { id: 'necromancer-greaves', name: '사령 각반', slot: 'feet', stat: 'maxHp', value: 30, requiredLevel: 9 },
 ];
 
 export const ITEMS = Object.fromEntries(ITEM_BASES.map((item) => [item.id, item]));
@@ -34,7 +48,7 @@ export function equipmentLook(equipment = []) {
   const weapon = equipment.find((item) => slotOf(item) === 'weapon');
   const family = ITEMS[weapon?.itemId]?.family ?? 'sword';
   const weaponModels = {
-    sword: weapon?.itemId === 'grave-greatsword' ? '2H_Sword' : '1H_Sword',
+    sword: ['grave-greatsword', 'necromancer-sword'].includes(weapon?.itemId) ? '2H_Sword' : '1H_Sword',
     crossbow: (ITEMS[weapon?.itemId]?.requiredLevel ?? 1) >= 5 ? '2H_Crossbow' : '1H_Crossbow',
     staff: (ITEMS[weapon?.itemId]?.requiredLevel ?? 1) === 1 ? '1H_Wand' : '2H_Staff',
   };

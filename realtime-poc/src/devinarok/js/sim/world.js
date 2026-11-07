@@ -62,6 +62,8 @@ function copyArena(arena) {
   return {
     id: arena.id,
     name: arena.name ?? arena.id ?? '시험의 방',
+    region: arena.region ?? 1,
+    ...(arena.theme ? { theme: arena.theme } : {}),
     stageLevel: arena.stageLevel ?? 1,
     recommendedLevel: arena.recommendedLevel ?? 1,
     boss: Boolean(arena.boss),
@@ -687,7 +689,7 @@ function damagePlayer(world, enemy, player, shape, damage) {
   });
 }
 
-function queueEnemyHit(world, enemy, player, shape, damage = null, motionMult = 1) {
+function queueEnemyHit(world, enemy, player, shape, damage = null, motionMult = 1, knockback = 0) {
   world.pendingHits.push({
     resolveTick: world.tick + 1,
     sourceId: enemy.id,
@@ -695,6 +697,7 @@ function queueEnemyHit(world, enemy, player, shape, damage = null, motionMult = 
     shape: copyShape(shape),
     damage,
     motionMult,
+    knockback,
   });
 }
 
@@ -717,7 +720,7 @@ function resolvePendingHits(world, iFramesAtTickStart = new Map()) {
       player.iFrames > 0 ||
       (iFramesAtTickStart.get(player.id) ?? 0) > 0
     ) continue;
-    if (world.mode === 'stage') damagePlayerM1(world, enemy, player, hit.shape, hit.motionMult ?? 1);
+    if (world.mode === 'stage') damagePlayerM1(world, enemy, player, hit.shape, hit.motionMult ?? 1, hit.knockback ?? 0);
     else damagePlayer(world, enemy, player, hit.shape, hit.damage ?? Math.round(enemy.attack * (hit.motionMult ?? 1)));
   }
 }
@@ -973,10 +976,10 @@ function stagePoint(world, index) {
   return points[index % Math.max(1, points.length)] ?? world.arena.playerSpawn;
 }
 
-function spawnStageEnemy(world, enemyType, index, elite = false) {
+function spawnStageEnemy(world, enemyType, index, elite = false, position = null, summonedBy = null) {
   const rule = ENEMIES[enemyType];
   if (!rule) throw new TypeError(`Unknown enemy type: ${enemyType}`);
-  const point = stagePoint(world, index);
+  const point = position ?? stagePoint(world, index);
   const scale = 1 + 0.12 * (world.stageLevel - 1);
   const partyScale = 1 + 0.75 * ((world.partySize ?? 1) - 1);
   const soloMaxHp = Math.max(1, Math.round(rule.hp * scale * (elite ? 2.5 : 1)));
@@ -986,6 +989,7 @@ function spawnStageEnemy(world, enemyType, index, elite = false) {
     kind: 'enemy',
     enemyKind: enemyType,
     model: rule.model,
+    ...(rule.tint ? { tint: rule.tint } : {}),
     x: point.x,
     z: point.z,
     facing: Math.PI / 2,
@@ -1012,13 +1016,18 @@ function spawnStageEnemy(world, enemyType, index, elite = false) {
     stunnedTicks: 0,
     slowTicks: 0,
     elite,
-    boss: enemyType === 'commander',
+    boss: ['commander', 'ashwarden'].includes(enemyType),
+    summoned: Boolean(summonedBy),
+    ...(summonedBy ? { summonedBy } : {}),
+    summonCooldownTicks: 0,
+    hitCountSinceBlink: 0,
+    lastBlinkTick: world.tick,
     recoverTicks: 0,
     lineTravelTicks: 0,
     lineTravelled: 0,
     currentRoomId: world.arena.rooms[world.roomIndex]?.id,
   };
-  if (enemy.boss) enemy.modelScale = rule.scale;
+  if (rule.scale) enemy.modelScale = rule.scale;
   moveEntity(world, enemy, 0, 0);
   world.entities.push(enemy);
   world.roomEnemyIds.push(enemy.id);
@@ -1183,19 +1192,21 @@ export function createLootUid(seed, stageId, eventId) {
 
 function dropRewards(world, enemy) {
   const rule = ENEMIES[enemy.enemyKind];
+  const rewardScale = enemy.summoned ? 0.25 : 1;
   const guaranteedCount = enemy.boss ? 2 : enemy.elite ? 1 : 0;
   const chance = enemy.elite || enemy.boss ? 1 : rule.dropChance;
   for (const player of stagePlayers(world)) {
     const reward = world.rewards[player.playerId];
-    const xp = Math.round(rule.xp * (1 + (player.stats.xpGain ?? 0) / 100));
+    const xp = Math.round(rule.xp * rewardScale * (1 + (player.stats.xpGain ?? 0) / 100));
     reward.xp += xp;
     emit(world, 'xp', { amount: xp, entityId: enemy.id, playerId: player.playerId });
     spawnLoot(world, enemy.x, enemy.z, {
       ownerId: player.playerId,
       lootType: 'gold',
-      gold: randomGold(world, world.stageLevel, player),
+      gold: Math.max(1, Math.round(randomGold(world, world.stageLevel, player) * rewardScale)),
     });
 
+    if (enemy.summoned) continue;
     if (guaranteedCount) {
       for (let index = 0; index < guaranteedCount; index += 1) {
         const item = rollStageItem(world, { stageLevel: world.stageLevel, elite: enemy.elite, boss: enemy.boss });
@@ -1218,6 +1229,7 @@ function dropRewards(world, enemy) {
 
 function killStageEnemy(world, source, enemy, damage, castId, critical = false, skillId = source.skillCast?.id ?? 0, viewLag = source.viewLag ?? 0, viewTick = source.lastInput?.viewTick) {
   if (enemy.dead) return;
+  enemy.hitCountSinceBlink = (enemy.hitCountSinceBlink ?? 0) + 1;
   enemy.hp = Math.max(0, enemy.hp - damage);
   enemy.hitFlashTicks = 9;
   if (source.kind === 'player') {
@@ -1740,7 +1752,7 @@ function advanceStagePlayer(world, player, rawInput) {
   }
 }
 
-function damagePlayerM1(world, enemy, player, shape, motionMult = 1) {
+function damagePlayerM1(world, enemy, player, shape, motionMult = 1, knockback = 0) {
   if (player.dead || player.iFrames > 0) return false;
   const incomingAngle = Math.atan2(shape.originZ - player.z, shape.originX - player.x);
   const facingAngle = angleDifference(incomingAngle, player.facing);
@@ -1759,6 +1771,10 @@ function damagePlayerM1(world, enemy, player, shape, motionMult = 1) {
   }
   player.hp = Math.max(0, player.hp - damage);
   player.hitFlashTicks = 8;
+  if (knockback > 0 && player.hp > 0) {
+    const distance = Math.hypot(player.x - enemy.x, player.z - enemy.z) || 1;
+    moveEntity(world, player, (player.x - enemy.x) / distance * knockback, (player.z - enemy.z) / distance * knockback);
+  }
   emit(world, 'hit', { sourceId: enemy.id, targetId: player.id, damage, blocked: guarding, shape });
   if (player.hp === 0) {
     if (world.partySize > 1) {
@@ -1792,6 +1808,90 @@ function bossWindup(base, phaseTwo, phaseTwoTicks = Math.floor(base * 0.8)) {
   return phaseTwo ? Math.max(12, phaseTwoTicks) : base;
 }
 
+function blinkDestination(world, boss, players, minimumDistance) {
+  const room = world.arena.rooms[world.roomIndex];
+  if (!room) return null;
+  const living = players.filter((player) => !player.dead && !player.downed);
+  const obstacles = world.arena.obstacles.filter((obstacle) => obstacle.roomId === room.id && !obstacle.doorId);
+  const gridSize = 0.5;
+  const minGridX = Math.ceil((-world.arena.width / 2 + 1) / gridSize);
+  const maxGridX = Math.floor((world.arena.width / 2 - 1) / gridSize);
+  const minGridZ = Math.ceil((room.centerZ - 9) / gridSize);
+  const maxGridZ = Math.floor((room.centerZ + 9) / gridSize);
+  const isClear = (gridX, gridZ) => {
+    if (gridX < minGridX || gridX > maxGridX || gridZ < minGridZ || gridZ > maxGridZ) return false;
+    const x = gridX * gridSize;
+    const z = gridZ * gridSize;
+    return !obstacles.some((obstacle) => obstacle.type === 'circle'
+      ? Math.hypot(x - obstacle.x, z - obstacle.z) < obstacle.radius + boss.radius
+      : Math.abs(x - obstacle.x) < obstacle.width / 2 + boss.radius
+        && Math.abs(z - obstacle.z) < obstacle.depth / 2 + boss.radius);
+  };
+  const startX = Math.round(boss.x / gridSize);
+  const startZ = Math.round(boss.z / gridSize);
+  if (!isClear(startX, startZ) || !living.length) return null;
+  const directions = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  const visited = new Set([`${startX},${startZ}`]);
+  const queue = [[startX, startZ]];
+  let best = null;
+  for (let head = 0; head < queue.length; head += 1) {
+    const [gridX, gridZ] = queue[head];
+    const x = gridX * gridSize;
+    const z = gridZ * gridSize;
+    const distance = Math.min(...living.map((player) => Math.hypot(x - player.x, z - player.z)));
+    if (distance >= minimumDistance && (!best || distance > best.distance)) best = { x, z, distance };
+    for (const [dx, dz] of directions) {
+      const nextX = gridX + dx;
+      const nextZ = gridZ + dz;
+      const key = `${nextX},${nextZ}`;
+      if (visited.has(key) || !isClear(nextX, nextZ)) continue;
+      if (dx && dz && (!isClear(gridX + dx, gridZ) || !isClear(gridX, gridZ + dz))) continue;
+      visited.add(key);
+      queue.push([nextX, nextZ]);
+    }
+  }
+  return best ? { x: best.x, z: best.z } : null;
+}
+
+function startAshwardenPattern(world, boss, target, players) {
+  const patterns = ENEMIES.ashwarden.patterns;
+  const spear = patterns['bone-spear'];
+  const phaseTwo = boss.hp / boss.maxHp <= 0.5;
+  const distance = Math.hypot(target.x - boss.x, target.z - boss.z);
+  const summons = world.entities.filter((entity) => entity.kind === 'enemy' && !entity.dead && entity.summonedBy === boss.id);
+  const blink = boss.hitCountSinceBlink >= patterns['blink-away'].hitThreshold
+    || world.tick - boss.lastBlinkTick >= patterns['blink-away'].tickInterval;
+  const pattern = blink ? 'blink-away'
+    : distance > spear.minTargetDistance && boss.boneSpearCooldownTicks === 0 ? 'bone-spear'
+      : boss.attackPatternIndex++ % 2 === 0 && !summons.length ? 'summon-wave' : 'ash-rain';
+  const angle = Math.atan2(target.z - boss.z, target.x - boss.x);
+  boss.facing = angle;
+  if (pattern === 'bone-spear') {
+    boss.boneSpearCooldownTicks = spear.cooldownTicks;
+    beginEnemyTelegraph(world, boss, target, makeLineShape(boss.x, boss.z, angle, spear.length, spear.width),
+      pattern, bossWindup(spear.windupTicks, phaseTwo, spear.phaseTwoWindupTicks));
+  } else if (pattern === 'summon-wave') {
+    beginEnemyTelegraph(world, boss, target, { type: 'circle', originX: boss.x, originZ: boss.z, radius: 1.1 },
+      pattern, bossWindup(patterns[pattern].windupTicks, phaseTwo));
+  } else if (pattern === 'blink-away') {
+    beginEnemyTelegraph(world, boss, target, { type: 'circle', originX: boss.x, originZ: boss.z, radius: 1.2 },
+      pattern, patterns[pattern].windupTicks);
+  } else {
+    const circles = players.filter((player) => !player.dead && !player.downed)
+      .map((player) => ({ x: player.x, z: player.z, radius: patterns[pattern].radius }));
+    const randomCount = patterns[pattern].randomCircles + (phaseTwo ? patterns[pattern].phaseTwoExtra : 0);
+    for (let index = 0; index < randomCount; index += 1) {
+      circles.push({
+        x: -world.arena.width / 2 + 1 + random(world) * (world.arena.width - 2),
+        z: world.arena.rooms[world.roomIndex].centerZ - 9 + random(world) * 18,
+        radius: patterns[pattern].radius,
+      });
+    }
+    beginEnemyTelegraph(world, boss, target, { type: 'circles', circles }, pattern,
+      bossWindup(patterns[pattern].windupTicks, phaseTwo));
+  }
+}
+
 function maybeBossSummon(world, boss) {
   for (const [threshold, name] of [[0.66, '66'], [0.33, '33']]) {
     if (boss.hp / boss.maxHp > threshold || world.bossThresholds[name]) continue;
@@ -1808,6 +1908,10 @@ function maybeBossSummon(world, boss) {
 }
 
 function startBossPattern(world, boss, target) {
+  if (boss.enemyKind === 'ashwarden') {
+    startAshwardenPattern(world, boss, target, stagePlayers(world));
+    return;
+  }
   const phaseTwo = boss.hp / boss.maxHp < 0.5;
   const patterns = phaseTwo ? ['combo', 'charge', 'slam', 'circles'] : ['combo', 'charge', 'slam'];
   const selectedPattern = patterns[boss.attackPatternIndex % patterns.length];
@@ -1855,14 +1959,28 @@ function startBossPattern(world, boss, target) {
 }
 
 function activeEnemyAttack(world, enemy, target) {
+  if (['summon', 'summon-wave', 'blink-away'].includes(enemy.attackPattern)) return;
+  if (enemy.attackPattern === 'ash-rain') {
+    const hitPlayers = stagePlayers(world).filter((player) => (
+      !player.dead && !player.downed && attackShapeHit(enemy.attackShape, player, player.radius)
+    ));
+    if (!hitPlayers.length) return;
+    enemy.attackHit = true;
+    for (const player of hitPlayers) queueEnemyHit(world, enemy, player, enemy.attackShape);
+    return;
+  }
   if (enemy.attackHit || !attackShapeHit(enemy.attackShape, target, target.radius)) return;
   enemy.attackHit = true;
-  const motionMult = enemy.attackPattern === 'bone-spear' ? ENEMIES.commander.boneSpear.motionMult : 1;
-  queueEnemyHit(world, enemy, target, enemy.attackShape, null, motionMult);
+  const motionMult = enemy.attackPattern === 'bone-spear'
+    ? (ENEMIES[enemy.enemyKind].boneSpear ?? ENEMIES[enemy.enemyKind].patterns['bone-spear']).motionMult
+    : 1;
+  const knockback = enemy.attackPattern === 'slam' ? (ENEMIES[enemy.enemyKind].knockback ?? 0) : 0;
+  queueEnemyHit(world, enemy, target, enemy.attackShape, null, motionMult, knockback);
 }
 
 function stepStageEnemy(world, enemy, players) {
   if (enemy.boss && enemy.boneSpearCooldownTicks > 0) enemy.boneSpearCooldownTicks -= 1;
+  if (enemy.summonCooldownTicks > 0) enemy.summonCooldownTicks -= 1;
   if (enemy.spawnTicksLeft > 0) {
     enemy.spawnTicksLeft -= 1;
     enemy.invulnerable = enemy.spawnTicksLeft > 0;
@@ -1883,7 +2001,7 @@ function stepStageEnemy(world, enemy, players) {
   }
   const target = nearestPlayer(enemy, players);
   if (!target) return;
-  if (enemy.boss) maybeBossSummon(world, enemy);
+  if (enemy.boss && enemy.enemyKind === 'commander') maybeBossSummon(world, enemy);
   if (enemy.attackPhase === 'windup') {
     if (enemy.attackRemaining > 1) {
       enemy.attackRemaining -= enemy.slowTicks > 0 ? 0.5 : 1;
@@ -1894,11 +2012,46 @@ function stepStageEnemy(world, enemy, players) {
       ? 9
       : enemy.attackPattern === 'line-dash'
         ? ENEMIES[enemy.enemyKind].activeTicks
-        : 3;
+        : (ENEMIES[enemy.enemyKind].activeTicks ?? 3);
     enemy.attackHit = false;
     return;
   }
   if (enemy.attackPhase === 'active') {
+    if (enemy.attackPattern === 'summon' || enemy.attackPattern === 'summon-wave') {
+      const count = enemy.attackPattern === 'summon-wave' ? 4 : ENEMIES.ashcaller.summon.count;
+      const livingCount = world.entities.filter((entry) => entry.kind === 'enemy' && !entry.dead && entry.summonedBy === enemy.id).length;
+      const allowed = enemy.attackPattern === 'summon-wave'
+        ? (livingCount ? 0 : count)
+        : Math.max(0, ENEMIES.ashcaller.summon.maxAlive - livingCount);
+      for (let index = 0; index < Math.min(count, allowed); index += 1) {
+        const angle = Math.PI * 2 * index / count;
+        spawnStageEnemy(world, 'minion', index, false, {
+          x: enemy.x + Math.cos(angle) * 1.8,
+          z: enemy.z + Math.sin(angle) * 1.8,
+        }, enemy.id);
+      }
+      enemy.attackCooldownTicks = enemy.attackPattern === 'summon'
+        ? ENEMIES.ashcaller.summon.cooldownTicks
+        : 90;
+      enemy.attackPhase = null;
+      enemy.attackShape = null;
+      return;
+    }
+    if (enemy.attackPattern === 'blink-away') {
+      const destination = blinkDestination(world, enemy, players, ENEMIES.ashwarden.patterns['blink-away'].minPlayerDistance);
+      if (destination) {
+        const from = { x: enemy.x, z: enemy.z };
+        enemy.x = destination.x;
+        enemy.z = destination.z;
+        enemy.hitCountSinceBlink = 0;
+        enemy.lastBlinkTick = world.tick;
+        emit(world, 'bossBlink', { entityId: enemy.id, from, to: { x: enemy.x, z: enemy.z } });
+      }
+      enemy.attackCooldownTicks = 30;
+      enemy.attackPhase = null;
+      enemy.attackShape = null;
+      return;
+    }
     if (enemy.attackPattern === 'charge') {
       const startX = enemy.x;
       const startZ = enemy.z;
@@ -1956,14 +2109,29 @@ function stepStageEnemy(world, enemy, players) {
   const dz = target.z - enemy.z;
   const distance = Math.hypot(dx, dz);
   if (distance > 0.001) enemy.facing = Math.atan2(dz, dx);
-  if (rule.behavior === 'ground-circle') {
+  if (rule.behavior === 'ground-circle' || rule.behavior === 'summoner') {
     if (distance > rule.keepDistance + 0.8) {
       moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
     } else if (distance < rule.keepDistance - 1.1) {
       moveEntity(world, enemy, -dx / distance * speed / TICK_HZ, -dz / distance * speed / TICK_HZ);
+    } else if (rule.behavior === 'summoner' && enemy.summonCooldownTicks === 0
+      && world.entities.filter((entry) => entry.kind === 'enemy' && !entry.dead && entry.summonedBy === enemy.id).length < rule.summon.maxAlive) {
+      beginEnemyTelegraph(world, enemy, target, { type: 'circle', originX: enemy.x, originZ: enemy.z, radius: 1.1 }, 'summon', rule.summon.windupTicks);
     } else {
       beginEnemyTelegraph(world, enemy, target, { type: 'circle', originX: target.x, originZ: target.z, radius: rule.circleRadius }, rule.behavior, rule.windupTicks);
     }
+    return;
+  }
+  if (rule.behavior === 'ranged-line') {
+    if (distance > rule.keepDistance + 0.8) moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
+    else if (distance < rule.keepDistance - 1.1) moveEntity(world, enemy, -dx / distance * speed / TICK_HZ, -dz / distance * speed / TICK_HZ);
+    else beginEnemyTelegraph(world, enemy, target, makeLineShape(enemy.x, enemy.z, enemy.facing, rule.length, rule.width), rule.behavior, rule.windupTicks);
+    return;
+  }
+  if (rule.behavior === 'slam') {
+    if (distance <= rule.slamRadius) beginEnemyTelegraph(world, enemy, target,
+      { type: 'circle', originX: enemy.x, originZ: enemy.z, radius: rule.slamRadius }, rule.behavior, rule.windupTicks);
+    else moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
     return;
   }
   if (rule.behavior === 'line-dash') {
