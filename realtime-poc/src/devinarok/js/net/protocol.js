@@ -23,7 +23,9 @@ const ENTITY_FIELDS = [
   'radius',
   'motion',
   'characterKind',
+  'family',
   'look',
+  'slowTicks',
 ];
 
 const ENTITY_FIELD_SET = new Set(ENTITY_FIELDS);

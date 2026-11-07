@@ -38,18 +38,21 @@ function testNewPlayerStaticFieldsInDelta() {
   const compiled = { exports: {} };
   new Function('module', 'exports', 'require', bundled)(compiled, compiled.exports, require);
   const room = new compiled.exports.DevinarokRoomDO({ storage: {} }, {});
-  const look = { weapon: '2H_Sword', helmet: true, cape: true, weaponRarity: 'rare' };
+  const look = { family: 'crossbow', characterKind: 'rogue', weapon: '2H_Crossbow', offhand: null, helmet: false, cape: true, weaponRarity: 'rare' };
   const player = {
     id: 42,
     kind: 'player',
     playerId: 'new-player',
-    characterKind: 'knight',
+    characterKind: 'rogue',
+    family: 'crossbow',
     look,
   };
   const firstDelta = room.renderEntity(player, 'viewer', false);
-  assert.equal(firstDelta.characterKind, 'knight');
+  assert.equal(firstDelta.characterKind, 'rogue');
+  assert.equal(firstDelta.family, 'crossbow');
   assert.deepEqual(firstDelta.look, look);
   assert.equal(room.renderEntity(player, 'viewer', false).look, undefined);
+  assert.equal(room.renderEntity({ id: 43, kind: 'enemy', boss: true, attackPattern: 'bone-spear' }, 'viewer', true).attackPattern, 'bone-spear');
 }
 
 function wsClient(socket) {
@@ -97,7 +100,7 @@ function wsClient(socket) {
   };
 }
 
-async function connect(mf, roomCode, name, token, simHash = SIM_HASH) {
+async function connect(mf, roomCode, name, token, simHash = SIM_HASH, character = { level: 1, equipment: [], potions: 2, clearedStages: [] }) {
   const response = await mf.dispatchFetch(`http://localhost/devinarok/${roomCode}`, {
     headers: { Upgrade: 'websocket' },
   });
@@ -109,15 +112,88 @@ async function connect(mf, roomCode, name, token, simHash = SIM_HASH) {
     v: 1,
     simHash,
     name,
-    character: { level: 1, equipment: [], potions: 2, clearedStages: [] },
+    character,
     ...(token ? { token } : {}),
   });
   return client;
 }
 
+async function testMixedFamilyStageSnapshot() {
+  const mf = new Miniflare({
+    modules: true,
+    script: bundleWorker(),
+    compatibilityDate: '2025-01-01',
+    durableObjects: {
+      ROOM: { className: 'RoomDO', useSQLite: true },
+      COORD: { className: 'CoordinatorDO', useSQLite: true },
+      DEVINAROK_ROOM: { className: 'DevinarokRoomDO', useSQLite: true },
+    },
+  });
+  const clients = [];
+  try {
+    await mf.ready;
+    const families = [
+      { family: 'sword', characterKind: 'knight', weapon: '1H_Sword', itemId: 'rusted-sword' },
+      { family: 'crossbow', characterKind: 'rogue', weapon: '1H_Crossbow', itemId: 'rusted-crossbow' },
+      { family: 'staff', characterKind: 'mage', weapon: '1H_Wand', itemId: 'apprentice-wand' },
+    ];
+    const party = [];
+    for (const [index, family] of families.entries()) {
+      const client = await connect(
+        mf,
+        'FAM234',
+        `Family${index}`,
+        null,
+        SIM_HASH,
+        { level: 1, equipment: [{ itemId: family.itemId, slot: 'weapon' }], potions: 2, clearedStages: [] },
+      );
+      clients.push(client);
+      party.push({ client, family });
+      await client.waitFor((message) => message.t === 'welcome', 'family welcome');
+    }
+    const host = party[0].client;
+    await host.waitFor((message) => message.t === 'lobby' && message.players.length === 3, 'mixed-family lobby');
+    for (const { client } of party) client.send({ t: 'lobby.ready', ready: true });
+    await host.waitFor((message) => message.t === 'lobby' && message.players.every((player) => player.ready), 'mixed-family ready');
+    host.send({ t: 'lobby.start' });
+    const snapshots = await Promise.all(party.map(async ({ client }) => {
+      await client.waitFor((message) => message.t === 'start', 'mixed-family start');
+      return client.waitFor((message) => message.t === 'snap' && message.full, 'mixed-family full snapshot');
+    }));
+    const fields = [
+      'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase', 'attackPattern', 'attackShape',
+      'attackRemaining', 'skill', 'dodge', 'downed', 'ownerId', 'model', 'maxHp', 'name', 'item',
+      'radius', 'motion', 'characterKind', 'family', 'look', 'slowTicks',
+    ];
+    const expand = (compact) => {
+      const [mask, ...rest] = compact;
+      const extras = rest.pop();
+      const entity = {};
+      let valueIndex = 0;
+      fields.forEach((field, index) => {
+        if (mask & (1 << index)) entity[field] = rest[valueIndex++];
+      });
+      return { ...entity, ...extras };
+    };
+    const players = snapshots[0].ents.map(expand).filter((entity) => entity.kind === 'player');
+    assert.equal(players.length, 3);
+    for (const expected of families) {
+      const player = players.find((entry) => entry.family === expected.family);
+      assert(player, `missing ${expected.family} player`);
+      assert.equal(player.characterKind, expected.characterKind);
+      assert.equal(player.look.family, expected.family);
+      assert.equal(player.look.weapon, expected.weapon);
+    }
+  } finally {
+    for (const client of clients) client.close();
+    await mf.dispose();
+  }
+}
+
 async function run() {
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
   testNewPlayerStaticFieldsInDelta();
+  await testMixedFamilyStageSnapshot();
   const mf = new Miniflare({
     modules: true,
     script: bundleWorker(),
@@ -195,9 +271,9 @@ async function run() {
     assert(snap0.ents.length >= 5);
     assert(Array.isArray(snap0.ents[0]), 'snapshot entities use compact protocol arrays');
     const fields = [
-      'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase',
+      'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase', 'attackPattern',
       'attackShape', 'attackRemaining', 'skill', 'dodge', 'downed', 'ownerId', 'model',
-      'maxHp', 'name', 'item', 'radius', 'motion', 'characterKind', 'look',
+      'maxHp', 'name', 'item', 'radius', 'motion', 'characterKind', 'family', 'look', 'slowTicks',
     ];
     const expandEntity = (compact) => {
       const [mask, ...rest] = compact;
@@ -213,8 +289,12 @@ async function run() {
     assert.equal(expandedPlayers.length, 2);
     for (const player of expandedPlayers) {
       assert.equal(player.characterKind, 'knight');
+      assert.equal(player.family, 'sword');
       assert.deepEqual(player.look, {
+        family: 'sword',
+        characterKind: 'knight',
         weapon: '1H_Sword',
+        offhand: 'Round_Shield',
         helmet: false,
         cape: false,
         weaponRarity: null,
