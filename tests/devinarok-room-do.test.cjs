@@ -129,6 +129,12 @@ async function run() {
     p0.send({ t: 'lobby.ready', ready: true });
     p1.send({ t: 'lobby.ready', ready: true });
     await p0.waitFor((message) => message.t === 'lobby' && message.players.every((player) => player.ready), 'all-ready lobby');
+    p0.send({ t: 'ping', c: 122 });
+    const lobbyPong = await p0.waitFor(
+      (message) => message.t === 'pong' && message.c === 122,
+      'lobby clock pong',
+    );
+    assert.equal(lobbyPong.tick, 0, 'lobby ping uses tick zero');
     p0.send({ t: 'lobby.start' });
     const start0 = await p0.waitFor((message) => message.t === 'start', 'host start');
     const start1 = await p1.waitFor((message) => message.t === 'start', 'member start');
@@ -143,13 +149,19 @@ async function run() {
     assert(snap0.ents.length >= 5);
     assert(Array.isArray(snap0.ents[0]), 'snapshot entities use compact protocol arrays');
 
+    const pongPromise = p0.waitFor(
+      (message) => message.t === 'pong' && message.c === 123,
+      'run clock pong',
+    );
+    const appliedPromise = p0.waitFor(
+      (message) => message.t === 'snap' && message.ack >= 1,
+      'input acknowledgement',
+    );
     p0.send({ t: 'ping', c: 123 });
-    const pong = await p0.waitFor((message) => message.t === 'pong', 'clock pong');
-    assert.equal(pong.c, 123);
-    assert(pong.tick >= snap0.tick && pong.tick <= snap0.tick + 15, 'pong reports the active run tick');
-
     p0.send({ t: 'in', ae: 0, sa: snap0.tick, inputs: [{ seq: 1, mx: 127, mz: 0, aim: 64, b: 0, vt: 0 }] });
-    const applied = await p0.waitFor((message) => message.t === 'snap' && message.ack >= 1, 'input acknowledgement');
+    const [pong, applied] = await Promise.all([pongPromise, appliedPromise]);
+    assert(pong.tick >= snap0.tick);
+    assert(pong.tick <= applied.tick && applied.tick - pong.tick <= 4, 'run pong is within four ticks of the latest snapshot');
     assert(applied.tick >= 2);
     assert.equal(applied.full, false);
     assert.equal(applied.baseTick, snap0.tick);

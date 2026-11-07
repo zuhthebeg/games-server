@@ -518,8 +518,7 @@ export class DevinarokRoomDO {
     }
     if (message.t === 'hello') return;
     if (message.t === 'ping') {
-      const tick = this.world && this.runId && !this.world.outcome ? this.world.tick : 0;
-      this.send(socket, { t: 'pong', c: message.c, tick });
+      this.send(socket, { t: 'pong', c: message.c, tick: this.activeRunTick() });
     } else if (message.t === 'in') {
       await this.handleInput(playerId, message);
     } else if (message.t === 'lobby.ready' || message.t === 'lobby.stage' || message.t === 'lobby.start') {
@@ -527,6 +526,11 @@ export class DevinarokRoomDO {
     } else if (message.t === 'leave') {
       await this.handleLeave(socket, playerId);
     }
+  }
+
+  private activeRunTick(): number {
+    if (this.runId === null || !this.world || this.world.outcome) return 0;
+    return this.world.tick;
   }
 
   async fetch(request: Request): Promise<Response> {
