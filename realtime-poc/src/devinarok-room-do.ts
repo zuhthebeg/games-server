@@ -10,7 +10,7 @@ import { decodeMessage, encodeMessage, PROTOCOL_VERSION } from './devinarok/js/n
 import { SIM_HASH } from './devinarok/js/net/sim-version.js';
 
 const ROOM_CODE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
-const STAGE_IDS = ['C1', 'C2', 'C3', 'CB', 'F1', 'F2', 'F3', 'FB'];
+const STAGE_IDS = ['C1', 'C2', 'C3', 'CB', 'F1', 'F2', 'F3', 'FB', 'K1', 'K2', 'K3', 'KB'];
 const TICK_MS = 1000 / 30;
 const SNAPSHOT_INTERVAL = 2;
 const FULL_INTERVAL = 30;
@@ -97,7 +97,7 @@ function normalizeCharacter(value: unknown): Character {
   const character = value && typeof value === 'object' ? value as Character : {};
   const equipment = Array.isArray(character.equipment) ? character.equipment : [];
   return {
-    level: clamp(Math.trunc(Number(character.level) || 1), 1, 15),
+    level: clamp(Math.trunc(Number(character.level) || 1), 1, 20),
     equipment,
     potions: clamp(Math.trunc(Number(character.potions) || 0), 0, 5),
     clearedStages: Array.isArray(character.clearedStages)

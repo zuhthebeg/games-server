@@ -190,7 +190,7 @@ async function testMixedFamilyStageSnapshot() {
   }
 }
 
-async function testGuestCanJoinHostUnlockedForestStage() {
+async function testGuestCanJoinHostUnlockedCastleStage() {
   const mf = new Miniflare({
     modules: true,
     script: bundleWorker(),
@@ -204,36 +204,40 @@ async function testGuestCanJoinHostUnlockedForestStage() {
   const clients = [];
   try {
     await mf.ready;
-    const host = await connect(mf, 'FST234', 'ForestHost', null, SIM_HASH, {
-      level: 7, equipment: [], potions: 2, clearedStages: ['CB'],
+    const host = await connect(mf, 'FST234', 'CastleHost', null, SIM_HASH, {
+      level: 14, equipment: [], potions: 2, clearedStages: ['CB', 'FB', 'K1', 'K2', 'K3'],
     });
     clients.push(host);
-    await host.waitFor((message) => message.t === 'welcome', 'forest host welcome');
-    await host.waitFor((message) => message.t === 'lobby', 'forest host lobby');
-    const guest = await connect(mf, 'FST234', 'ForestGuest', null, SIM_HASH, {
+    await host.waitFor((message) => message.t === 'welcome', 'castle host welcome');
+    await host.waitFor((message) => message.t === 'lobby', 'castle host lobby');
+    const guest = await connect(mf, 'FST234', 'CastleGuest', null, SIM_HASH, {
       level: 1, equipment: [], potions: 2, clearedStages: [],
     });
     clients.push(guest);
-    await guest.waitFor((message) => message.t === 'welcome', 'forest guest welcome');
-    await host.waitFor((message) => message.t === 'lobby' && message.players.length === 2, 'forest guest joined');
+    await guest.waitFor((message) => message.t === 'welcome', 'castle guest welcome');
+    await host.waitFor((message) => message.t === 'lobby' && message.players.length === 2, 'castle guest joined');
 
     host.send({ t: 'lobby.stage', stageId: 'F2' });
     assert.equal((await host.waitFor((message) => message.t === 'error', 'locked forest stage error')).code, 'stage-locked');
     host.send({ t: 'lobby.stage', stageId: 'F1' });
     await host.waitFor((message) => message.t === 'lobby' && message.stageId === 'F1', 'host selected unlocked forest stage');
+    for (const stageId of ['K1', 'K2', 'K3', 'KB']) {
+      host.send({ t: 'lobby.stage', stageId });
+      await host.waitFor((message) => message.t === 'lobby' && message.stageId === stageId, `host selected unlocked ${stageId}`);
+    }
     host.send({ t: 'lobby.ready', ready: true });
     guest.send({ t: 'lobby.ready', ready: true });
     await host.waitFor(
       (message) => message.t === 'lobby' && message.players.every((player) => player.ready),
-      'forest party ready',
+      'castle party ready',
     );
     host.send({ t: 'lobby.start' });
     const [hostStart, guestStart] = await Promise.all([
-      host.waitFor((message) => message.t === 'start', 'forest host start'),
-      guest.waitFor((message) => message.t === 'start', 'forest guest start'),
+      host.waitFor((message) => message.t === 'start', 'castle host start'),
+      guest.waitFor((message) => message.t === 'start', 'castle guest start'),
     ]);
-    assert.equal(hostStart.stageId, 'F1');
-    assert.equal(guestStart.stageId, 'F1');
+    assert.equal(hostStart.stageId, 'KB');
+    assert.equal(guestStart.stageId, 'KB');
   } finally {
     for (const client of clients) client.close();
     await mf.dispose();
@@ -244,7 +248,7 @@ async function run() {
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
   testNewPlayerStaticFieldsInDelta();
   await testMixedFamilyStageSnapshot();
-  await testGuestCanJoinHostUnlockedForestStage();
+  await testGuestCanJoinHostUnlockedCastleStage();
   const mf = new Miniflare({
     modules: true,
     script: bundleWorker(),

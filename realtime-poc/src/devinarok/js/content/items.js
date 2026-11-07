@@ -34,6 +34,20 @@ export const ITEM_BASES = [
   { id: 'necromancer-robe', name: '사령의 로브', slot: 'body', stat: 'maxHp', value: 44, requiredLevel: 9 },
   { id: 'necromancer-gloves', name: '사령의 장갑', slot: 'hands', stat: 'defense', value: 7, requiredLevel: 9 },
   { id: 'necromancer-greaves', name: '사령 각반', slot: 'feet', stat: 'maxHp', value: 30, requiredLevel: 9 },
+  { id: 'royal-sword', name: '왕실 장검', slot: 'weapon', family: 'sword', stat: 'attack', value: 32, requiredLevel: 11 },
+  { id: 'royal-crossbow', name: '왕실 석궁', slot: 'weapon', family: 'crossbow', stat: 'attack', value: 32, requiredLevel: 11 },
+  { id: 'royal-staff', name: '왕실 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 32, requiredLevel: 11 },
+  { id: 'royal-helm', name: '왕실 투구', slot: 'head', stat: 'maxHp', value: 28, requiredLevel: 11 },
+  { id: 'royal-plate', name: '왕실 흉갑', slot: 'body', stat: 'maxHp', value: 55, requiredLevel: 11 },
+  { id: 'royal-gauntlets', name: '왕실 건틀릿', slot: 'hands', stat: 'defense', value: 9, requiredLevel: 11 },
+  { id: 'royal-greaves', name: '왕실 각반', slot: 'feet', stat: 'maxHp', value: 37, requiredLevel: 11 },
+  { id: 'king-sword', name: '해골 왕의 검', slot: 'weapon', family: 'sword', stat: 'attack', value: 39, requiredLevel: 13 },
+  { id: 'king-crossbow', name: '해골 왕의 석궁', slot: 'weapon', family: 'crossbow', stat: 'attack', value: 39, requiredLevel: 13 },
+  { id: 'king-staff', name: '해골 왕의 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 39, requiredLevel: 13 },
+  { id: 'king-helm', name: '해골 왕의 투구', slot: 'head', stat: 'maxHp', value: 34, requiredLevel: 13 },
+  { id: 'king-plate', name: '해골 왕의 갑옷', slot: 'body', stat: 'maxHp', value: 67, requiredLevel: 13 },
+  { id: 'king-gauntlets', name: '해골 왕의 건틀릿', slot: 'hands', stat: 'defense', value: 11, requiredLevel: 13 },
+  { id: 'king-greaves', name: '해골 왕의 각반', slot: 'feet', stat: 'maxHp', value: 45, requiredLevel: 13 },
 ];
 
 export const ITEMS = Object.fromEntries(ITEM_BASES.map((item) => [item.id, item]));
@@ -48,7 +62,7 @@ export function equipmentLook(equipment = []) {
   const weapon = equipment.find((item) => slotOf(item) === 'weapon');
   const family = ITEMS[weapon?.itemId]?.family ?? 'sword';
   const weaponModels = {
-    sword: ['grave-greatsword', 'necromancer-sword'].includes(weapon?.itemId) ? '2H_Sword' : '1H_Sword',
+    sword: ['grave-greatsword', 'necromancer-sword', 'royal-sword', 'king-sword'].includes(weapon?.itemId) ? '2H_Sword' : '1H_Sword',
     crossbow: (ITEMS[weapon?.itemId]?.requiredLevel ?? 1) >= 5 ? '2H_Crossbow' : '1H_Crossbow',
     staff: (ITEMS[weapon?.itemId]?.requiredLevel ?? 1) === 1 ? '1H_Wand' : '2H_Staff',
   };

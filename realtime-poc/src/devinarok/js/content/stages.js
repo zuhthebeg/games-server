@@ -8,6 +8,53 @@ const FLOOR_MODELS = {
   darkWood: 'assets/env/floor_wood_large_dark.glb',
 };
 
+const CASTLE_MODELS = {
+  grave: 'assets/env/castle/grave_A.glb',
+  gravestone: 'assets/env/castle/gravestone.glb',
+  fence: 'assets/env/castle/fence.glb',
+  boneA: 'assets/env/castle/bone_A.glb',
+  boneB: 'assets/env/castle/bone_B.glb',
+  boneC: 'assets/env/castle/bone_C.glb',
+  ribcage: 'assets/env/castle/ribcage.glb',
+  skull: 'assets/env/castle/skull.glb',
+  coffin: 'assets/env/castle/coffin.glb',
+  candles: 'assets/env/castle/candle_triple.glb',
+};
+
+const CASTLE_MEASURED_BOUNDS = {
+  grave: { width: 2, height: 2.129, depth: 1 },
+  gravestone: { width: 1.4, height: 1.6, depth: 0.4 },
+  fence: { width: 4, height: 2.2, depth: 0.5 },
+  boneA: { width: 0.707, height: 0.276, depth: 0.201 },
+  boneB: { width: 0.606, height: 0.175, depth: 0.287 },
+  boneC: { width: 1.107, height: 0.276, depth: 0.201 },
+  ribcage: { width: 0.846, height: 0.858, depth: 0.747 },
+  skull: { width: 0.918, height: 0.898, depth: 0.907 },
+  coffin: { width: 2, height: 1.322, depth: 3 },
+  candles: { width: 0.451, height: 0.786, depth: 0.351 },
+};
+
+const CASTLE_PROP_HEIGHTS = {
+  grave: 2.1,
+  gravestone: 1.7,
+  fence: 1.76,
+  boneA: 0.5,
+  boneB: 0.45,
+  boneC: 0.5,
+  ribcage: 0.85,
+  skull: 0.9,
+  coffin: 1.1,
+  candles: 1,
+};
+
+function castlePropModel(name) {
+  return CASTLE_MODELS[name];
+}
+
+function castlePropScale(name) {
+  return CASTLE_PROP_HEIGHTS[name] / CASTLE_MEASURED_BOUNDS[name].height;
+}
+
 export const PROP_FOOTPRINTS = {
   'assets/env/column.glb': { type: 'circle', radius: 0.3 },
   'assets/env/barrel_large.glb': { type: 'circle', radius: 0.77 },
@@ -40,6 +87,16 @@ export const PROP_FOOTPRINTS = {
   'assets/env/forest/tree_oak_fall.glb': { type: 'rect', width: 3, depth: 3 },
   'assets/env/forest/tree_pineTallA.glb': { type: 'circle', radius: 1.25 },
   'assets/env/forest/tree_pineTallB.glb': { type: 'circle', radius: 1.4 },
+  [CASTLE_MODELS.grave]: { type: 'rect', width: 2, depth: 1 },
+  [CASTLE_MODELS.gravestone]: { type: 'rect', width: 1.4, depth: 0.4 },
+  [CASTLE_MODELS.fence]: { type: 'rect', width: 4, depth: 0.5 },
+  [CASTLE_MODELS.boneA]: { type: 'rect', width: 0.707, depth: 0.201 },
+  [CASTLE_MODELS.boneB]: { type: 'rect', width: 0.606, depth: 0.287 },
+  [CASTLE_MODELS.boneC]: { type: 'rect', width: 1.107, depth: 0.201 },
+  [CASTLE_MODELS.ribcage]: { type: 'rect', width: 0.846, depth: 0.747 },
+  [CASTLE_MODELS.skull]: { type: 'rect', width: 0.918, depth: 0.907 },
+  [CASTLE_MODELS.coffin]: { type: 'rect', width: 2, depth: 3 },
+  [CASTLE_MODELS.candles]: { type: 'rect', width: 0.451, depth: 0.351 },
 };
 
 const NON_SOLID_PROP_MODELS = new Set([
@@ -58,6 +115,10 @@ const NON_SOLID_PROP_MODELS = new Set([
   'assets/env/forest/campfire_logs.glb',
   'assets/env/forest/ground_pathStraight.glb',
   'assets/env/forest/ground_grass.glb',
+  CASTLE_MODELS.boneA,
+  CASTLE_MODELS.boneB,
+  CASTLE_MODELS.boneC,
+  CASTLE_MODELS.candles,
 ]);
 
 const CENTERED_DECOR_MODELS = new Set([
@@ -166,13 +227,17 @@ function addPropObstacles(props, obstacles, idPrefix) {
 
 function floorForRoom(room, width, depth) {
   const props = [];
+  const castleRoom = room.theme.startsWith('castle');
+  const floorTint = castleRoom ? 0x747ca8 : null;
   const columns = Math.ceil(width / 4);
   const rows = Math.ceil(depth / 4);
   for (let column = 0; column < columns; column += 1) {
     for (let row = 0; row < rows; row += 1) {
       const x = -width / 2 + 2 + column * 4;
       const z = room.centerZ - depth / 2 + 2 + row * 4;
-      const tile = room.theme === 'inn'
+      const tile = castleRoom
+        ? (column + row * 2) % 5 === 0 ? FLOOR_MODELS.broken : FLOOR_MODELS.stone
+        : room.theme === 'inn'
         ? ((column + row) % 4 === 0 ? FLOOR_MODELS.darkWood : FLOOR_MODELS.wood)
         : room.theme === 'corridor'
           ? ((column + row * 2) % 5 === 0 ? FLOOR_MODELS.rockyDirt : column % 3 === 1 ? FLOOR_MODELS.dirt : FLOOR_MODELS.stone)
@@ -186,10 +251,19 @@ function floorForRoom(room, width, depth) {
         x,
         z,
         rotY: ((column + row) % 4) * Math.PI / 2,
+        ...(floorTint ? { tint: floorTint } : {}),
         roomId: room.id,
       });
       if (room.theme !== 'inn' && (column + row * 2) % 5 === 0) {
-        props.push({ model: FLOOR_MODELS.brokenSmall, x: x + 1, y: 0.035, z: z + 1, rotY: ((column + row) % 4) * Math.PI / 2, roomId: room.id });
+        props.push({
+          model: FLOOR_MODELS.brokenSmall,
+          x: x + 1,
+          y: 0.035,
+          z: z + 1,
+          rotY: ((column + row) % 4) * Math.PI / 2,
+          ...(floorTint ? { tint: floorTint } : {}),
+          roomId: room.id,
+        });
       }
     }
   }
@@ -269,7 +343,9 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
   if (room.nextRoomId) xWalls.push(0);
   xWalls.sort((left, right) => left - right);
 
-  const sideWallModels = room.theme === 'corridor'
+  const sideWallModels = room.theme.startsWith('castle')
+    ? ['assets/env/wall_arched.glb', 'assets/env/wall_cracked.glb']
+    : room.theme === 'corridor'
     ? ['assets/env/wall_broken.glb', 'assets/env/wall_cracked.glb']
     : room.theme === 'ossuary'
       ? ['assets/env/wall_shelves.glb', 'assets/env/wall_archedwindow_open.glb']
@@ -283,7 +359,9 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
   }
 
   wallRow(room, xWalls, room.centerZ - depth / 2 - 0.5, !lastRoom && Boolean(room.nextRoomId), doors, obstacles, props);
-  const backWall = room.theme === 'corridor'
+  const backWall = room.theme.startsWith('castle')
+    ? 'assets/env/wall_arched.glb'
+    : room.theme === 'corridor'
     ? 'assets/env/wall_broken.glb'
     : room.theme === 'ossuary'
       ? 'assets/env/wall_archedwindow_open.glb'
@@ -324,9 +402,24 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
   const lantern = room.theme === 'ossuary' ? 'assets/env/candle_lit.glb' : 'assets/env/torch_lit.glb';
   for (const x of [-width / 2 + 1.4, width / 2 - 1.4]) {
     for (const z of [room.centerZ - depth / 2 + 1.8, room.centerZ + depth / 2 - 1.8]) {
-      props.push({ model: lantern, x, z, rotY: x < 0 ? 0 : Math.PI, roomId: room.id });
+      props.push({
+        model: lantern,
+        x,
+        z,
+        rotY: x < 0 ? 0 : Math.PI,
+        ...(room.theme.startsWith('castle') ? { blueFlame: true, tint: 0x526dff } : {}),
+        roomId: room.id,
+      });
     }
-    props.push({ model: 'assets/env/torch_mounted.glb', x, z: room.centerZ - depth / 2 + 4.4, rotY: x < 0 ? Math.PI / 2 : -Math.PI / 2, wallLight: true, roomId: room.id });
+    props.push({
+      model: 'assets/env/torch_mounted.glb',
+      x,
+      z: room.centerZ - depth / 2 + 4.4,
+      rotY: x < 0 ? Math.PI / 2 : -Math.PI / 2,
+      wallLight: true,
+      ...(room.theme.startsWith('castle') ? { blueFlame: true, tint: 0x526dff } : {}),
+      roomId: room.id,
+    });
   }
   const stageDecor = {
     stone: [
@@ -533,6 +626,90 @@ function buildForestRoomArt(room, { width, depth, lastRoom, stageId }) {
   return { props, obstacles, doors };
 }
 
+function buildCastleRoomArt(room, { width, depth, lastRoom, stageId }) {
+  const art = buildRoomArt(room, { width, depth, lastRoom });
+  const props = [];
+  const center = room.centerZ;
+  const add = (name, x, z, rotY = 0, { solid = true, targetHeight = CASTLE_PROP_HEIGHTS[name], tint = null } = {}) => {
+    props.push({
+      model: castlePropModel(name),
+      x,
+      z,
+      rotY,
+      scale: targetHeight / CASTLE_MEASURED_BOUNDS[name].height,
+      solid,
+      ...(tint ? { tint } : {}),
+      roomId: room.id,
+      castleInterior: true,
+    });
+  };
+  if (stageId === 'K1') {
+    for (const z of [center + 3.5, center - 2.5]) {
+      add('fence', -6.6, z, Math.PI / 2);
+      add('fence', 6.6, z, Math.PI / 2);
+    }
+    add('grave', -4.9, center + 3.5, Math.PI / 2);
+    add('grave', 4.9, center + 3.5, Math.PI / 2);
+    add('grave', -4.9, center - 3.5, Math.PI / 2);
+    add('grave', 4.9, center - 3.5, Math.PI / 2);
+    add('gravestone', -3.1, center + 0.2, Math.PI / 2);
+    add('gravestone', 3.1, center - 0.2, -Math.PI / 2);
+  } else if (stageId === 'K2') {
+    for (const z of [center + 3, center - 4]) {
+      add('ribcage', -4.8, z, 0, { targetHeight: 0.95 });
+      add('ribcage', 4.8, z, Math.PI, { targetHeight: 0.95 });
+      add('skull', -3.5, z + 1.2, 0, { solid: false });
+      add('skull', 3.5, z - 1.2, Math.PI, { solid: false });
+      add('boneA', -2.8, z + 1.5, 0, { solid: false, targetHeight: 0.55 });
+      add('boneB', 2.8, z - 1.5, Math.PI / 2, { solid: false, targetHeight: 0.55 });
+    }
+    for (const z of [center + 6, center, center - 6]) {
+      add('candles', -6, z, 0, { solid: false, tint: 0x8498ff });
+      add('candles', 6, z, Math.PI, { solid: false, tint: 0x8498ff });
+    }
+  } else if (stageId === 'K3') {
+    for (const z of [center + 2.5, center - 4]) {
+      add('coffin', -4.6, z, Math.PI / 2);
+      add('coffin', 4.6, z, Math.PI / 2);
+      add('gravestone', -2.9, z + 1.5, Math.PI / 2);
+      add('gravestone', 2.9, z - 1.5, -Math.PI / 2);
+    }
+    for (const x of [-6, 6]) {
+      add('candles', x, center + 6, 0, { solid: false, tint: 0x8498ff });
+      add('candles', x, center - 7, Math.PI, { solid: false, tint: 0x8498ff });
+    }
+  } else {
+    props.push(
+      { model: 'assets/env/banner_patternB_blue.glb', x: -6.8, z: center - 7, rotY: Math.PI, solid: false, roomId: room.id, castleInterior: true },
+      { model: 'assets/env/banner_patternB_blue.glb', x: 6.8, z: center - 7, rotY: Math.PI, solid: false, roomId: room.id, castleInterior: true },
+      {
+        model: 'assets/env/floor_tile_large.glb',
+        x: 0,
+        z: center - 1,
+        y: 0.055,
+        scaleX: 0.42,
+        scaleZ: 3.8,
+        solid: false,
+        decal: 'red-carpet',
+        decalWidth: 1.8,
+        decalLength: 16,
+        roomId: room.id,
+        castleInterior: true,
+      },
+    );
+    for (const z of [center + 4, center - 5]) {
+      add('ribcage', -5, z, 0, { targetHeight: 0.9 });
+      add('ribcage', 5, z, Math.PI, { targetHeight: 0.9 });
+      add('skull', -3.8, z + 1.2, 0, { solid: false });
+      add('skull', 3.8, z - 1.2, Math.PI, { solid: false });
+    }
+  }
+  keepRoomSpawnsClear(props, room, width, depth);
+  addPropObstacles(props, art.obstacles, room.id);
+  art.props.push(...props);
+  return art;
+}
+
 function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false, region = 1 } = {}) {
   const width = boss ? 20 : 16;
   const depth = 20;
@@ -548,9 +725,11 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
   const obstacles = [];
   const doors = [];
   for (const [index, room] of arranged.entries()) {
-    const art = region === 2
-      ? buildForestRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1, stageId: id })
-      : buildRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1 });
+    const art = region === 3
+      ? buildCastleRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1, stageId: id })
+      : region === 2
+        ? buildForestRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1, stageId: id })
+        : buildRoomArt(room, { width, depth, lastRoom: index === arranged.length - 1 });
     props.push(...art.props);
     obstacles.push(...art.obstacles);
     doors.push(...art.doors);
@@ -559,7 +738,9 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
   const xMax = width / 2;
   const minZ = arranged.at(-1).centerZ - depth / 2;
   const maxZ = depth / 2;
-  const spawnPoints = arranged.map((room) => roomSpawnPoints(width, room.centerZ));
+  const spawnPoints = arranged.map((room) => (
+    id === 'KB' ? [{ x: 0, z: room.centerZ - 2 }] : roomSpawnPoints(width, room.centerZ)
+  ));
   return {
     id,
     name,
@@ -567,6 +748,7 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
     recommendedLevel,
     region,
     ...(region === 2 ? { theme: 'forest' } : {}),
+    ...(region === 3 ? { theme: 'castle' } : {}),
     boss,
     width,
     depth: arranged.length * depth,
@@ -613,6 +795,20 @@ export const STAGE_LIST = [
   makeStage('FB', '잿빛 숲의 사령술사', 10, 10, [
     { theme: 'forest-boss', waves: [{ enemy: 'ashwarden', count: 1 }] },
   ], { boss: true, region: 2 }),
+  makeStage('K1', '성채 외벽', 11, 11, [
+    { theme: 'castle-courtyard', waves: [{ enemy: 'minion', count: 4 }, { enemy: 'shieldbearer', count: 2 }] },
+  ], { region: 3 }),
+  makeStage('K2', '뼈의 회랑', 12, 12, [
+    { theme: 'castle-corridor', waves: [{ enemy: 'bonearcher', count: 2 }, { enemy: 'shieldbearer', count: 2 }] },
+    { theme: 'castle-corridor', waves: [{ enemy: 'minion', count: 3 }, { enemy: 'shieldbearer', count: 2 }] },
+  ], { region: 3 }),
+  makeStage('K3', '왕의 납골소', 13, 13, [
+    { theme: 'castle-crypt', waves: [{ enemy: 'warrior', count: 2 }, { enemy: 'shieldbearer', count: 2 }] },
+    { theme: 'castle-crypt', waves: [{ enemy: 'mage', count: 1 }, { enemy: 'minion', count: 3 }, { enemy: 'shieldbearer', count: 1 }] },
+  ], { region: 3 }),
+  makeStage('KB', '해골 왕의 옥좌', 14, 14, [
+    { theme: 'castle-throne', waves: [{ enemy: 'skeletonking', count: 1 }] },
+  ], { boss: true, region: 3 }),
 ];
 
 export function isStageUnlocked(stageId, clearedStages = []) {
@@ -621,6 +817,7 @@ export function isStageUnlocked(stageId, clearedStages = []) {
   if (index === 0) return true;
   const stage = STAGE_LIST[index];
   if (stage.region === 2 && !clearedStages.includes('CB')) return false;
+  if (stage.region === 3 && !clearedStages.includes('FB')) return false;
   return clearedStages.includes(STAGE_LIST[index - 1].id);
 }
 
@@ -684,5 +881,6 @@ export const HUB_ARENA = {
     { id: 'blacksmith', name: '대장장이', model: 'Barbarian', x: -2.2, z: -3, rotY: Math.PI / 2, panel: 'blacksmith' },
     { id: 'merchant', name: '상인', model: 'Rogue_Hooded', x: 2.2, z: -3, rotY: -Math.PI / 2, panel: 'merchant' },
     { id: 'innkeeper', name: '주인', model: 'Mage', x: 0, z: -7, rotY: Math.PI, panel: 'board' },
+    { id: 'sanctuary', name: '법당', model: 'Knight', x: 5.1, z: -7, rotY: Math.PI, panel: 'sanctuary' },
   ],
 };

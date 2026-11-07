@@ -36,6 +36,11 @@ export const ENEMIES = {
     behavior: 'slam', slamRadius: 2.2, windupTicks: 28, activeTicks: 3, cooldownTicks: 90,
     knockback: 0.8, xp: 48, gold: [3, 7], dropChance: 0.18,
   },
+  shieldbearer: {
+    id: 'shieldbearer', model: 'Skeleton_Warrior', hp: 140, attack: 18, speed: 0.85, radius: 0.52,
+    behavior: 'shield-bash', length: 1.2, width: 1.6, windupTicks: 22, activeTicks: 3, cooldownTicks: 58,
+    knockback: 1, xp: 54, gold: [3, 7], dropChance: 0.2,
+  },
   commander: {
     id: 'commander', model: 'Skeleton_Warrior', hp: 900, attack: 20, speed: 1.5, radius: 0.75,
     behavior: 'boss-patterns', scale: 1.6, xp: 420, gold: [2, 5], dropChance: 1,
@@ -61,6 +66,20 @@ export const ENEMIES = {
         phaseTwoWindupTicks: 18, motionMult: 1.2, cooldownTicks: 150,
       },
       'blink-away': { hitThreshold: 12, tickInterval: 300, windupTicks: 18, minPlayerDistance: 6 },
+    },
+  },
+  skeletonking: {
+    id: 'skeletonking', model: 'Skeleton_Warrior', hp: 1800, attack: 30, speed: 1.15, radius: 1,
+    behavior: 'boss-patterns', scale: 2, tint: 0xd7bc63, xp: 900, gold: [8, 16], dropChance: 1,
+    patterns: {
+      cleave: { range: 4, halfAngle: Math.PI / 3, windupTicks: 26 },
+      'royal-nova': { innerRadius: 2.2, outerRadius: 7, windupTicks: 32 },
+      'summon-wave': { count: 4, windupTicks: 30, maxAliveWaves: 1, enemies: { shieldbearer: 2, minion: 2 } },
+      'bone-spear': {
+        minTargetDistance: 5.5, length: 14, width: 1, windupTicks: 24,
+        phaseTwoWindupTicks: 18, motionMult: 1.2, cooldownTicks: 150,
+      },
+      'grave-rise': { radius: 1.4, randomCircles: 3, windupTicks: 24 },
     },
   },
 };
