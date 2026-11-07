@@ -25,6 +25,33 @@ function bundleWorker() {
   return out.outputFiles[0].text;
 }
 
+function testNewPlayerStaticFieldsInDelta() {
+  const bundled = esbuild.buildSync({
+    entryPoints: [path.join(ROOT, 'realtime-poc/src/devinarok-room-do.ts')],
+    bundle: true,
+    format: 'cjs',
+    target: 'node22',
+    platform: 'node',
+    write: false,
+    logLevel: 'silent',
+  }).outputFiles[0].text;
+  const compiled = { exports: {} };
+  new Function('module', 'exports', 'require', bundled)(compiled, compiled.exports, require);
+  const room = new compiled.exports.DevinarokRoomDO({ storage: {} }, {});
+  const look = { weapon: '2H_Sword', helmet: true, cape: true, weaponRarity: 'rare' };
+  const player = {
+    id: 42,
+    kind: 'player',
+    playerId: 'new-player',
+    characterKind: 'knight',
+    look,
+  };
+  const firstDelta = room.renderEntity(player, 'viewer', false);
+  assert.equal(firstDelta.characterKind, 'knight');
+  assert.deepEqual(firstDelta.look, look);
+  assert.equal(room.renderEntity(player, 'viewer', false).look, undefined);
+}
+
 function wsClient(socket) {
   socket.accept();
   const queue = [];
@@ -90,6 +117,7 @@ async function connect(mf, roomCode, name, token, simHash = SIM_HASH) {
 
 async function run() {
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
+  testNewPlayerStaticFieldsInDelta();
   const mf = new Miniflare({
     modules: true,
     script: bundleWorker(),
@@ -115,6 +143,23 @@ async function run() {
     assert.equal(welcome0.roomCode, 'ABC234');
     assert.equal(welcome0.hostId, welcome0.playerId);
     assert.equal(lobby0.players.length, 1);
+    assert.equal(lobby0.public, true);
+    let listed = await (await mf.dispatchFetch('http://localhost/coord/rooms?g=devinarok')).json();
+    assert.equal(listed.rooms.length, 1);
+    assert.deepEqual(listed.rooms[0].meta, {
+      code: 'ABC234',
+      hostName: 'Host',
+      stageId: 'C1',
+      hostLevel: 1,
+      public: true,
+    });
+
+    p0.send({ t: 'lobby.public', public: false });
+    await p0.waitFor((message) => message.t === 'lobby' && message.public === false, 'private lobby');
+    listed = await (await mf.dispatchFetch('http://localhost/coord/rooms?g=devinarok')).json();
+    assert.equal(listed.rooms.length, 0);
+    p0.send({ t: 'lobby.public', public: true });
+    await p0.waitFor((message) => message.t === 'lobby' && message.public === true, 'public lobby');
 
     const p1 = await connect(mf, 'ABC234', 'Member');
     clients.push(p1);
@@ -146,8 +191,35 @@ async function run() {
     assert.equal(snap0.tick, 0);
     assert.equal(snap1.ack, 0);
     assert(Array.isArray(snap0.activeEnemyIds));
+    assert.equal((await (await mf.dispatchFetch('http://localhost/coord/match?g=devinarok')).json()).roomId, null);
     assert(snap0.ents.length >= 5);
     assert(Array.isArray(snap0.ents[0]), 'snapshot entities use compact protocol arrays');
+    const fields = [
+      'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase',
+      'attackShape', 'attackRemaining', 'skill', 'dodge', 'downed', 'ownerId', 'model',
+      'maxHp', 'name', 'item', 'radius', 'motion', 'characterKind', 'look',
+    ];
+    const expandEntity = (compact) => {
+      const [mask, ...rest] = compact;
+      const extras = rest.pop();
+      const entity = {};
+      let valueIndex = 0;
+      fields.forEach((field, index) => {
+        if (mask & (1 << index)) entity[field] = rest[valueIndex++];
+      });
+      return { ...entity, ...extras };
+    };
+    const expandedPlayers = snap0.ents.map(expandEntity).filter((entity) => entity.kind === 'player');
+    assert.equal(expandedPlayers.length, 2);
+    for (const player of expandedPlayers) {
+      assert.equal(player.characterKind, 'knight');
+      assert.deepEqual(player.look, {
+        weapon: '1H_Sword',
+        helmet: false,
+        cape: false,
+        weaponRarity: null,
+      });
+    }
 
     const pongPromise = p0.waitFor(
       (message) => message.t === 'pong' && message.c === 123,

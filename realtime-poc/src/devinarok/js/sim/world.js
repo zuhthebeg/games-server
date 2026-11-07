@@ -1,7 +1,7 @@
 import { ARENA } from './arena.js';
 import { AFFIXES } from '../content/affixes.js';
 import { ENEMIES } from '../content/enemies.js';
-import { ITEM_BASES, ITEMS, LEGENDARIES, RARITIES, BOSS_RARITIES, ELITE_RARITIES } from '../content/items.js';
+import { equipmentLook, ITEM_BASES, ITEMS, LEGENDARIES, RARITIES, BOSS_RARITIES, ELITE_RARITIES } from '../content/items.js';
 import { POTION, SKILLS } from '../content/skills.js';
 import { STAGES } from '../content/stages.js';
 import { HUB_ARENA } from '../content/stages.js';
@@ -395,12 +395,16 @@ export function addPlayer(world, {
   }
 
   const spawn = world.arena.playerSpawn;
-  const level = world.mode === 'stage' ? Math.max(1, Math.min(15, character.level ?? 1)) : 1;
+  const level = world.mode === 'stage' || world.mode === 'hub'
+    ? Math.max(1, Math.min(15, character.level ?? 1))
+    : 1;
   const equipment = (character.equipment ?? []).map((item) => ({
     ...item,
     affixes: [...(item.affixes ?? [])],
   }));
-  const stats = world.mode === 'stage' ? calculatePlayerStats(level, equipment) : null;
+  const stats = world.mode === 'stage' || world.mode === 'hub'
+    ? calculatePlayerStats(level, equipment)
+    : null;
   const reward = { xp: 0, gold: 0, items: [] };
   const player = {
     id: nextEntityId(world),
@@ -409,6 +413,7 @@ export function addPlayer(world, {
     name: String(name ?? id).slice(0, 32),
     characterKind,
     equipment,
+    look: equipmentLook(equipment),
     x: spawn.x,
     z: spawn.z,
     facing: -Math.PI / 2,
@@ -931,10 +936,10 @@ export function createStageWorld({
   return world;
 }
 
-export function createHubWorld({ seed = 1, playerId = 'hero' } = {}) {
+export function createHubWorld({ seed = 1, playerId = 'hero', level = 1, equipment = [] } = {}) {
   const world = createWorld({ seed, arena: HUB_ARENA });
   world.mode = 'hub';
-  addPlayer(world, { playerId, characterKind: 'knight' });
+  addPlayer(world, { playerId, characterKind: 'knight', character: { level, equipment } });
   return world;
 }
 

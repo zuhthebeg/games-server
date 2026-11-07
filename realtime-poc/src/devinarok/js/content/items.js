@@ -18,6 +18,19 @@ export const ITEM_BASES = [
 
 export const ITEMS = Object.fromEntries(ITEM_BASES.map((item) => [item.id, item]));
 
+export function equipmentLook(equipment = []) {
+  const slotOf = (item) => item.slot ?? ITEMS[item.itemId]?.slot;
+  const weapon = equipment.find((item) => slotOf(item) === 'weapon');
+  return {
+    weapon: weapon?.itemId === 'grave-greatsword' ? '2H_Sword' : '1H_Sword',
+    helmet: equipment.some((item) => slotOf(item) === 'head'),
+    cape: equipment.some((item) => slotOf(item) === 'body'),
+    weaponRarity: RARITY_IDS.has(weapon?.rarity) ? weapon.rarity : null,
+  };
+}
+
+const RARITY_IDS = new Set(['common', 'magic', 'rare', 'legendary']);
+
 export const RARITIES = {
   common: { name: '일반', weight: 60, affixes: 0, color: 0xc7c2bb },
   magic: { name: '마법', weight: 30, affixes: 1, color: 0x6388ff },
