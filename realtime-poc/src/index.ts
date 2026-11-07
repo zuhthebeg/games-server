@@ -4,12 +4,14 @@
 // 그 외                 → 상태/헬스
 import { RoomDO } from './room-do';
 import { CoordinatorDO } from './coordinator';
+import { DevinarokRoomDO } from './devinarok-room-do';
 
-export { RoomDO, CoordinatorDO };
+export { RoomDO, CoordinatorDO, DevinarokRoomDO };
 
 interface Env {
   ROOM: DurableObjectNamespace;
   COORD: DurableObjectNamespace;
+  DEVINAROK_ROOM: DurableObjectNamespace;
 }
 
 const COORD_PATHS = new Set(['/stats', '/rooms', '/match']);
@@ -21,6 +23,12 @@ export default {
     const m = url.pathname.match(/^\/room\/([A-Za-z0-9_-]{1,64})$/);
     if (m) {
       const stub = env.ROOM.get(env.ROOM.idFromName(m[1]));
+      return stub.fetch(req);
+    }
+
+    const devinarok = url.pathname.match(/^\/devinarok\/([ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6})$/);
+    if (devinarok) {
+      const stub = env.DEVINAROK_ROOM.get(env.DEVINAROK_ROOM.idFromName(devinarok[1]));
       return stub.fetch(req);
     }
 
