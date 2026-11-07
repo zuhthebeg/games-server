@@ -408,7 +408,7 @@ export function addPlayer(world, {
 
   const spawn = world.arena.playerSpawn;
   const level = world.mode === 'stage' || world.mode === 'hub'
-    ? Math.max(1, Math.min(15, character.level ?? 1))
+    ? Math.max(1, Math.min(20, character.level ?? 1))
     : 1;
   const equipment = (character.equipment ?? []).map((item) => ({
     ...item,
@@ -528,6 +528,14 @@ function queueCombo(player, seq) {
     attack.queued = true;
     attack.queuedSeq = seq;
   }
+}
+
+function shieldGuardLowered(world, enemy) {
+  return enemy.enemyKind === 'shieldbearer'
+    && (
+      (enemy.attackPattern === 'shield-bash' && (enemy.attackPhase !== null || enemy.recoverTicks > 0))
+      || world.tick <= (enemy.shieldGuardDownUntilTick ?? 0)
+    );
 }
 
 function damageEnemy(world, player, enemy, shape, timeline, castId) {
@@ -1011,12 +1019,13 @@ function spawnStageEnemy(world, enemyType, index, elite = false, position = null
     attackHit: false,
     attackTargetId: null,
     attackPattern: null,
+    shieldGuardDownUntilTick: 0,
     attackPatternIndex: 0,
     boneSpearCooldownTicks: 0,
     stunnedTicks: 0,
     slowTicks: 0,
     elite,
-    boss: ['commander', 'ashwarden'].includes(enemyType),
+    boss: ['commander', 'ashwarden', 'skeletonking'].includes(enemyType),
     summoned: Boolean(summonedBy),
     ...(summonedBy ? { summonedBy } : {}),
     summonCooldownTicks: 0,
@@ -1064,7 +1073,18 @@ function attackShapeHit(shape, target, targetRadius = 0) {
   if (!shape) return false;
   if (shape.type === 'sector') return inSector(shape, target, targetRadius);
   if (shape.type === 'circle') return Math.hypot(target.x - shape.originX, target.z - shape.originZ) <= shape.radius + targetRadius;
+  if (shape.type === 'annulus') {
+    const distance = Math.hypot(target.x - shape.originX, target.z - shape.originZ);
+    return distance + targetRadius >= shape.innerRadius && distance - targetRadius <= shape.outerRadius;
+  }
   if (shape.type === 'circles') return shape.circles.some((circle) => Math.hypot(target.x - circle.x, target.z - circle.z) <= circle.radius + targetRadius);
+  if (shape.type === 'rect') {
+    const dx = target.x - shape.originX;
+    const dz = target.z - shape.originZ;
+    const forward = dx * Math.cos(shape.angle) + dz * Math.sin(shape.angle);
+    const side = Math.abs(-dx * Math.sin(shape.angle) + dz * Math.cos(shape.angle));
+    return forward >= -targetRadius && forward <= shape.length + targetRadius && side <= shape.width / 2 + targetRadius;
+  }
   if (shape.type === 'line') {
     const dx = target.x - shape.originX;
     const dz = target.z - shape.originZ;
@@ -1143,6 +1163,7 @@ function recordEnemyHistory(world) {
         x: enemy.x,
         z: enemy.z,
         radius: enemy.radius,
+        facing: enemy.facing,
         dead: enemy.dead,
       }))
       .sort((a, b) => a.id - b.id),
@@ -1155,6 +1176,10 @@ function recordEnemyHistory(world) {
 
 function makeLineShape(x, z, angle, length, width) {
   return { type: 'line', originX: x, originZ: z, angle, length, width };
+}
+
+function makeAnnulusShape(x, z, innerRadius, outerRadius) {
+  return { type: 'annulus', originX: x, originZ: z, innerRadius, outerRadius };
 }
 
 function randomGold(world, stageLevel, player) {
@@ -1227,7 +1252,19 @@ function dropRewards(world, enemy) {
   }
 }
 
-function killStageEnemy(world, source, enemy, damage, castId, critical = false, skillId = source.skillCast?.id ?? 0, viewLag = source.viewLag ?? 0, viewTick = source.lastInput?.viewTick) {
+function killStageEnemy(
+  world,
+  source,
+  enemy,
+  damage,
+  castId,
+  critical = false,
+  skillId = source.skillCast?.id ?? 0,
+  viewLag = source.viewLag ?? 0,
+  viewTick = source.lastInput?.viewTick,
+  guarded = false,
+  shape = null,
+) {
   if (enemy.dead) return;
   enemy.hitCountSinceBlink = (enemy.hitCountSinceBlink ?? 0) + 1;
   enemy.hp = Math.max(0, enemy.hp - damage);
@@ -1247,6 +1284,7 @@ function killStageEnemy(world, source, enemy, damage, castId, critical = false, 
     skill: skillId,
     viewLag,
     inputSeq: source.lastInput?.seq,
+    ...(guarded ? { guarded: true, shape: copyShape(shape) } : {}),
     ...(Number.isSafeInteger(viewTick) ? { viewTick } : {}),
   });
   if (enemy.hp > 0) return;
@@ -1294,12 +1332,19 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
     });
   }
   let hitCount = 0;
-  for (const { enemy } of candidates) {
+  for (const { enemy, target } of candidates) {
     if (hitTargets.includes(enemy.id) || enemy.invulnerable || enemy.spawnTicksLeft > 0) continue;
     if (enemy.dead) continue;
     hitTargets.push(enemy.id);
     const critical = random(world) * 100 < player.stats.critChance;
-    const damage = calculateDamage(player.stats.attack, motionMult, critical, player.stats.critDamage, enemy.defense ?? 0);
+    const rawDamage = calculateDamage(player.stats.attack, motionMult, critical, player.stats.critDamage, enemy.defense ?? 0);
+    const sourceX = Number.isFinite(shape.originX) ? shape.originX : player.x;
+    const sourceZ = Number.isFinite(shape.originZ) ? shape.originZ : player.z;
+    const incomingAngle = Math.atan2(sourceZ - target.z, sourceX - target.x);
+    const guarded = enemy.enemyKind === 'shieldbearer'
+      && !shieldGuardLowered(world, enemy)
+      && Math.abs(angleDifference(incomingAngle, target.facing ?? enemy.facing)) <= Math.PI / 3;
+    const damage = guarded ? Math.max(1, Math.round(rawDamage * 0.5)) : rawDamage;
     killStageEnemy(
       world,
       player,
@@ -1310,6 +1355,8 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
       skillId ?? player.skillCast?.id ?? 0,
       viewLag,
       viewTick,
+      guarded,
+      shape,
     );
     const heal = Math.floor(damage * player.stats.lifesteal / 100);
     if (heal) player.hp = Math.min(player.maxHp, player.hp + heal);
@@ -1912,6 +1959,10 @@ function startBossPattern(world, boss, target) {
     startAshwardenPattern(world, boss, target, stagePlayers(world));
     return;
   }
+  if (boss.enemyKind === 'skeletonking') {
+    startSkeletonKingPattern(world, boss, target);
+    return;
+  }
   const phaseTwo = boss.hp / boss.maxHp < 0.5;
   const patterns = phaseTwo ? ['combo', 'charge', 'slam', 'circles'] : ['combo', 'charge', 'slam'];
   const selectedPattern = patterns[boss.attackPatternIndex % patterns.length];
@@ -1958,8 +2009,88 @@ function startBossPattern(world, boss, target) {
   }
 }
 
+function startSkeletonKingPattern(world, boss, target) {
+  const patterns = ENEMIES.skeletonking.patterns;
+  const phaseTwo = boss.hp / boss.maxHp <= 0.5;
+  const distance = Math.hypot(target.x - boss.x, target.z - boss.z);
+  const livingSummons = world.entities.filter((entity) => (
+    entity.kind === 'enemy' && !entity.dead && entity.summonedBy === boss.id
+  ));
+  const cycle = phaseTwo
+    ? ['cleave', 'royal-nova', 'summon-wave', 'grave-rise']
+    : ['cleave', 'royal-nova', 'summon-wave'];
+  let pattern = cycle[boss.attackPatternIndex++ % cycle.length];
+  if (pattern === 'summon-wave' && livingSummons.length) pattern = phaseTwo ? 'grave-rise' : 'royal-nova';
+  const spear = patterns['bone-spear'];
+  if (distance > spear.minTargetDistance && boss.boneSpearCooldownTicks === 0) pattern = 'bone-spear';
+  const angle = Math.atan2(target.z - boss.z, target.x - boss.x);
+  boss.facing = angle;
+  if (pattern === 'cleave') {
+    beginEnemyTelegraph(world, boss, target, {
+      type: 'sector',
+      originX: boss.x,
+      originZ: boss.z,
+      angle,
+      range: patterns.cleave.range,
+      halfAngle: patterns.cleave.halfAngle,
+    }, pattern, bossWindup(patterns.cleave.windupTicks, phaseTwo));
+  } else if (pattern === 'royal-nova') {
+    beginEnemyTelegraph(
+      world,
+      boss,
+      target,
+      makeAnnulusShape(boss.x, boss.z, patterns['royal-nova'].innerRadius, patterns['royal-nova'].outerRadius),
+      pattern,
+      bossWindup(patterns['royal-nova'].windupTicks, phaseTwo),
+    );
+  } else if (pattern === 'summon-wave') {
+    beginEnemyTelegraph(world, boss, target, { type: 'circle', originX: boss.x, originZ: boss.z, radius: 1.1 },
+      pattern, bossWindup(patterns['summon-wave'].windupTicks, phaseTwo));
+  } else if (pattern === 'bone-spear') {
+    boss.boneSpearCooldownTicks = spear.cooldownTicks;
+    beginEnemyTelegraph(
+      world,
+      boss,
+      target,
+      makeLineShape(boss.x, boss.z, angle, spear.length, spear.width),
+      pattern,
+      bossWindup(spear.windupTicks, phaseTwo, spear.phaseTwoWindupTicks),
+    );
+  } else {
+    const livingPlayers = stagePlayers(world).filter((player) => !player.dead && !player.downed);
+    const circles = livingPlayers.map((player) => ({ x: player.x, z: player.z, radius: patterns['grave-rise'].radius }));
+    for (let index = 0; index < patterns['grave-rise'].randomCircles; index += 1) {
+      circles.push({
+        x: -world.arena.width / 2 + 1 + random(world) * (world.arena.width - 2),
+        z: world.arena.rooms[world.roomIndex].centerZ - 9 + random(world) * 18,
+        radius: patterns['grave-rise'].radius,
+      });
+    }
+    beginEnemyTelegraph(
+      world,
+      boss,
+      target,
+      { type: 'circles', circles },
+      pattern,
+      bossWindup(patterns['grave-rise'].windupTicks, phaseTwo),
+    );
+  }
+}
+
 function activeEnemyAttack(world, enemy, target) {
   if (['summon', 'summon-wave', 'blink-away'].includes(enemy.attackPattern)) return;
+  if (
+    enemy.enemyKind === 'skeletonking'
+    && ['cleave', 'royal-nova', 'grave-rise'].includes(enemy.attackPattern)
+  ) {
+    const hitPlayers = stagePlayers(world).filter((player) => (
+      !player.dead && !player.downed && attackShapeHit(enemy.attackShape, player, player.radius)
+    ));
+    if (!hitPlayers.length) return;
+    enemy.attackHit = true;
+    for (const player of hitPlayers) queueEnemyHit(world, enemy, player, enemy.attackShape);
+    return;
+  }
   if (enemy.attackPattern === 'ash-rain') {
     const hitPlayers = stagePlayers(world).filter((player) => (
       !player.dead && !player.downed && attackShapeHit(enemy.attackShape, player, player.radius)
@@ -1974,7 +2105,9 @@ function activeEnemyAttack(world, enemy, target) {
   const motionMult = enemy.attackPattern === 'bone-spear'
     ? (ENEMIES[enemy.enemyKind].boneSpear ?? ENEMIES[enemy.enemyKind].patterns['bone-spear']).motionMult
     : 1;
-  const knockback = enemy.attackPattern === 'slam' ? (ENEMIES[enemy.enemyKind].knockback ?? 0) : 0;
+  const knockback = enemy.attackPattern === 'shield-bash'
+    ? ENEMIES.shieldbearer.knockback
+    : enemy.attackPattern === 'slam' ? (ENEMIES[enemy.enemyKind].knockback ?? 0) : 0;
   queueEnemyHit(world, enemy, target, enemy.attackShape, null, motionMult, knockback);
 }
 
@@ -1992,15 +2125,27 @@ function stepStageEnemy(world, enemy, players) {
   }
   if (enemy.recoverTicks > 0) {
     enemy.recoverTicks -= 1;
-    if (!enemy.recoverTicks) enemy.attackCooldownTicks = 30;
+    if (!enemy.recoverTicks) {
+      enemy.attackCooldownTicks = 30;
+      if (enemy.enemyKind === 'shieldbearer' && enemy.attackPattern === 'shield-bash') {
+        enemy.shieldGuardDownUntilTick = world.tick + 45;
+        enemy.attackPattern = null;
+      }
+    }
     return;
   }
   if (enemy.attackCooldownTicks > 0) {
     enemy.attackCooldownTicks -= 1;
-    return;
+    if (enemy.enemyKind !== 'shieldbearer') return;
   }
   const target = nearestPlayer(enemy, players);
   if (!target) return;
+  if (enemy.enemyKind === 'shieldbearer') {
+    const targetAngle = Math.atan2(target.z - enemy.z, target.x - enemy.x);
+    const turn = clamp(angleDifference(targetAngle, enemy.facing), -2 * Math.PI / 180, 2 * Math.PI / 180);
+    enemy.facing += turn;
+    if (enemy.attackCooldownTicks > 0) return;
+  }
   if (enemy.boss && enemy.enemyKind === 'commander') maybeBossSummon(world, enemy);
   if (enemy.attackPhase === 'windup') {
     if (enemy.attackRemaining > 1) {
@@ -2018,17 +2163,27 @@ function stepStageEnemy(world, enemy, players) {
   }
   if (enemy.attackPhase === 'active') {
     if (enemy.attackPattern === 'summon' || enemy.attackPattern === 'summon-wave') {
-      const count = enemy.attackPattern === 'summon-wave' ? 4 : ENEMIES.ashcaller.summon.count;
+      const summonRule = enemy.enemyKind === 'skeletonking'
+        ? ENEMIES.skeletonking.patterns['summon-wave']
+        : ENEMIES.ashwarden.patterns['summon-wave'];
+      const count = enemy.attackPattern === 'summon-wave' ? summonRule.count : ENEMIES.ashcaller.summon.count;
       const livingCount = world.entities.filter((entry) => entry.kind === 'enemy' && !entry.dead && entry.summonedBy === enemy.id).length;
       const allowed = enemy.attackPattern === 'summon-wave'
-        ? (livingCount ? 0 : count)
+        ? (livingCount && summonRule.maxAliveWaves ? 0 : count)
         : Math.max(0, ENEMIES.ashcaller.summon.maxAlive - livingCount);
-      for (let index = 0; index < Math.min(count, allowed); index += 1) {
-        const angle = Math.PI * 2 * index / count;
-        spawnStageEnemy(world, 'minion', index, false, {
-          x: enemy.x + Math.cos(angle) * 1.8,
-          z: enemy.z + Math.sin(angle) * 1.8,
-        }, enemy.id);
+      const composition = enemy.enemyKind === 'skeletonking'
+        ? summonRule.enemies
+        : { minion: count };
+      let index = 0;
+      for (const [enemyType, amount] of Object.entries(composition)) {
+        for (let entry = 0; entry < amount && index < allowed; entry += 1) {
+          const angle = Math.PI * 2 * index / count;
+          spawnStageEnemy(world, enemyType, index, false, {
+            x: enemy.x + Math.cos(angle) * 1.8,
+            z: enemy.z + Math.sin(angle) * 1.8,
+          }, enemy.id);
+          index += 1;
+        }
       }
       enemy.attackCooldownTicks = enemy.attackPattern === 'summon'
         ? ENEMIES.ashcaller.summon.cooldownTicks
@@ -2091,6 +2246,7 @@ function stepStageEnemy(world, enemy, players) {
       } else {
         if (enemy.attackPattern === 'line-dash') enemy.recoverTicks = 30;
         else if (enemy.attackPattern === 'charge') enemy.recoverTicks = 18;
+        else if (enemy.attackPattern === 'shield-bash') enemy.recoverTicks = 1;
         else enemy.attackCooldownTicks = enemy.boss ? 30 : ENEMIES[enemy.enemyKind].cooldownTicks;
         enemy.attackPhase = null;
         enemy.attackShape = null;
@@ -2108,7 +2264,22 @@ function stepStageEnemy(world, enemy, players) {
   const dx = target.x - enemy.x;
   const dz = target.z - enemy.z;
   const distance = Math.hypot(dx, dz);
-  if (distance > 0.001) enemy.facing = Math.atan2(dz, dx);
+  if (distance > 0.001 && enemy.enemyKind !== 'shieldbearer') enemy.facing = Math.atan2(dz, dx);
+  if (rule.behavior === 'shield-bash') {
+    if (distance <= rule.length + target.radius) {
+      beginEnemyTelegraph(world, enemy, target, {
+        type: 'rect',
+        originX: enemy.x,
+        originZ: enemy.z,
+        angle: enemy.facing,
+        length: rule.length,
+        width: rule.width,
+      }, 'shield-bash', rule.windupTicks);
+    } else {
+      moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
+    }
+    return;
+  }
   if (rule.behavior === 'ground-circle' || rule.behavior === 'summoner') {
     if (distance > rule.keepDistance + 0.8) {
       moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
@@ -2417,7 +2588,7 @@ export function step(world, inputsByPlayerId = {}) {
     if (enemy.kind === 'enemy') enemy.hitFlashTicks = Math.max(0, enemy.hitFlashTicks - 1);
   }
   cleanupEntities(world);
-  ensureWave(world);
+  if (world.mode !== 'hub') ensureWave(world);
   return world;
 }
 
