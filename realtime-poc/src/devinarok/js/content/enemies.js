@@ -69,12 +69,12 @@ export const ENEMIES = {
     },
   },
   skeletonking: {
-    id: 'skeletonking', model: 'Skeleton_Warrior', hp: 1800, attack: 30, speed: 1.15, radius: 1,
+    id: 'skeletonking', model: 'Skeleton_Warrior', hp: 1800, attack: 15, speed: 1.15, radius: 1,
     behavior: 'boss-patterns', scale: 2, tint: 0xd7bc63, xp: 900, gold: [8, 16], dropChance: 1,
     patterns: {
       cleave: { range: 4, halfAngle: Math.PI / 3, windupTicks: 26 },
       'royal-nova': { innerRadius: 2.2, outerRadius: 7, windupTicks: 32 },
-      'summon-wave': { count: 4, windupTicks: 30, maxAliveWaves: 1, enemies: { shieldbearer: 2, minion: 2 } },
+      'summon-wave': { count: 3, windupTicks: 30, maxAliveWaves: 1, enemies: { shieldbearer: 1, minion: 2 } },
       'bone-spear': {
         minTargetDistance: 5.5, length: 14, width: 1, windupTicks: 24,
         phaseTwoWindupTicks: 18, motionMult: 1.2, cooldownTicks: 150,

@@ -881,6 +881,6 @@ export const HUB_ARENA = {
     { id: 'blacksmith', name: '대장장이', model: 'Barbarian', x: -2.2, z: -3, rotY: Math.PI / 2, panel: 'blacksmith' },
     { id: 'merchant', name: '상인', model: 'Rogue_Hooded', x: 2.2, z: -3, rotY: -Math.PI / 2, panel: 'merchant' },
     { id: 'innkeeper', name: '주인', model: 'Mage', x: 0, z: -7, rotY: Math.PI, panel: 'board' },
-    { id: 'sanctuary', name: '법당', model: 'Knight', x: 5.1, z: -7, rotY: Math.PI, panel: 'sanctuary' },
+    { id: 'sanctuary', name: '법당', model: 'knight', x: 5.1, z: -7, rotY: Math.PI, panel: 'sanctuary' },
   ],
 };

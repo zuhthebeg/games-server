@@ -530,6 +530,14 @@ function queueCombo(player, seq) {
   }
 }
 
+function shieldGuardLowered(world, enemy) {
+  return enemy.enemyKind === 'shieldbearer'
+    && (
+      (enemy.attackPattern === 'shield-bash' && (enemy.attackPhase !== null || enemy.recoverTicks > 0))
+      || world.tick <= (enemy.shieldGuardDownUntilTick ?? 0)
+    );
+}
+
 function damageEnemy(world, player, enemy, shape, timeline, castId) {
   enemy.hp = Math.max(0, enemy.hp - timeline.damage);
   enemy.hitFlashTicks = 7;
@@ -1011,6 +1019,7 @@ function spawnStageEnemy(world, enemyType, index, elite = false, position = null
     attackHit: false,
     attackTargetId: null,
     attackPattern: null,
+    shieldGuardDownUntilTick: 0,
     attackPatternIndex: 0,
     boneSpearCooldownTicks: 0,
     stunnedTicks: 0,
@@ -1333,8 +1342,9 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
     const sourceZ = Number.isFinite(shape.originZ) ? shape.originZ : player.z;
     const incomingAngle = Math.atan2(sourceZ - target.z, sourceX - target.x);
     const guarded = enemy.enemyKind === 'shieldbearer'
+      && !shieldGuardLowered(world, enemy)
       && Math.abs(angleDifference(incomingAngle, target.facing ?? enemy.facing)) <= Math.PI / 3;
-    const damage = guarded ? Math.max(1, Math.round(rawDamage * 0.3)) : rawDamage;
+    const damage = guarded ? Math.max(1, Math.round(rawDamage * 0.5)) : rawDamage;
     killStageEnemy(
       world,
       player,
@@ -2115,7 +2125,13 @@ function stepStageEnemy(world, enemy, players) {
   }
   if (enemy.recoverTicks > 0) {
     enemy.recoverTicks -= 1;
-    if (!enemy.recoverTicks) enemy.attackCooldownTicks = 30;
+    if (!enemy.recoverTicks) {
+      enemy.attackCooldownTicks = 30;
+      if (enemy.enemyKind === 'shieldbearer' && enemy.attackPattern === 'shield-bash') {
+        enemy.shieldGuardDownUntilTick = world.tick + 45;
+        enemy.attackPattern = null;
+      }
+    }
     return;
   }
   if (enemy.attackCooldownTicks > 0) {
@@ -2126,7 +2142,7 @@ function stepStageEnemy(world, enemy, players) {
   if (!target) return;
   if (enemy.enemyKind === 'shieldbearer') {
     const targetAngle = Math.atan2(target.z - enemy.z, target.x - enemy.x);
-    const turn = clamp(angleDifference(targetAngle, enemy.facing), -4 * Math.PI / 180, 4 * Math.PI / 180);
+    const turn = clamp(angleDifference(targetAngle, enemy.facing), -2 * Math.PI / 180, 2 * Math.PI / 180);
     enemy.facing += turn;
     if (enemy.attackCooldownTicks > 0) return;
   }
@@ -2230,6 +2246,7 @@ function stepStageEnemy(world, enemy, players) {
       } else {
         if (enemy.attackPattern === 'line-dash') enemy.recoverTicks = 30;
         else if (enemy.attackPattern === 'charge') enemy.recoverTicks = 18;
+        else if (enemy.attackPattern === 'shield-bash') enemy.recoverTicks = 1;
         else enemy.attackCooldownTicks = enemy.boss ? 30 : ENEMIES[enemy.enemyKind].cooldownTicks;
         enemy.attackPhase = null;
         enemy.attackShape = null;
@@ -2571,7 +2588,7 @@ export function step(world, inputsByPlayerId = {}) {
     if (enemy.kind === 'enemy') enemy.hitFlashTicks = Math.max(0, enemy.hitFlashTicks - 1);
   }
   cleanupEntities(world);
-  ensureWave(world);
+  if (world.mode !== 'hub') ensureWave(world);
   return world;
 }
 
