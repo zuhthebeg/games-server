@@ -320,8 +320,8 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
     hall: [
       ['assets/env/banner_patternA_red.glb', -6.5, room.centerZ - 7],
       ['assets/env/banner_shield_red.glb', 6.5, room.centerZ - 7],
-      ['assets/env/stairs_wide.glb', 0, room.centerZ - 8],
-      ['assets/env/chest_gold.glb', 0, room.centerZ - 6],
+      ['assets/env/stairs_wide.glb', 6.5, room.centerZ - 8],
+      ['assets/env/chest_gold.glb', -7, room.centerZ - 7.5],
       ['assets/env/shelf_large.glb', -7, room.centerZ - 3],
     ],
   }[room.theme] ?? [];

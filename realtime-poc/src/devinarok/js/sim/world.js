@@ -145,7 +145,7 @@ function clampToArena(world, entity) {
   entity.z = clamp(entity.z, bounds.minZ + entity.radius, bounds.maxZ - entity.radius);
 }
 
-function resolveObstacle(entity, obstacle) {
+function resolveObstacle(entity, obstacle, startX, startZ, movementX, movementZ) {
   if (obstacle.type === 'circle') {
     const dx = entity.x - obstacle.x;
     const dz = entity.z - obstacle.z;
@@ -179,22 +179,32 @@ function resolveObstacle(entity, obstacle) {
   const penetrationX = halfWidth + entity.radius - Math.abs(entity.x - obstacle.x);
   const penetrationZ = halfDepth + entity.radius - Math.abs(entity.z - obstacle.z);
   if (penetrationX < penetrationZ) {
-    dx = entity.x < obstacle.x ? -1 : 1;
+    dx = entity.x < obstacle.x
+      ? -1
+      : entity.x > obstacle.x
+        ? 1
+        : startX < obstacle.x || (startX === obstacle.x && movementX > 0) ? -1 : 1;
     entity.x += dx * penetrationX;
   } else {
-    dz = entity.z < obstacle.z ? -1 : 1;
+    dz = entity.z < obstacle.z
+      ? -1
+      : entity.z > obstacle.z
+        ? 1
+        : startZ < obstacle.z || (startZ === obstacle.z && movementZ > 0) ? -1 : 1;
     entity.z += dz * penetrationZ;
   }
 }
 
 function moveEntity(world, entity, dx, dz) {
+  const startX = entity.x;
+  const startZ = entity.z;
   entity.x += dx;
   entity.z += dz;
   for (let pass = 0; pass < 2; pass += 1) {
     clampToArena(world, entity);
     for (const obstacle of world.arena.obstacles) {
       if (obstacle.doorId && world.openDoors?.[obstacle.doorId]) continue;
-      resolveObstacle(entity, obstacle);
+      resolveObstacle(entity, obstacle, startX, startZ, dx, dz);
     }
   }
   clampToArena(world, entity);
@@ -1468,6 +1478,7 @@ function startBossPattern(world, boss, target) {
     boss.chargeStartX = boss.x;
     boss.chargeStartZ = boss.z;
     boss.chargeAngle = angle;
+    boss.lineTravelled = 0;
     beginEnemyTelegraph(world, boss, target, makeLineShape(boss.x, boss.z, angle, 9, 1.6), pattern, bossWindup(27, phaseTwo));
   } else if (pattern === 'slam') {
     beginEnemyTelegraph(world, boss, target, { type: 'circle', originX: boss.x, originZ: boss.z, radius: 3.5 }, pattern, bossWindup(30, phaseTwo));
@@ -1529,8 +1540,15 @@ function stepStageEnemy(world, enemy, players) {
   }
   if (enemy.attackPhase === 'active') {
     if (enemy.attackPattern === 'charge') {
-      moveEntity(world, enemy, Math.cos(enemy.chargeAngle) * 1, Math.sin(enemy.chargeAngle) * 1);
-      enemy.lineTravelled += 1;
+      const startX = enemy.x;
+      const startZ = enemy.z;
+      const directionX = Math.cos(enemy.chargeAngle);
+      const directionZ = Math.sin(enemy.chargeAngle);
+      moveEntity(world, enemy, directionX, directionZ);
+      const travelled = Math.max(0, (enemy.x - startX) * directionX + (enemy.z - startZ) * directionZ);
+      enemy.lineTravelled += Math.min(1, travelled);
+      enemy.attackShape.length = enemy.lineTravelled;
+      if (travelled < 1 - 1e-3) enemy.attackRemaining = 1;
     } else if (enemy.attackPattern === 'line-dash') {
       const shape = enemy.attackShape;
       const directionX = Math.cos(shape.angle);
