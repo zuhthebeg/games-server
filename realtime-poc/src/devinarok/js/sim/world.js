@@ -131,6 +131,15 @@ function normalizeInput(player, rawInput) {
     moveZ: clampInput(rawInput.moveZ, -127, 127, previous.moveZ),
     aim: clampInput(rawInput.aim, 0, 255, previous.aim),
     buttons: clampInput(rawInput.buttons, 0, 127, 0),
+    ...(Number.isFinite(rawInput.ad) && player.family !== 'sword'
+      ? {
+        ad: Math.round(clamp(
+          rawInput.ad,
+          0,
+          player.family === 'crossbow' ? 12 : 8,
+        ) * 10) / 10,
+      }
+      : {}),
     ...(Number.isSafeInteger(rawInput.viewTick) ? { viewTick: rawInput.viewTick } : {}),
   };
 }
@@ -1096,7 +1105,16 @@ export function pickAimTarget(world, player, range) {
   return nearest(Math.PI * 35 / 180) ?? nearest(Math.PI / 2);
 }
 
-function aimedPoint(world, player, range, fallbackDistance) {
+function aimedPoint(world, player, range, fallbackDistance, input) {
+  if (Number.isFinite(input?.ad)) {
+    const angle = angleFromAim(input.aim);
+    const distance = clamp(input.ad, 0, range);
+    return {
+      x: player.x + Math.cos(angle) * distance,
+      z: player.z + Math.sin(angle) * distance,
+      targetId: null,
+    };
+  }
   const target = pickAimTarget(world, player, range);
   if (target) return { x: target.x, z: target.z, targetId: target.id };
   return {
@@ -1198,7 +1216,7 @@ function dropRewards(world, enemy) {
   }
 }
 
-function killStageEnemy(world, source, enemy, damage, castId, critical = false, skillId = source.skillCast?.id ?? 0, viewLag = 0) {
+function killStageEnemy(world, source, enemy, damage, castId, critical = false, skillId = source.skillCast?.id ?? 0, viewLag = source.viewLag ?? 0, viewTick = source.lastInput?.viewTick) {
   if (enemy.dead) return;
   enemy.hp = Math.max(0, enemy.hp - damage);
   enemy.hitFlashTicks = 9;
@@ -1217,7 +1235,7 @@ function killStageEnemy(world, source, enemy, damage, castId, critical = false, 
     skill: skillId,
     viewLag,
     inputSeq: source.lastInput?.seq,
-    ...(Number.isSafeInteger(source.lastInput?.viewTick) ? { viewTick: source.lastInput.viewTick } : {}),
+    ...(Number.isSafeInteger(viewTick) ? { viewTick } : {}),
   });
   if (enemy.hp > 0) return;
   enemy.dead = true;
@@ -1233,16 +1251,18 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
   rewind = true,
   maxTargets = Infinity,
   slowTicks = 0,
+  viewLag = player.viewLag,
+  viewTick = player.lastInput?.viewTick,
 } = {}) {
-  const history = rewind ? enemyHistoryFrame(world, player.viewLag) : null;
+  const history = rewind ? enemyHistoryFrame(world, viewLag) : null;
   emit(world, 'strike', {
     sourceId: player.id,
     castId,
     skill: skillId,
     shape: structuredClone(shape),
-    viewLag: player.viewLag,
+    viewLag,
     inputSeq: player.lastInput?.seq,
-    ...(Number.isSafeInteger(player.lastInput?.viewTick) ? { viewTick: player.lastInput.viewTick } : {}),
+    ...(Number.isSafeInteger(viewTick) ? { viewTick } : {}),
   });
   let candidates = stageActiveEnemies(world)
     .map((enemy) => {
@@ -1268,7 +1288,17 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
     hitTargets.push(enemy.id);
     const critical = random(world) * 100 < player.stats.critChance;
     const damage = calculateDamage(player.stats.attack, motionMult, critical, player.stats.critDamage, enemy.defense ?? 0);
-    killStageEnemy(world, player, enemy, damage, castId, critical, skillId ?? player.skillCast?.id ?? 0, player.viewLag);
+    killStageEnemy(
+      world,
+      player,
+      enemy,
+      damage,
+      castId,
+      critical,
+      skillId ?? player.skillCast?.id ?? 0,
+      viewLag,
+      viewTick,
+    );
     const heal = Math.floor(damage * player.stats.lifesteal / 100);
     if (heal) player.hp = Math.min(player.maxHp, player.hp + heal);
     if (!enemy.dead && slowTicks > 0) enemy.slowTicks = Math.max(enemy.slowTicks ?? 0, slowTicks);
@@ -1279,7 +1309,11 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
 }
 
 function queuePendingImpact(world, impact) {
-  const pending = { ...impact, shape: copyShape(impact.shape) };
+  const pending = {
+    ...impact,
+    viewLag: clamp(Math.trunc(impact.viewLag ?? 0), 0, 12),
+    shape: copyShape(impact.shape),
+  };
   world.pendingImpacts.push(pending);
   emit(world, 'impact', {
     id: pending.id,
@@ -1290,6 +1324,8 @@ function queuePendingImpact(world, impact) {
     resolveTick: pending.resolveTick,
     endsTick: pending.endsTick,
     hitEvery: pending.hitEvery,
+    viewLag: pending.viewLag,
+    ...(Number.isSafeInteger(pending.viewTick) ? { viewTick: pending.viewTick } : {}),
     shape: copyShape(pending.shape),
     kind: pending.kind,
     sourceX: pending.sourceX,
@@ -1310,7 +1346,10 @@ function resolvePendingImpacts(world) {
       if (elapsed > 0 && elapsed % impact.hitEvery === 0) {
         const player = world.entities.find((entity) => entity.kind === 'player' && entity.playerId === impact.ownerId);
         if (player && !player.dead && !player.downed && player.connected) {
-          playerStrike(world, player, impact.shape, impact.motionMult, impact.id, [], impact.skillId, { rewind: false });
+          playerStrike(world, player, impact.shape, impact.motionMult, impact.id, [], impact.skillId, {
+            viewLag: impact.viewLag,
+            viewTick: impact.viewTick,
+          });
         }
       }
       if (world.tick < impact.endsTick) remaining.push(impact);
@@ -1330,7 +1369,11 @@ function resolvePendingImpacts(world) {
       impact.id,
       [],
       impact.skillId,
-      { rewind: false, slowTicks: impact.slowTicks ?? 0 },
+      {
+        slowTicks: impact.slowTicks ?? 0,
+        viewLag: impact.viewLag,
+        viewTick: impact.viewTick,
+      },
     );
     if (impact.kind === 'frost') {
       for (const enemyId of hitTargets) {
@@ -1413,8 +1456,11 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   if (player.moving && player.guardTicks <= 0) player.facing = Math.atan2(directionZ, directionX);
   else if (!player.moving) player.facing = angleFromAim(input.aim);
   if (family !== 'sword') {
-    const target = pickAimTarget(ctx, player, family === 'crossbow' ? 12 : 8);
-    if (target) player.facing = Math.atan2(target.z - player.z, target.x - player.x);
+    if (Number.isFinite(input.ad)) player.facing = angleFromAim(input.aim);
+    else {
+      const target = pickAimTarget(ctx, player, family === 'crossbow' ? 12 : 8);
+      if (target) player.facing = Math.atan2(target.z - player.z, target.x - player.x);
+    }
   }
 
   const skillId = pressed & BUTTONS.SKILL1 ? 1 : pressed & BUTTONS.SKILL2 ? 2 : pressed & BUTTONS.SKILL3 ? 3 : 0;
@@ -1465,7 +1511,14 @@ export function stepPlayerMotion(ctx, player, rawInput) {
       );
       if (cast.tick === skill.dashTicks) {
         const shape = makeLineShape(player.x, player.z, cast.angle, 9, 0.5);
-        attackStrike = { shape, motionMult: skill.motionMult, castId: cast.castId, hitTargets: [], maxTargets: 1 };
+        attackStrike = {
+          shape,
+          motionMult: skill.motionMult,
+          castId: cast.castId,
+          hitTargets: [],
+          maxTargets: 1,
+          viewTick: input.viewTick,
+        };
         shots.push({ ownerId: player.playerId, x: player.x, z: player.z, angle: cast.angle, length: 9, castSeq: cast.seq });
       }
     } else if (cast.name === 'blink' && cast.tick === 1) {
@@ -1503,7 +1556,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         shots.push({ ownerId: player.playerId, x: cast.originX, z: cast.originZ, angle, length: skill.length, castSeq: cast.seq, lineIndex });
       }
     } else if (cast.name === 'flame' && cast.tick === skill.windupTicks) {
-      const point = aimedPoint(ctx, player, skill.range, 6);
+      const point = aimedPoint(ctx, player, skill.range, 6, input);
       pendingImpacts.push({
         id: cast.castId,
         ownerId: player.playerId,
@@ -1513,6 +1566,8 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         shape: { type: 'circle', originX: point.x, originZ: point.z, radius: skill.radius },
         motionMult: skill.motionMult,
         kind: 'burn',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
         hitEvery: skill.hitEvery,
         endsTick: ctx.tick + skill.windupTicks + skill.burnTicks,
         skillId: cast.id,
@@ -1529,6 +1584,8 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         shape: { type: 'circle', originX: player.x, originZ: player.z, radius: skill.radius },
         motionMult: skill.motionMult,
         kind: 'frost',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
         slowTicks: skill.slowTicks,
         skillId: cast.id,
         sourceX: player.x,
@@ -1587,7 +1644,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
           attack.fired = true;
         }
       } else if (!attack.fired) {
-        const point = aimedPoint(ctx, player, timeline.range, 6);
+        const point = aimedPoint(ctx, player, timeline.range, 6, input);
         const radius = [1, 1, 1.6][attack.step - 1];
         pendingImpacts.push({
           id: attack.castId,
@@ -1598,6 +1655,8 @@ export function stepPlayerMotion(ctx, player, rawInput) {
           shape: { type: 'circle', originX: point.x, originZ: point.z, radius },
           motionMult: [0.8, 0.8, 1.3][attack.step - 1],
           kind: 'staff-basic',
+          viewLag: player.viewLag,
+          viewTick: input.viewTick,
           skillId: 0,
           sourceX: player.x,
           sourceZ: player.z,
@@ -1663,12 +1722,16 @@ function advanceStagePlayer(world, player, rawInput) {
     for (const strike of skillStrikes) {
       playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
         maxTargets: strike.maxTargets,
+        viewLag: player.viewLag,
+        viewTick: strike.viewTick ?? motion.input.viewTick,
       });
     }
     if (motion.attackStrike) {
       const strike = motion.attackStrike;
       playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, undefined, {
         maxTargets: strike.maxTargets,
+        viewLag: player.viewLag,
+        viewTick: strike.viewTick ?? motion.input.viewTick,
       });
     }
     if (motion.potionHeal > 0) {

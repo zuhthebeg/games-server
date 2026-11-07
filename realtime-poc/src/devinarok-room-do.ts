@@ -68,6 +68,7 @@ type QueuedInput = {
   moveX: number;
   moveZ: number;
   aim: number;
+  ad?: number;
   buttons: number;
   viewTick?: number;
 };
@@ -121,6 +122,7 @@ function normalizeInput(value: any): QueuedInput | null {
     aim: clamp(Math.trunc(Number(value.aim) || 0), 0, 255),
     buttons: clamp(Math.trunc(Number(value.b) || 0), 0, 127),
   };
+  if (Number.isFinite(value.ad)) input.ad = Math.max(0, Math.round(Number(value.ad) * 10) / 10);
   if (Number.isSafeInteger(value.vt)) input.viewTick = value.vt;
   return input;
 }
@@ -716,6 +718,7 @@ export class DevinarokRoomDO {
           moveX: input.moveX,
           moveZ: input.moveZ,
           aim: input.aim,
+          ...(input.ad === undefined ? {} : { ad: input.ad }),
           buttons: input.buttons,
           ...(input.viewTick === undefined ? {} : { viewTick: input.viewTick }),
         }));
