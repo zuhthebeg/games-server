@@ -9,6 +9,7 @@ interface RoomRec {
   max: number;
   started: boolean;
   updatedAt: number;
+  meta?: any;
 }
 interface Counter { created: number; finished: number; }
 
@@ -17,6 +18,7 @@ interface Counter { created: number; finished: number; }
 // updatedAt이 이보다 오래된 방은 읽기 시점에 레지스트리에서 걷어낸다.
 // 방 자체(RoomDO)는 건드리지 않으므로, 살아있는 방이면 다음 보고 때 재등록된다.
 const STALE_ROOM_MS = 2 * 3600_000;
+const DEVINAROK_STALE_ROOM_MS = 10 * 60_000;
 
 const CORS = {
   'access-control-allow-origin': '*',
@@ -32,10 +34,11 @@ export class CoordinatorDO {
 
   async rooms(): Promise<Record<string, RoomRec>> {
     const rooms = (await this.ctx.storage.get<Record<string, RoomRec>>('rooms')) || {};
-    const cutoff = Date.now() - STALE_ROOM_MS;
+    const now = Date.now();
     let dirty = false;
     for (const [id, r] of Object.entries(rooms)) {
-      if (!r.updatedAt || r.updatedAt < cutoff) { delete rooms[id]; dirty = true; }
+      const staleMs = r.gameType === 'devinarok' ? DEVINAROK_STALE_ROOM_MS : STALE_ROOM_MS;
+      if (!r.updatedAt || r.updatedAt < now - staleMs) { delete rooms[id]; dirty = true; }
     }
     if (dirty) await this.ctx.storage.put('rooms', rooms);
     return rooms;
@@ -68,6 +71,7 @@ export class CoordinatorDO {
           max: b.max || 2,
           started: !!b.started,
           updatedAt: Date.now(),
+          ...(b.meta === undefined ? {} : { meta: b.meta }),
         };
       }
       await this.ctx.storage.put('rooms', rooms);
@@ -82,7 +86,12 @@ export class CoordinatorDO {
       const open = Object.entries(rooms)
         .filter(([, r]) => r.gameType === gt && !r.started && r.players > 0 && r.players < r.max)
         .sort((a, b) => b[1].players - a[1].players);
-      return json({ roomId: open.length ? open[0][0] : null });
+      const [roomId, room] = open[0] ?? [];
+      return json({
+        roomId: roomId ?? null,
+        meta: room?.meta ?? null,
+        updatedAt: room?.updatedAt ?? null,
+      });
     }
 
     // 공개 방 목록(열린 방). 어드민/로비 둘 다 사용.
@@ -91,7 +100,14 @@ export class CoordinatorDO {
       const rooms = await this.rooms();
       const list = Object.entries(rooms)
         .filter(([, r]) => (!gt || r.gameType === gt) && !r.started && r.players > 0 && r.players < r.max)
-        .map(([roomId, r]) => ({ roomId, gameType: r.gameType, players: r.players, max: r.max }));
+        .map(([roomId, r]) => ({
+          roomId,
+          gameType: r.gameType,
+          players: r.players,
+          max: r.max,
+          meta: r.meta ?? null,
+          updatedAt: r.updatedAt,
+        }));
       return json({ rooms: list });
     }
 

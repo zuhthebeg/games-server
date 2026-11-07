@@ -22,6 +22,8 @@ const ENTITY_FIELDS = [
   'item',
   'radius',
   'motion',
+  'characterKind',
+  'look',
 ];
 
 const ENTITY_FIELD_SET = new Set(ENTITY_FIELDS);
