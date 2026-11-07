@@ -8,6 +8,143 @@ const FLOOR_MODELS = {
   darkWood: 'assets/env/floor_wood_large_dark.glb',
 };
 
+export const PROP_FOOTPRINTS = {
+  'assets/env/column.glb': { type: 'circle', radius: 0.3 },
+  'assets/env/barrel_large.glb': { type: 'circle', radius: 0.77 },
+  'assets/env/crates_stacked.glb': { type: 'rect', width: 1.78, depth: 1.91 },
+  'assets/env/keg.glb': { type: 'rect', width: 1.53, depth: 1.7 },
+  'assets/env/chest.glb': { type: 'rect', width: 1.45, depth: 1.23 },
+  'assets/env/rubble_large.glb': { type: 'rect', width: 6.91, depth: 2.71 },
+  'assets/env/keg_decorated.glb': { type: 'rect', width: 2.99, depth: 1.7 },
+  'assets/env/chest_gold.glb': { type: 'rect', width: 1.45, depth: 1.23 },
+  'assets/env/shelf_large.glb': { type: 'rect', width: 1.7, depth: 0.43 },
+  'assets/env/shelf_small_candles.glb': { type: 'rect', width: 0.85, depth: 0.43 },
+  'assets/env/table_small_decorated_A.glb': { type: 'rect', width: 0.88, depth: 1.03 },
+  'assets/env/wall_cracked.glb': { type: 'rect', width: 3.4, depth: 1.07 },
+  'assets/env/wall_broken.glb': { type: 'rect', width: 3.4, depth: 0.85 },
+  'assets/env/stairs_wide.glb': { type: 'rect', width: 5.95, depth: 3.4 },
+  'assets/env/table_long_decorated_A.glb': { type: 'rect', width: 1.75, depth: 3.4 },
+  'assets/env/table_medium_decorated_A.glb': { type: 'rect', width: 1.7, depth: 1.7 },
+  'assets/env/chair.glb': { type: 'circle', radius: 0.32 },
+  'assets/env/stool.glb': { type: 'circle', radius: 0.32 },
+};
+
+const NON_SOLID_PROP_MODELS = new Set([
+  ...Object.values(FLOOR_MODELS),
+  'assets/env/banner_patternA_red.glb',
+  'assets/env/banner_patternB_blue.glb',
+  'assets/env/banner_shield_red.glb',
+  'assets/env/candle_lit.glb',
+  'assets/env/torch_lit.glb',
+  'assets/env/torch_mounted.glb',
+  'assets/env/rubble_half.glb',
+  'assets/env/wall_doorway.glb',
+]);
+
+const CENTERED_DECOR_MODELS = new Set([
+  'assets/env/stairs_wide.glb',
+  'assets/env/wall_cracked.glb',
+  'assets/env/wall_broken.glb',
+]);
+
+const SPAWN_CLEARANCE_RADIUS = 0.32;
+
+function propFootprint(prop) {
+  const footprint = PROP_FOOTPRINTS[prop.model];
+  if (!footprint) throw new Error(`Missing collision footprint for ${prop.model}`);
+
+  const scaleX = Math.abs(prop.scaleX ?? prop.scale ?? 1);
+  const scaleZ = Math.abs(prop.scaleZ ?? prop.scale ?? 1);
+  const quarterTurn = Math.abs(Math.sin(prop.rotY ?? 0)) > 0.999999;
+  if (footprint.type === 'rect') {
+    return {
+      type: 'rect',
+      width: (quarterTurn ? footprint.depth : footprint.width) * (quarterTurn ? scaleZ : scaleX),
+      depth: (quarterTurn ? footprint.width : footprint.depth) * (quarterTurn ? scaleX : scaleZ),
+    };
+  }
+  if (Math.abs(scaleX - scaleZ) < 1e-9) {
+    return { type: 'circle', radius: footprint.radius * scaleX };
+  }
+  return {
+    type: 'rect',
+    width: footprint.radius * 2 * (quarterTurn ? scaleZ : scaleX),
+    depth: footprint.radius * 2 * (quarterTurn ? scaleX : scaleZ),
+  };
+}
+
+function propOverlapsPoint(prop, point, radius) {
+  const footprint = propFootprint(prop);
+  const dx = Math.abs(point.x - prop.x);
+  const dz = Math.abs(point.z - prop.z);
+  if (footprint.type === 'circle') {
+    return Math.hypot(dx, dz) < footprint.radius + radius;
+  }
+  const closestX = Math.max(dx - footprint.width / 2, 0);
+  const closestZ = Math.max(dz - footprint.depth / 2, 0);
+  return closestX * closestX + closestZ * closestZ < radius * radius;
+}
+
+function roomSpawnPoints(width, centerZ) {
+  return [
+    { x: -width / 2 + 3, z: centerZ - 5 },
+    { x: 0, z: centerZ - 7 },
+    { x: width / 2 - 3, z: centerZ - 5 },
+    { x: -width / 2 + 3, z: centerZ + 5 },
+    { x: width / 2 - 3, z: centerZ + 5 },
+  ];
+}
+
+function keepRoomSpawnsClear(props, room, width, depth) {
+  const spawnPoints = [
+    ...roomSpawnPoints(width, room.centerZ),
+    { x: 0, z: room.centerZ + 7.75 },
+  ];
+  const offsets = Array.from({ length: 24 }, (_, index) => (index + 1) * 0.25);
+  const directions = [[0, 1], [0, -1], [-1, 0], [1, 0]];
+  for (const prop of props) {
+    if (prop.roomId !== room.id || prop.solid === false || !PROP_FOOTPRINTS[prop.model]) continue;
+    if (!spawnPoints.some((point) => propOverlapsPoint(prop, point, SPAWN_CLEARANCE_RADIUS))) continue;
+
+    let placement = null;
+    for (const offset of offsets) {
+      for (const [dx, dz] of directions) {
+        const candidate = { ...prop, x: prop.x + dx * offset, z: prop.z + dz * offset };
+        if (
+          candidate.x < -width / 2 + 1
+          || candidate.x > width / 2 - 1
+          || candidate.z < room.centerZ - depth / 2 + 1
+          || candidate.z > room.centerZ + depth / 2 - 1
+          || spawnPoints.some((point) => propOverlapsPoint(candidate, point, SPAWN_CLEARANCE_RADIUS))
+        ) continue;
+        placement = candidate;
+        break;
+      }
+      if (placement) break;
+    }
+    if (!placement) throw new Error(`No spawn-safe placement for ${prop.model} in ${room.id}`);
+    prop.x = placement.x;
+    prop.z = placement.z;
+  }
+}
+
+function addPropObstacles(props, obstacles, idPrefix) {
+  for (const [index, prop] of props.entries()) {
+    if (prop.solid === false || NON_SOLID_PROP_MODELS.has(prop.model)) continue;
+    const footprint = propFootprint(prop);
+    const id = prop.id ?? prop.obstacleId ?? `${idPrefix}-prop-${index + 1}`;
+    prop.id = id;
+    prop.obstacleId = id;
+    obstacles.push({
+      ...footprint,
+      id,
+      x: prop.x,
+      z: prop.z,
+      ...(prop.roomId ? { roomId: prop.roomId } : {}),
+    });
+  }
+}
+
 function floorForRoom(room, width, depth) {
   const props = [];
   const columns = Math.ceil(width / 4);
@@ -43,7 +180,7 @@ function floorForRoom(room, width, depth) {
 function wallRow(room, xPositions, z, hasDoor, doors, obstacles, props) {
   for (const x of xPositions) {
     if (hasDoor && Math.abs(x) < 1) {
-      props.push({ model: 'assets/env/wall_doorway.glb', x, z, rotY: 0, roomId: room.id });
+      props.push({ model: 'assets/env/wall_doorway.glb', x, z, rotY: 0, solid: false, roomId: room.id });
       const door = {
         id: `${room.id}-door`,
         fromRoom: room.id,
@@ -53,8 +190,8 @@ function wallRow(room, xPositions, z, hasDoor, doors, obstacles, props) {
         open: false,
       };
       doors.push(door);
-      obstacles.push({ id: `${door.id}-gate`, type: 'rect', x, z, width: 2.6, depth: 0.55, doorId: door.id });
-      props.push({ model: 'assets/env/wall.glb', x, z, rotY: 0, doorId: door.id, obstacleId: `${door.id}-gate`, roomId: room.id });
+      obstacles.push({ id: `${door.id}-gate`, type: 'rect', x, z, width: 2.6, depth: 0.55, doorId: door.id, roomId: room.id });
+      props.push({ model: 'assets/env/wall.glb', x, z, rotY: 0, doorId: door.id, obstacleId: `${door.id}-gate`, solid: false, roomId: room.id });
     } else {
       const besideDoor = hasDoor && Math.abs(x) === 2;
       props.push({
@@ -65,6 +202,7 @@ function wallRow(room, xPositions, z, hasDoor, doors, obstacles, props) {
         scaleX: besideDoor ? 0.5 : 1,
         scaleY: 1,
         scaleZ: 1,
+        solid: false,
         roomId: room.id,
       });
     }
@@ -89,8 +227,8 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
         : ['assets/env/wall_archedwindow_open.glb', 'assets/env/wall_cracked.glb'];
   for (let z = room.centerZ - depth / 2 + 2; z <= room.centerZ + depth / 2 - 2; z += 4) {
     const sideWall = sideWallModels[Math.abs(Math.round(z)) % sideWallModels.length];
-    props.push({ model: sideWall, x: -width / 2 - 0.5, z, rotY: Math.PI / 2, wallSide: true, wallCenterZ: z, roomId: room.id });
-    props.push({ model: sideWall, x: width / 2 + 0.5, z, rotY: -Math.PI / 2, wallSide: true, wallCenterZ: z, roomId: room.id });
+    props.push({ model: sideWall, x: -width / 2 - 0.5, z, rotY: Math.PI / 2, wallSide: true, wallCenterZ: z, solid: false, roomId: room.id });
+    props.push({ model: sideWall, x: width / 2 + 0.5, z, rotY: -Math.PI / 2, wallSide: true, wallCenterZ: z, solid: false, roomId: room.id });
   }
 
   wallRow(room, xWalls, room.centerZ - depth / 2 - 0.5, !lastRoom && Boolean(room.nextRoomId), doors, obstacles, props);
@@ -107,8 +245,8 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
     }
   }
   props.push(
-    { model: 'assets/env/wall_corner.glb', x: -width / 2 - 0.5, z: room.centerZ - depth / 2 - 0.5, rotY: 0, roomId: room.id },
-    { model: 'assets/env/wall_corner.glb', x: width / 2 + 0.5, z: room.centerZ - depth / 2 - 0.5, rotY: Math.PI / 2, roomId: room.id },
+    { model: 'assets/env/wall_corner.glb', x: -width / 2 - 0.5, z: room.centerZ - depth / 2 - 0.5, rotY: 0, solid: false, roomId: room.id },
+    { model: 'assets/env/wall_corner.glb', x: width / 2 + 0.5, z: room.centerZ - depth / 2 - 0.5, rotY: Math.PI / 2, solid: false, roomId: room.id },
   );
 
   const columns = [
@@ -118,24 +256,18 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
     [width / 2 - 4.8, room.centerZ + depth / 2 - 5],
   ];
   columns.forEach(([x, z], index) => {
-    const id = `${room.id}-pillar-${index}`;
-    obstacles.push({ id, type: 'circle', x, z, radius: 0.72 });
-    props.push({ model: 'assets/env/column.glb', x, z, rotY: 0, obstacleId: id, roomId: room.id });
+    props.push({ model: 'assets/env/column.glb', x, z, rotY: 0, roomId: room.id });
   });
 
   const crates = room.theme === 'collapsed' || room.theme === 'ossuary';
   if (crates) {
     const x = room.index % 2 ? 3.6 : -3.6;
     const z = room.centerZ + 0.5;
-    const id = `${room.id}-crates`;
-    obstacles.push({ id, type: 'rect', x, z, width: 1.35, depth: 1.2 });
-    props.push({ model: 'assets/env/crates_stacked.glb', x, z, rotY: room.index % 2 ? 0 : Math.PI, obstacleId: id, roomId: room.id });
+    props.push({ model: 'assets/env/crates_stacked.glb', x, z, rotY: room.index % 2 ? 0 : Math.PI, roomId: room.id });
   } else {
     const x = room.index % 2 ? -3.5 : 3.5;
     const z = room.centerZ + 1;
-    const id = `${room.id}-barrel`;
-    obstacles.push({ id, type: 'circle', x, z, radius: 0.58 });
-    props.push({ model: 'assets/env/barrel_large.glb', x, z, rotY: 0, obstacleId: id, roomId: room.id });
+    props.push({ model: 'assets/env/barrel_large.glb', x, z, rotY: 0, roomId: room.id });
   }
 
   const lantern = room.theme === 'ossuary' ? 'assets/env/candle_lit.glb' : 'assets/env/torch_lit.glb';
@@ -196,9 +328,30 @@ function buildRoomArt(room, { width, depth, lastRoom }) {
   const mirrorDecor = room.index % 2 === 1;
   const decorZOffset = room.index === 0 ? 0 : mirrorDecor ? 1.25 : -1.25;
   for (const [model, x, z] of stageDecor) {
-    props.push({ model, x: mirrorDecor ? -x : x, z: z + decorZOffset, rotY: mirrorDecor ? Math.PI : 0, roomId: room.id });
+    const centeredDecor = x === 0 && CENTERED_DECOR_MODELS.has(model);
+    const offAxisX = centeredDecor && room.nextRoomId ? -4.5 : x;
+    const prop = {
+      model,
+      x: mirrorDecor ? -offAxisX : offAxisX,
+      z: z + decorZOffset,
+      rotY: mirrorDecor ? Math.PI : 0,
+      roomId: room.id,
+    };
+    if (
+      centeredDecor
+      && !room.nextRoomId
+      && [
+        ...roomSpawnPoints(width, room.centerZ),
+        { x: 0, z: room.centerZ + 7.75 },
+      ].some((point) => propOverlapsPoint(prop, point, SPAWN_CLEARANCE_RADIUS))
+    ) {
+      prop.x = mirrorDecor ? 4.5 : -4.5;
+    }
+    props.push(prop);
   }
 
+  keepRoomSpawnsClear(props, room, width, depth);
+  addPropObstacles(props, obstacles, room.id);
   return { props, obstacles, doors };
 }
 
@@ -226,13 +379,7 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
   const xMax = width / 2;
   const minZ = arranged.at(-1).centerZ - depth / 2;
   const maxZ = depth / 2;
-  const spawnPoints = arranged.map((room) => [
-    { x: -width / 2 + 3, z: room.centerZ - 5 },
-    { x: 0, z: room.centerZ - 7 },
-    { x: width / 2 - 3, z: room.centerZ - 5 },
-    { x: -width / 2 + 3, z: room.centerZ + 5 },
-    { x: width / 2 - 3, z: room.centerZ + 5 },
-  ]);
+  const spawnPoints = arranged.map((room) => roomSpawnPoints(width, room.centerZ));
   return {
     id,
     name,
@@ -280,13 +427,13 @@ for (let x = -8; x <= 8; x += 4) {
   }
 }
 hubProps.push(
-  ...[-6, -2, 2, 6].map((x) => ({ model: 'assets/env/wall_archedwindow_open.glb', x, z: -10.5, rotY: 0 })),
+  ...[-6, -2, 2, 6].map((x) => ({ model: 'assets/env/wall_archedwindow_open.glb', x, z: -10.5, rotY: 0, solid: false })),
   ...[-7, -3, 1, 5].flatMap((z) => [
-    { model: 'assets/env/wall_cracked.glb', x: -10.5, z, rotY: Math.PI / 2, wallSide: true, wallCenterZ: z },
-    { model: 'assets/env/wall_cracked.glb', x: 10.5, z, rotY: -Math.PI / 2, wallSide: true, wallCenterZ: z },
+    { model: 'assets/env/wall_cracked.glb', x: -10.5, z, rotY: Math.PI / 2, wallSide: true, wallCenterZ: z, solid: false },
+    { model: 'assets/env/wall_cracked.glb', x: 10.5, z, rotY: -Math.PI / 2, wallSide: true, wallCenterZ: z, solid: false },
   ]),
-  { model: 'assets/env/wall_half.glb', x: -6, z: 10.5, rotY: 0 },
-  { model: 'assets/env/wall_half.glb', x: 6, z: 10.5, rotY: 0 },
+  { model: 'assets/env/wall_half.glb', x: -6, z: 10.5, rotY: 0, solid: false },
+  { model: 'assets/env/wall_half.glb', x: 6, z: 10.5, rotY: 0, solid: false },
   { model: 'assets/env/banner_patternA_red.glb', x: -6, z: -9.7, rotY: Math.PI },
   { model: 'assets/env/banner_shield_red.glb', x: 6, z: -9.7, rotY: Math.PI },
   { model: 'assets/env/torch_mounted.glb', x: -8.5, z: -9, rotY: Math.PI / 2, wallLight: true },
@@ -295,9 +442,9 @@ hubProps.push(
   { model: 'assets/env/torch_lit.glb', x: 8, z: 1, rotY: 0 },
   { model: 'assets/env/candle_lit.glb', x: -8, z: 8, rotY: 0 },
   { model: 'assets/env/candle_lit.glb', x: 8, z: 8, rotY: 0 },
-  { model: 'assets/env/table_long_decorated_A.glb', x: 0, z: -8, rotY: 0 },
-  { model: 'assets/env/table_medium_decorated_A.glb', x: -3, z: -3.5, rotY: Math.PI / 2 },
-  { model: 'assets/env/table_medium_decorated_A.glb', x: 3, z: -3.5, rotY: -Math.PI / 2 },
+  { model: 'assets/env/table_long_decorated_A.glb', x: 0, z: -9.5, rotY: 0 },
+  { model: 'assets/env/table_medium_decorated_A.glb', x: -4.5, z: -3.5, rotY: Math.PI / 2 },
+  { model: 'assets/env/table_medium_decorated_A.glb', x: 4.5, z: -3.5, rotY: -Math.PI / 2 },
   { model: 'assets/env/table_small_decorated_A.glb', x: 0, z: -5.5, rotY: 0 },
   { model: 'assets/env/chair.glb', x: -2, z: -5.5, rotY: Math.PI / 2 },
   { model: 'assets/env/chair.glb', x: 2, z: -5.5, rotY: -Math.PI / 2 },
@@ -313,6 +460,9 @@ hubProps.push(
   { model: 'assets/env/column.glb', x: 5, z: -6, rotY: 0, obstacleId: 'hub-pillar-right' },
 );
 
+const hubObstacles = [];
+addPropObstacles(hubProps, hubObstacles, 'hub');
+
 export const HUB_ARENA = {
   id: 'inn-hub',
   width: 20,
@@ -322,12 +472,7 @@ export const HUB_ARENA = {
   spawnPoints: [],
   rooms: [],
   doors: [],
-  obstacles: [
-    { id: 'hub-crates', type: 'rect', x: -5, z: -1, width: 1.6, depth: 1.2 },
-    { id: 'hub-barrel', type: 'circle', x: 5, z: 1, radius: 0.65 },
-    { id: 'hub-pillar-left', type: 'circle', x: -5, z: -6, radius: 0.72 },
-    { id: 'hub-pillar-right', type: 'circle', x: 5, z: -6, radius: 0.72 },
-  ],
+  obstacles: hubObstacles,
   props: hubProps,
   npcs: [
     { id: 'blacksmith', name: '대장장이', model: 'Barbarian', x: -2.2, z: -3, rotY: Math.PI / 2, panel: 'blacksmith' },
