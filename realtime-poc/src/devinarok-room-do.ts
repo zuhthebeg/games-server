@@ -5,6 +5,7 @@ import {
   setPlayerConnected,
   step,
 } from './devinarok/js/sim/world.js';
+import { equipmentLook } from './devinarok/js/content/items.js';
 import { decodeMessage, encodeMessage, PROTOCOL_VERSION } from './devinarok/js/net/protocol.js';
 import { SIM_HASH } from './devinarok/js/net/sim-version.js';
 
@@ -18,6 +19,23 @@ const MAX_PENDING_INPUTS = 90;
 const MAX_SNAPSHOT_BASELINES = 120;
 const EVENT_RESEND_MS = 200;
 const RECONNECT_MS = 60_000;
+
+function playerAnimation(entity: any): string {
+  if (entity.dead) return 'death';
+  const skill = entity.skillCast?.name;
+  if (skill === 'blink' || skill === 'vault') return 'dodge';
+  if (skill === 'flame' || skill === 'frost') return 'Spellcast_Long';
+  if (entity.family === 'crossbow' && (entity.attack || skill === 'pierce' || skill === 'volley')) {
+    return entity.look?.weapon === '2H_Crossbow' ? '2H_Ranged_Shoot' : '1H_Ranged_Shoot';
+  }
+  if (entity.family === 'staff' && (entity.attack || skill)) return skill === 'flame' || skill === 'frost' ? 'Spellcast_Long' : 'Spellcast_Shoot';
+  if (entity.family === 'sword' && skill === 'spin') return '1H_Melee_Attack_Slice_Diagonal';
+  if (entity.family === 'sword' && skill === 'dash') return '1H_Melee_Attack_Chop';
+  if (entity.family === 'sword' && entity.attack?.step) {
+    return ['1H_Melee_Attack_Slice_Diagonal', '1H_Melee_Attack_Slice_Horizontal', '1H_Melee_Attack_Chop'][entity.attack.step - 1];
+  }
+  return entity.moving ? 'run' : 'idle';
+}
 
 type Character = {
   level?: number;
@@ -50,6 +68,7 @@ type QueuedInput = {
   moveX: number;
   moveZ: number;
   aim: number;
+  ad?: number;
   buttons: number;
   viewTick?: number;
 };
@@ -103,6 +122,7 @@ function normalizeInput(value: any): QueuedInput | null {
     aim: clamp(Math.trunc(Number(value.aim) || 0), 0, 255),
     buttons: clamp(Math.trunc(Number(value.b) || 0), 0, 127),
   };
+  if (Number.isFinite(value.ad)) input.ad = Math.max(0, Math.round(Number(value.ad) * 10) / 10);
   if (Number.isSafeInteger(value.vt)) input.viewTick = value.vt;
   return input;
 }
@@ -231,6 +251,7 @@ export class DevinarokRoomDO {
       playerId: player.playerId,
       name: player.name,
       level: player.character.level ?? 1,
+      family: equipmentLook(Array.isArray(player.character.equipment) ? player.character.equipment as any[] : []).family,
       ready: player.ready,
       connected: player.connected,
     }));
@@ -697,6 +718,7 @@ export class DevinarokRoomDO {
           moveX: input.moveX,
           moveZ: input.moveZ,
           aim: input.aim,
+          ...(input.ad === undefined ? {} : { ad: input.ad }),
           buttons: input.buttons,
           ...(input.viewTick === undefined ? {} : { viewTick: input.viewTick }),
         }));
@@ -724,23 +746,26 @@ export class DevinarokRoomDO {
       id: entity.id,
       kind: entity.kind,
       playerId: entity.playerId,
+      family: entity.family,
       x: entity.x,
       z: entity.z,
       facing: entity.facing,
       hp: entity.hp,
       state: entity.downed ? 'downed' : entity.dead ? 'dead' : entity.attackPhase ?? 'idle',
-      anim: entity.dead ? 'death' : entity.moving ? 'run' : 'idle',
+      anim: entity.kind === 'player' ? playerAnimation(entity) : entity.dead ? 'death' : entity.moving ? 'run' : 'idle',
       dead: Boolean(entity.dead),
       invulnerable: Boolean(entity.invulnerable),
       spawnTicksLeft: entity.spawnTicksLeft ?? 0,
       attackPhase: entity.attackPhase ?? null,
+      attackPattern: entity.attackPattern ?? null,
       attackShape: entity.attackShape ?? null,
       attackRemaining: entity.attackRemaining ?? 0,
-      skill: entity.skillCast?.skill ?? entity.skill ?? null,
+      skill: entity.skillCast?.id ?? entity.skill ?? null,
       dodge: (entity.dodgeTicks ?? 0) > 0,
       downed: Boolean(entity.downed),
       ownerId: entity.ownerId,
       radius: entity.radius,
+      slowTicks: entity.slowTicks ?? 0,
       ...(includeStatic ? {
         model: entity.model,
         maxHp: entity.maxHp,
@@ -748,6 +773,7 @@ export class DevinarokRoomDO {
         item: entity.item,
         ...(entity.kind === 'player' ? {
           characterKind: entity.characterKind,
+          family: entity.family,
           look: entity.look,
         } : {}),
       } : {}),

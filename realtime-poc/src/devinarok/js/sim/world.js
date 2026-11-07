@@ -2,7 +2,7 @@ import { ARENA } from './arena.js';
 import { AFFIXES } from '../content/affixes.js';
 import { ENEMIES } from '../content/enemies.js';
 import { equipmentLook, ITEM_BASES, ITEMS, LEGENDARIES, RARITIES, BOSS_RARITIES, ELITE_RARITIES } from '../content/items.js';
-import { POTION, SKILLS } from '../content/skills.js';
+import { FAMILY_SKILLS, POTION, SKILLS } from '../content/skills.js';
 import { STAGES } from '../content/stages.js';
 import { HUB_ARENA } from '../content/stages.js';
 
@@ -131,6 +131,15 @@ function normalizeInput(player, rawInput) {
     moveZ: clampInput(rawInput.moveZ, -127, 127, previous.moveZ),
     aim: clampInput(rawInput.aim, 0, 255, previous.aim),
     buttons: clampInput(rawInput.buttons, 0, 127, 0),
+    ...(Number.isFinite(rawInput.ad) && player.family !== 'sword'
+      ? {
+        ad: Math.round(clamp(
+          rawInput.ad,
+          0,
+          player.family === 'crossbow' ? 12 : 8,
+        ) * 10) / 10,
+      }
+      : {}),
     ...(Number.isSafeInteger(rawInput.viewTick) ? { viewTick: rawInput.viewTick } : {}),
   };
 }
@@ -349,6 +358,7 @@ export function createWorld({ seed = 1, arena = ARENA } = {}) {
     rewards: {},
     results: {},
     pendingHits: [],
+    pendingImpacts: [],
     enemyHistory: [],
     doorCountdown: null,
     events: [],
@@ -402,6 +412,7 @@ export function addPlayer(world, {
     ...item,
     affixes: [...(item.affixes ?? [])],
   }));
+  const look = equipmentLook(equipment);
   const stats = world.mode === 'stage' || world.mode === 'hub'
     ? calculatePlayerStats(level, equipment)
     : null;
@@ -411,9 +422,10 @@ export function addPlayer(world, {
     kind: 'player',
     playerId: id,
     name: String(name ?? id).slice(0, 32),
-    characterKind,
+    characterKind: look.characterKind,
+    family: look.family,
     equipment,
-    look: equipmentLook(equipment),
+    look,
     x: spawn.x,
     z: spawn.z,
     facing: -Math.PI / 2,
@@ -484,6 +496,18 @@ function beginPlayerAttack(world, player, step, seq) {
 function comboTimeline(player, step) {
   const timeline = COMBO_TIMELINES[step - 1];
   const speed = 1 + (player.stats?.attackSpeed ?? 0) / 100;
+  if (player.family === 'crossbow' || player.family === 'staff') {
+    const familyTimeline = player.family === 'crossbow'
+      ? { windupTicks: 4, recoveryTicks: 8, range: 9, width: 0.5 }
+      : { windupTicks: 5, recoveryTicks: 10, range: 8 };
+    return {
+      ...timeline,
+      ...familyTimeline,
+      windupTicks: Math.max(1, Math.round(familyTimeline.windupTicks / speed)),
+      activeTicks: 1,
+      recoveryTicks: Math.max(1, Math.round(familyTimeline.recoveryTicks / speed)),
+    };
+  }
   return {
     ...timeline,
     windupTicks: Math.max(1, Math.round(timeline.windupTicks / speed)),
@@ -663,13 +687,14 @@ function damagePlayer(world, enemy, player, shape, damage) {
   });
 }
 
-function queueEnemyHit(world, enemy, player, shape, damage = null) {
+function queueEnemyHit(world, enemy, player, shape, damage = null, motionMult = 1) {
   world.pendingHits.push({
     resolveTick: world.tick + 1,
     sourceId: enemy.id,
     targetId: player.id,
     shape: copyShape(shape),
     damage,
+    motionMult,
   });
 }
 
@@ -692,8 +717,8 @@ function resolvePendingHits(world, iFramesAtTickStart = new Map()) {
       player.iFrames > 0 ||
       (iFramesAtTickStart.get(player.id) ?? 0) > 0
     ) continue;
-    if (world.mode === 'stage') damagePlayerM1(world, enemy, player, hit.shape);
-    else damagePlayer(world, enemy, player, hit.shape, hit.damage ?? enemy.attack);
+    if (world.mode === 'stage') damagePlayerM1(world, enemy, player, hit.shape, hit.motionMult ?? 1);
+    else damagePlayer(world, enemy, player, hit.shape, hit.damage ?? Math.round(enemy.attack * (hit.motionMult ?? 1)));
   }
 }
 
@@ -983,7 +1008,9 @@ function spawnStageEnemy(world, enemyType, index, elite = false) {
     attackTargetId: null,
     attackPattern: null,
     attackPatternIndex: 0,
+    boneSpearCooldownTicks: 0,
     stunnedTicks: 0,
+    slowTicks: 0,
     elite,
     boss: enemyType === 'commander',
     recoverTicks: 0,
@@ -1040,10 +1067,61 @@ function attackShapeHit(shape, target, targetRadius = 0) {
 }
 
 function enemyHistoryFrame(world, viewLag) {
-  if (!Number.isFinite(viewLag)) return null;
+  if (!Number.isFinite(viewLag) || !Array.isArray(world?.enemyHistory) || !Number.isSafeInteger(world.tick)) return null;
   const clampedTick = world.tick - clamp(Math.trunc(viewLag), 0, 12);
   if (clampedTick >= world.tick) return null;
   return world.enemyHistory.find((frame) => frame.tick === clampedTick) ?? null;
+}
+
+export function pickAimTarget(world, player, range) {
+  const history = enemyHistoryFrame(world, player.viewLag ?? 0);
+  const roomEnemyIds = Array.isArray(world.roomEnemyIds) ? new Set(world.roomEnemyIds) : null;
+  const activeEnemyIds = Array.isArray(world.activeEnemyIds) ? new Set(world.activeEnemyIds) : null;
+  const candidates = (world.entities ?? [])
+    .filter((enemy) => (
+      enemy.kind === 'enemy' &&
+      !enemy.dead &&
+      enemy.state !== 'dead' &&
+      !enemy.invulnerable &&
+      (enemy.spawnTicksLeft ?? 0) <= 0 &&
+      (!roomEnemyIds || roomEnemyIds.has(enemy.id)) &&
+      (!activeEnemyIds || activeEnemyIds.has(enemy.id))
+    ))
+    .map((enemy) => {
+      const historical = history?.enemies.find((entry) => entry.id === enemy.id);
+      if (history && (!historical || historical.dead)) return null;
+      const target = historical ? { ...enemy, ...historical } : enemy;
+      const dx = target.x - player.x;
+      const dz = target.z - player.z;
+      const distance = Math.hypot(dx, dz);
+      return distance <= range
+        ? { target, distance, angle: Math.atan2(dz, dx) }
+        : null;
+    })
+    .filter(Boolean);
+  const nearest = (halfAngle) => candidates
+    .filter((candidate) => Math.abs(angleDifference(candidate.angle, player.facing)) <= halfAngle)
+    .sort((a, b) => a.distance - b.distance || a.target.id - b.target.id)[0]?.target ?? null;
+  return nearest(Math.PI * 35 / 180) ?? nearest(Math.PI / 2);
+}
+
+function aimedPoint(world, player, range, fallbackDistance, input) {
+  if (Number.isFinite(input?.ad)) {
+    const angle = angleFromAim(input.aim);
+    const distance = clamp(input.ad, 0, range);
+    return {
+      x: player.x + Math.cos(angle) * distance,
+      z: player.z + Math.sin(angle) * distance,
+      targetId: null,
+    };
+  }
+  const target = pickAimTarget(world, player, range);
+  if (target) return { x: target.x, z: target.z, targetId: target.id };
+  return {
+    x: player.x + Math.cos(player.facing) * fallbackDistance,
+    z: player.z + Math.sin(player.facing) * fallbackDistance,
+    targetId: null,
+  };
 }
 
 function recordEnemyHistory(world) {
@@ -1138,7 +1216,7 @@ function dropRewards(world, enemy) {
   }
 }
 
-function killStageEnemy(world, source, enemy, damage, castId, critical = false, skillId = source.skillCast?.id ?? 0, viewLag = 0) {
+function killStageEnemy(world, source, enemy, damage, castId, critical = false, skillId = source.skillCast?.id ?? 0, viewLag = source.viewLag ?? 0, viewTick = source.lastInput?.viewTick) {
   if (enemy.dead) return;
   enemy.hp = Math.max(0, enemy.hp - damage);
   enemy.hitFlashTicks = 9;
@@ -1157,7 +1235,7 @@ function killStageEnemy(world, source, enemy, damage, castId, critical = false, 
     skill: skillId,
     viewLag,
     inputSeq: source.lastInput?.seq,
-    ...(Number.isSafeInteger(source.lastInput?.viewTick) ? { viewTick: source.lastInput.viewTick } : {}),
+    ...(Number.isSafeInteger(viewTick) ? { viewTick } : {}),
   });
   if (enemy.hp > 0) return;
   enemy.dead = true;
@@ -1169,49 +1247,175 @@ function killStageEnemy(world, source, enemy, damage, castId, critical = false, 
   if (enemy.boss) emit(world, 'bossDefeated', { entityId: enemy.id });
 }
 
-function playerStrike(world, player, shape, motionMult, castId, hitTargets, skillId = undefined) {
-  const history = enemyHistoryFrame(world, player.viewLag);
+function playerStrike(world, player, shape, motionMult, castId, hitTargets, skillId = undefined, {
+  rewind = true,
+  maxTargets = Infinity,
+  slowTicks = 0,
+  viewLag = player.viewLag,
+  viewTick = player.lastInput?.viewTick,
+} = {}) {
+  const history = rewind ? enemyHistoryFrame(world, viewLag) : null;
   emit(world, 'strike', {
     sourceId: player.id,
     castId,
     skill: skillId,
     shape: structuredClone(shape),
-    viewLag: player.viewLag,
+    viewLag,
     inputSeq: player.lastInput?.seq,
-    ...(Number.isSafeInteger(player.lastInput?.viewTick) ? { viewTick: player.lastInput.viewTick } : {}),
+    ...(Number.isSafeInteger(viewTick) ? { viewTick } : {}),
   });
-  for (const enemy of stageActiveEnemies(world)) {
+  let candidates = stageActiveEnemies(world)
+    .map((enemy) => {
+      const historical = history?.enemies.find((entry) => entry.id === enemy.id);
+      if (history && (!historical || historical.dead)) return null;
+      const target = historical ?? enemy;
+      return attackShapeHit(shape, target, target.radius) ? { enemy, target } : null;
+    })
+    .filter(Boolean);
+  if (Number.isFinite(maxTargets) && shape.type === 'line') {
+    candidates.sort((a, b) => {
+      const project = ({ target }) => (
+        (target.x - shape.originX) * Math.cos(shape.angle) +
+        (target.z - shape.originZ) * Math.sin(shape.angle)
+      );
+      return project(a) - project(b) || a.enemy.id - b.enemy.id;
+    });
+  }
+  let hitCount = 0;
+  for (const { enemy } of candidates) {
     if (hitTargets.includes(enemy.id) || enemy.invulnerable || enemy.spawnTicksLeft > 0) continue;
     if (enemy.dead) continue;
-    const historical = history?.enemies.find((entry) => entry.id === enemy.id);
-    if (history && (!historical || historical.dead)) continue;
-    const target = historical ?? enemy;
-    if (!attackShapeHit(shape, target, target.radius)) continue;
     hitTargets.push(enemy.id);
     const critical = random(world) * 100 < player.stats.critChance;
     const damage = calculateDamage(player.stats.attack, motionMult, critical, player.stats.critDamage, enemy.defense ?? 0);
-    killStageEnemy(world, player, enemy, damage, castId, critical, skillId ?? player.skillCast?.id ?? 0, player.viewLag);
+    killStageEnemy(
+      world,
+      player,
+      enemy,
+      damage,
+      castId,
+      critical,
+      skillId ?? player.skillCast?.id ?? 0,
+      viewLag,
+      viewTick,
+    );
     const heal = Math.floor(damage * player.stats.lifesteal / 100);
     if (heal) player.hp = Math.min(player.maxHp, player.hp + heal);
+    if (!enemy.dead && slowTicks > 0) enemy.slowTicks = Math.max(enemy.slowTicks ?? 0, slowTicks);
+    hitCount += 1;
+    if (hitCount >= maxTargets) break;
   }
+  return hitTargets;
+}
+
+function queuePendingImpact(world, impact) {
+  const pending = {
+    ...impact,
+    viewLag: clamp(Math.trunc(impact.viewLag ?? 0), 0, 12),
+    shape: copyShape(impact.shape),
+  };
+  world.pendingImpacts.push(pending);
+  emit(world, 'impact', {
+    id: pending.id,
+    ownerId: pending.ownerId,
+    ownerEntityId: pending.ownerEntityId,
+    castSeq: pending.castSeq,
+    fireTick: world.tick,
+    resolveTick: pending.resolveTick,
+    endsTick: pending.endsTick,
+    hitEvery: pending.hitEvery,
+    viewLag: pending.viewLag,
+    ...(Number.isSafeInteger(pending.viewTick) ? { viewTick: pending.viewTick } : {}),
+    shape: copyShape(pending.shape),
+    kind: pending.kind,
+    sourceX: pending.sourceX,
+    sourceZ: pending.sourceZ,
+  });
+}
+
+function resolvePendingImpacts(world) {
+  const remaining = [];
+  for (const impact of world.pendingImpacts) {
+    if (impact.kind === 'burn') {
+      if (world.tick < impact.resolveTick) {
+        remaining.push(impact);
+        continue;
+      }
+      if (world.tick > impact.endsTick) continue;
+      const elapsed = world.tick - impact.resolveTick;
+      if (elapsed > 0 && elapsed % impact.hitEvery === 0) {
+        const player = world.entities.find((entity) => entity.kind === 'player' && entity.playerId === impact.ownerId);
+        if (player && !player.dead && !player.downed && player.connected) {
+          playerStrike(world, player, impact.shape, impact.motionMult, impact.id, [], impact.skillId, {
+            viewLag: impact.viewLag,
+            viewTick: impact.viewTick,
+          });
+        }
+      }
+      if (world.tick < impact.endsTick) remaining.push(impact);
+      continue;
+    }
+    if (world.tick < impact.resolveTick) {
+      remaining.push(impact);
+      continue;
+    }
+    const player = world.entities.find((entity) => entity.kind === 'player' && entity.playerId === impact.ownerId);
+    if (!player || player.dead || player.downed || !player.connected) continue;
+    const hitTargets = playerStrike(
+      world,
+      player,
+      impact.shape,
+      impact.motionMult,
+      impact.id,
+      [],
+      impact.skillId,
+      {
+        slowTicks: impact.slowTicks ?? 0,
+        viewLag: impact.viewLag,
+        viewTick: impact.viewTick,
+      },
+    );
+    if (impact.kind === 'frost') {
+      for (const enemyId of hitTargets) {
+        const enemy = world.entities.find((entity) => entity.id === enemyId);
+        if (enemy && !enemy.dead) enemy.slowTicks = Math.max(enemy.slowTicks ?? 0, impact.slowTicks);
+      }
+    }
+  }
+  world.pendingImpacts = remaining;
+}
+
+function familySkillName(player, id) {
+  return FAMILY_SKILLS[player.family ?? 'sword']?.[id - 1] ?? null;
+}
+
+function skillDuration(name) {
+  const skill = SKILLS[name];
+  if (name === 'spin') return skill.windupTicks + skill.activeTicks + skill.recoveryTicks;
+  if (name === 'guard') return skill.durationTicks;
+  return skill.windupTicks ?? skill.dashTicks ?? 1;
 }
 
 function startSkillMotion(ctx, player, id, seq) {
-  const skill = Object.values(SKILLS).find((entry) => entry.id === id);
+  const name = familySkillName(player, id);
+  const skill = SKILLS[name];
   if (!skill) return null;
   const castId = `${player.playerId}:${seq}`;
   player.skillCast = {
     id,
+    name,
+    family: player.family ?? 'sword',
     castId,
+    seq,
     startedTick: ctx.tick,
-    ticks: id === 1 ? skill.windupTicks : id === 2 ? skill.dashTicks : skill.durationTicks,
+    ticks: skillDuration(name),
     tick: 0,
     hitTargets: [],
     originX: player.x,
     originZ: player.z,
     angle: player.facing,
   };
-  return { entityId: player.id, playerId: player.playerId, castId, skill: id, skillName: skill.name };
+  return { entityId: player.id, playerId: player.playerId, castId, skill: id, skillName: skill.name, family: player.family ?? 'sword' };
 }
 
 function applyPotion(world, player, seq) {
@@ -1233,21 +1437,37 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     : clamp((Number.isSafeInteger(ctx.tick) ? ctx.tick : 0) - viewTick, 0, 12);
   const events = [];
   let skillStrike = null;
+  const skillStrikes = [];
   let attackStrike = null;
+  const pendingImpacts = [];
+  const shots = [];
+  const blinks = [];
+  const addSkillStrike = (strike) => {
+    skillStrike ??= strike;
+    skillStrikes.push(strike);
+  };
   const moveX = input.moveX / 127;
   const moveZ = input.moveZ / 127;
   const magnitude = Math.hypot(moveX, moveZ);
   const directionX = magnitude > 1 ? moveX / magnitude : moveX;
   const directionZ = magnitude > 1 ? moveZ / magnitude : moveZ;
+  const family = player.family ?? 'sword';
   player.moving = Math.abs(directionX) + Math.abs(directionZ) > 0.01;
   if (player.moving && player.guardTicks <= 0) player.facing = Math.atan2(directionZ, directionX);
   else if (!player.moving) player.facing = angleFromAim(input.aim);
+  if (family !== 'sword') {
+    if (Number.isFinite(input.ad)) player.facing = angleFromAim(input.aim);
+    else {
+      const target = pickAimTarget(ctx, player, family === 'crossbow' ? 12 : 8);
+      if (target) player.facing = Math.atan2(target.z - player.z, target.x - player.x);
+    }
+  }
 
   const skillId = pressed & BUTTONS.SKILL1 ? 1 : pressed & BUTTONS.SKILL2 ? 2 : pressed & BUTTONS.SKILL3 ? 3 : 0;
   if (skillId && !player.skillCast && player.skillCooldowns[skillId] === 0) {
     const payload = startSkillMotion(ctx, player, skillId, input.seq);
     if (payload) {
-      const skill = Object.values(SKILLS).find((entry) => entry.id === skillId);
+      const skill = SKILLS[familySkillName(player, skillId)];
       const cooldownTicks = Math.max(1, Math.round(skill.cooldownTicks * (
         1 - Math.min(60, player.stats.skillCooldownReduction) / 100
       )));
@@ -1265,18 +1485,114 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   if (player.guardTicks > 0) {
     player.guardTicks -= 1;
     player.moving = false;
-  } else if (player.skillCast?.id === 2) {
+  }
+  if (player.skillCast) {
     const cast = player.skillCast;
-    const stepDistance = SKILLS.dash.dashDistance / SKILLS.dash.dashTicks;
-    moveEntity(ctx, player, Math.cos(cast.angle) * stepDistance, Math.sin(cast.angle) * stepDistance);
-    skillStrike = {
-      shape: makeLineShape(cast.originX, cast.originZ, cast.angle, SKILLS.dash.length, SKILLS.dash.width),
-      motionMult: SKILLS.dash.motionMult,
-      castId: cast.castId,
-      hitTargets: cast.hitTargets,
-      viewTick: input.viewTick,
-      skillId: cast.id,
-    };
+    const skill = SKILLS[cast.name];
+    cast.tick += 1;
+    if (cast.name === 'dash') {
+      const stepDistance = skill.dashDistance / skill.dashTicks;
+      moveEntity(ctx, player, Math.cos(cast.angle) * stepDistance, Math.sin(cast.angle) * stepDistance);
+      addSkillStrike({
+        shape: makeLineShape(cast.originX, cast.originZ, cast.angle, skill.length, skill.width),
+        motionMult: skill.motionMult,
+        castId: cast.castId,
+        hitTargets: cast.hitTargets,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+      });
+    } else if (cast.name === 'vault') {
+      if (cast.tick === 1) player.iFrames = Math.max(player.iFrames, skill.iframeTicks);
+      moveEntity(
+        ctx,
+        player,
+        -Math.cos(cast.angle) * skill.retreatDistance / skill.dashTicks,
+        -Math.sin(cast.angle) * skill.retreatDistance / skill.dashTicks,
+      );
+      if (cast.tick === skill.dashTicks) {
+        const shape = makeLineShape(player.x, player.z, cast.angle, 9, 0.5);
+        attackStrike = {
+          shape,
+          motionMult: skill.motionMult,
+          castId: cast.castId,
+          hitTargets: [],
+          maxTargets: 1,
+          viewTick: input.viewTick,
+        };
+        shots.push({ ownerId: player.playerId, x: player.x, z: player.z, angle: cast.angle, length: 9, castSeq: cast.seq });
+      }
+    } else if (cast.name === 'blink' && cast.tick === 1) {
+      const from = { x: player.x, z: player.z };
+      const angle = player.moving ? Math.atan2(directionZ, directionX) : cast.angle;
+      player.iFrames = Math.max(player.iFrames, skill.iframeTicks);
+      const steps = Math.ceil(skill.distance / 0.5);
+      const stepDistance = skill.distance / steps;
+      for (let index = 0; index < steps; index += 1) {
+        moveEntity(ctx, player, Math.cos(angle) * stepDistance, Math.sin(angle) * stepDistance);
+      }
+      blinks.push({ ownerId: player.playerId, castSeq: cast.seq, from, to: { x: player.x, z: player.z } });
+    }
+    if (cast.name === 'spin' && cast.tick >= skill.windupTicks && cast.tick < skill.windupTicks + skill.activeTicks) {
+      addSkillStrike({
+        shape: { type: 'circle', originX: cast.originX, originZ: cast.originZ, radius: skill.range },
+        motionMult: skill.motionMult,
+        castId: cast.castId,
+        hitTargets: cast.hitTargets,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+      });
+    } else if (cast.name === 'guard' && cast.tick === 1) {
+      player.guardTicks = skill.durationTicks;
+    } else if (cast.name === 'pierce' && cast.tick === skill.windupTicks) {
+      const shape = makeLineShape(cast.originX, cast.originZ, cast.angle, skill.length, skill.width);
+      addSkillStrike({ shape, motionMult: skill.motionMult, castId: cast.castId, hitTargets: cast.hitTargets, viewTick: input.viewTick, skillId: cast.id });
+      shots.push({ ownerId: player.playerId, x: cast.originX, z: cast.originZ, angle: cast.angle, length: skill.length, castSeq: cast.seq });
+    } else if (cast.name === 'volley' && cast.tick === skill.windupTicks) {
+      for (let lineIndex = 0; lineIndex < skill.count; lineIndex += 1) {
+        const offset = -skill.spread + lineIndex * (skill.spread * 2 / (skill.count - 1));
+        const angle = cast.angle + offset;
+        const shape = makeLineShape(cast.originX, cast.originZ, angle, skill.length, skill.width);
+        addSkillStrike({ shape, motionMult: skill.motionMult, castId: `${cast.castId}:${lineIndex}`, hitTargets: [], viewTick: input.viewTick, skillId: cast.id });
+        shots.push({ ownerId: player.playerId, x: cast.originX, z: cast.originZ, angle, length: skill.length, castSeq: cast.seq, lineIndex });
+      }
+    } else if (cast.name === 'flame' && cast.tick === skill.windupTicks) {
+      const point = aimedPoint(ctx, player, skill.range, 6, input);
+      pendingImpacts.push({
+        id: cast.castId,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: cast.seq,
+        resolveTick: ctx.tick + skill.windupTicks,
+        shape: { type: 'circle', originX: point.x, originZ: point.z, radius: skill.radius },
+        motionMult: skill.motionMult,
+        kind: 'burn',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
+        hitEvery: skill.hitEvery,
+        endsTick: ctx.tick + skill.windupTicks + skill.burnTicks,
+        skillId: cast.id,
+        sourceX: player.x,
+        sourceZ: player.z,
+      });
+    } else if (cast.name === 'frost' && cast.tick === skill.windupTicks) {
+      pendingImpacts.push({
+        id: cast.castId,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: cast.seq,
+        resolveTick: ctx.tick + skill.windupTicks,
+        shape: { type: 'circle', originX: player.x, originZ: player.z, radius: skill.radius },
+        motionMult: skill.motionMult,
+        kind: 'frost',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
+        slowTicks: skill.slowTicks,
+        skillId: cast.id,
+        sourceX: player.x,
+        sourceZ: player.z,
+      });
+    }
+    if (cast.tick >= cast.ticks) player.skillCast = null;
   } else if (!player.skillCast) {
     if ((pressed & BUTTONS.DODGE) && player.dodgeCooldownTicks === 0) {
       player.dodgeVectorX = player.moving ? directionX : Math.cos(player.facing);
@@ -1294,25 +1610,6 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     else moveEntity(ctx, player, directionX * moveSpeed, directionZ * moveSpeed);
   }
 
-  if (player.skillCast) {
-    const cast = player.skillCast;
-    cast.tick += 1;
-    if (cast.id === 1 && cast.tick >= SKILLS.spin.windupTicks) {
-      skillStrike = {
-        shape: { type: 'circle', originX: cast.originX, originZ: cast.originZ, radius: SKILLS.spin.range },
-        motionMult: SKILLS.spin.motionMult,
-        castId: cast.castId,
-        hitTargets: cast.hitTargets,
-        viewTick: input.viewTick,
-        skillId: cast.id,
-      };
-    }
-    if (cast.id === 3 && cast.tick === 1) player.guardTicks = SKILLS.guard.durationTicks;
-    if (cast.tick >= (cast.id === 1 ? SKILLS.spin.windupTicks + SKILLS.spin.activeTicks + SKILLS.spin.recoveryTicks : cast.id === 2 ? SKILLS.dash.dashTicks : SKILLS.guard.durationTicks)) {
-      player.skillCast = null;
-    }
-  }
-
   if (pressed & BUTTONS.ATTACK) {
     if (!player.attack) events.push({
       type: 'attack',
@@ -1324,14 +1621,48 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     const attack = player.attack;
     const timeline = comboTimeline(player, attack.step);
     if (attack.phase === 'active') {
-      const shape = createAttackShape(player, player.facing, timeline.range, timeline.halfAngle);
-      attackStrike = {
-        shape: { ...shape, type: 'sector' },
-        motionMult: [1, 1.1, 1.8][attack.step - 1],
-        castId: attack.castId,
-        hitTargets: attack.hitTargets,
-        viewTick: input.viewTick,
-      };
+      if (family === 'sword') {
+        const shape = createAttackShape(player, player.facing, timeline.range, timeline.halfAngle);
+        attackStrike = {
+          shape: { ...shape, type: 'sector' },
+          motionMult: [1, 1.1, 1.8][attack.step - 1],
+          castId: attack.castId,
+          hitTargets: attack.hitTargets,
+          viewTick: input.viewTick,
+        };
+      } else if (family === 'crossbow') {
+        attackStrike = {
+          shape: makeLineShape(player.x, player.z, player.facing, timeline.range, timeline.width),
+          motionMult: [0.6, 0.6, 0.95][attack.step - 1],
+          castId: attack.castId,
+          hitTargets: attack.hitTargets,
+          maxTargets: 1,
+          viewTick: input.viewTick,
+        };
+        if (!attack.fired) {
+          shots.push({ ownerId: player.playerId, x: player.x, z: player.z, angle: player.facing, length: timeline.range, castSeq: attack.seq });
+          attack.fired = true;
+        }
+      } else if (!attack.fired) {
+        const point = aimedPoint(ctx, player, timeline.range, 6, input);
+        const radius = [1, 1, 1.6][attack.step - 1];
+        pendingImpacts.push({
+          id: attack.castId,
+          ownerId: player.playerId,
+          ownerEntityId: player.id,
+          castSeq: attack.seq,
+          resolveTick: ctx.tick + 7,
+          shape: { type: 'circle', originX: point.x, originZ: point.z, radius },
+          motionMult: [0.8, 0.8, 1.3][attack.step - 1],
+          kind: 'staff-basic',
+          viewLag: player.viewLag,
+          viewTick: input.viewTick,
+          skillId: 0,
+          sourceX: player.x,
+          sourceZ: player.z,
+        });
+        attack.fired = true;
+      }
     }
     attack.phaseTick += 1;
     const phaseLength = attack.phase === 'windup'
@@ -1369,7 +1700,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     player.potionHealTicks -= 1;
     player.potionTicks -= 1;
   }
-  return { input, pressed, events, skillStrike, attackStrike, potionHeal };
+  return { input, pressed, events, skillStrike, skillStrikes, attackStrike, pendingImpacts, shots, blinks, potionHeal };
 }
 
 function advanceStagePlayer(world, player, rawInput) {
@@ -1377,24 +1708,31 @@ function advanceStagePlayer(world, player, rawInput) {
   if (!inputs.length && !world.inputDriven) inputs.push(null);
   for (const input of inputs) {
     if (player.downed || player.dead || !player.connected) continue;
-    const motion = stepPlayerMotion({
-      arena: world.arena,
-      openDoors: world.openDoors,
-      tick: world.tick,
-    }, player, input);
+    const motion = stepPlayerMotion(world, player, input);
     for (const event of motion.events) {
       if (event.type === 'skill') emit(world, 'cast', event.payload);
       else if (event.type === 'dodge') emit(world, 'dodge', { entityId: player.id, playerId: player.playerId });
       else if (event.type === 'potion') applyPotion(world, player, event.seq);
       else emit(world, 'cast', event.payload);
     }
-    if (motion.skillStrike) {
-      const strike = motion.skillStrike;
-      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId);
+    for (const impact of motion.pendingImpacts) queuePendingImpact(world, impact);
+    for (const shot of motion.shots) emit(world, 'shot', shot);
+    for (const blink of motion.blinks) emit(world, 'blink', blink);
+    const skillStrikes = motion.skillStrikes.length ? motion.skillStrikes : motion.skillStrike ? [motion.skillStrike] : [];
+    for (const strike of skillStrikes) {
+      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
+        maxTargets: strike.maxTargets,
+        viewLag: player.viewLag,
+        viewTick: strike.viewTick ?? motion.input.viewTick,
+      });
     }
     if (motion.attackStrike) {
       const strike = motion.attackStrike;
-      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets);
+      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, undefined, {
+        maxTargets: strike.maxTargets,
+        viewLag: player.viewLag,
+        viewTick: strike.viewTick ?? motion.input.viewTick,
+      });
     }
     if (motion.potionHeal > 0) {
       player.hp = Math.min(player.maxHp, player.hp + motion.potionHeal);
@@ -1402,13 +1740,13 @@ function advanceStagePlayer(world, player, rawInput) {
   }
 }
 
-function damagePlayerM1(world, enemy, player, shape) {
+function damagePlayerM1(world, enemy, player, shape, motionMult = 1) {
   if (player.dead || player.iFrames > 0) return false;
   const incomingAngle = Math.atan2(shape.originZ - player.z, shape.originX - player.x);
   const facingAngle = angleDifference(incomingAngle, player.facing);
   const guarding = player.guardTicks > 0 && Math.abs(facingAngle) <= SKILLS.guard.halfAngle;
   const perfect = guarding && player.guardTicks >= SKILLS.guard.durationTicks - SKILLS.guard.perfectTicks + 1;
-  let damage = calculateDamage(enemy.attack, 1, false, 1, player.stats.defense);
+  let damage = calculateDamage(enemy.attack, motionMult, false, 1, player.stats.defense);
   if (guarding) {
     damage = Math.max(1, Math.round(damage * SKILLS.guard.damageMultiplier));
     if (perfect) {
@@ -1450,8 +1788,8 @@ function beginEnemyTelegraph(world, enemy, target, shape, pattern, windupTicks) 
   emit(world, 'telegraph', { entityId: enemy.id, shape, pattern });
 }
 
-function bossWindup(base, phaseTwo) {
-  return phaseTwo ? Math.max(12, Math.floor(base * 0.8)) : base;
+function bossWindup(base, phaseTwo, phaseTwoTicks = Math.floor(base * 0.8)) {
+  return phaseTwo ? Math.max(12, phaseTwoTicks) : base;
 }
 
 function maybeBossSummon(world, boss) {
@@ -1472,11 +1810,26 @@ function maybeBossSummon(world, boss) {
 function startBossPattern(world, boss, target) {
   const phaseTwo = boss.hp / boss.maxHp < 0.5;
   const patterns = phaseTwo ? ['combo', 'charge', 'slam', 'circles'] : ['combo', 'charge', 'slam'];
-  const pattern = patterns[boss.attackPatternIndex % patterns.length];
+  const selectedPattern = patterns[boss.attackPatternIndex % patterns.length];
   boss.attackPatternIndex += 1;
+  const rule = ENEMIES.commander.boneSpear;
+  const distance = Math.hypot(target.x - boss.x, target.z - boss.z);
+  const pattern = distance > rule.minTargetDistance && boss.boneSpearCooldownTicks === 0
+    ? 'bone-spear'
+    : selectedPattern;
   const angle = Math.atan2(target.z - boss.z, target.x - boss.x);
   boss.facing = angle;
-  if (pattern === 'combo') {
+  if (pattern === 'bone-spear') {
+    boss.boneSpearCooldownTicks = rule.cooldownTicks;
+    beginEnemyTelegraph(
+      world,
+      boss,
+      target,
+      makeLineShape(boss.x, boss.z, angle, rule.length, rule.width),
+      pattern,
+      bossWindup(rule.windupTicks, phaseTwo, rule.phaseTwoWindupTicks),
+    );
+  } else if (pattern === 'combo') {
     boss.comboSwing = 0;
     beginEnemyTelegraph(world, boss, target, { type: 'sector', originX: boss.x, originZ: boss.z, angle, range: 2.6, halfAngle: 0.82 }, pattern, bossWindup([18, 12, 12][0], phaseTwo));
   } else if (pattern === 'charge') {
@@ -1504,10 +1857,12 @@ function startBossPattern(world, boss, target) {
 function activeEnemyAttack(world, enemy, target) {
   if (enemy.attackHit || !attackShapeHit(enemy.attackShape, target, target.radius)) return;
   enemy.attackHit = true;
-  queueEnemyHit(world, enemy, target, enemy.attackShape);
+  const motionMult = enemy.attackPattern === 'bone-spear' ? ENEMIES.commander.boneSpear.motionMult : 1;
+  queueEnemyHit(world, enemy, target, enemy.attackShape, null, motionMult);
 }
 
 function stepStageEnemy(world, enemy, players) {
+  if (enemy.boss && enemy.boneSpearCooldownTicks > 0) enemy.boneSpearCooldownTicks -= 1;
   if (enemy.spawnTicksLeft > 0) {
     enemy.spawnTicksLeft -= 1;
     enemy.invulnerable = enemy.spawnTicksLeft > 0;
@@ -1531,7 +1886,7 @@ function stepStageEnemy(world, enemy, players) {
   if (enemy.boss) maybeBossSummon(world, enemy);
   if (enemy.attackPhase === 'windup') {
     if (enemy.attackRemaining > 1) {
-      enemy.attackRemaining -= 1;
+      enemy.attackRemaining -= enemy.slowTicks > 0 ? 0.5 : 1;
       return;
     }
     enemy.attackPhase = 'active';
@@ -1549,7 +1904,8 @@ function stepStageEnemy(world, enemy, players) {
       const startZ = enemy.z;
       const directionX = Math.cos(enemy.chargeAngle);
       const directionZ = Math.sin(enemy.chargeAngle);
-      moveEntity(world, enemy, directionX, directionZ);
+      const slowFactor = enemy.slowTicks > 0 ? 0.5 : 1;
+      moveEntity(world, enemy, directionX * slowFactor, directionZ * slowFactor);
       const travelled = Math.max(0, (enemy.x - startX) * directionX + (enemy.z - startZ) * directionZ);
       enemy.lineTravelled += Math.min(1, travelled);
       enemy.attackShape.length = enemy.lineTravelled;
@@ -1558,8 +1914,9 @@ function stepStageEnemy(world, enemy, players) {
       const shape = enemy.attackShape;
       const directionX = Math.cos(shape.angle);
       const directionZ = Math.sin(shape.angle);
+      const slowFactor = enemy.slowTicks > 0 ? 0.5 : 1;
       const distance = Math.min(
-        shape.length / Math.max(1, ENEMIES[enemy.enemyKind].activeTicks),
+        shape.length / Math.max(1, ENEMIES[enemy.enemyKind].activeTicks) * slowFactor,
         Math.max(0, shape.length - enemy.lineTravelled),
       );
       const startX = enemy.x;
@@ -1594,15 +1951,16 @@ function stepStageEnemy(world, enemy, players) {
     return;
   }
   const rule = ENEMIES[enemy.enemyKind];
+  const speed = rule.speed * (enemy.slowTicks > 0 ? 0.5 : 1);
   const dx = target.x - enemy.x;
   const dz = target.z - enemy.z;
   const distance = Math.hypot(dx, dz);
   if (distance > 0.001) enemy.facing = Math.atan2(dz, dx);
   if (rule.behavior === 'ground-circle') {
     if (distance > rule.keepDistance + 0.8) {
-      moveEntity(world, enemy, dx / distance * rule.speed / TICK_HZ, dz / distance * rule.speed / TICK_HZ);
+      moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
     } else if (distance < rule.keepDistance - 1.1) {
-      moveEntity(world, enemy, -dx / distance * rule.speed / TICK_HZ, -dz / distance * rule.speed / TICK_HZ);
+      moveEntity(world, enemy, -dx / distance * speed / TICK_HZ, -dz / distance * speed / TICK_HZ);
     } else {
       beginEnemyTelegraph(world, enemy, target, { type: 'circle', originX: target.x, originZ: target.z, radius: rule.circleRadius }, rule.behavior, rule.windupTicks);
     }
@@ -1613,7 +1971,7 @@ function stepStageEnemy(world, enemy, players) {
       beginEnemyTelegraph(world, enemy, target, makeLineShape(enemy.x, enemy.z, enemy.facing, rule.length, rule.width), rule.behavior, rule.windupTicks);
       enemy.lineTravelled = 0;
     } else if (distance > 0.001) {
-      moveEntity(world, enemy, dx / distance * rule.speed / TICK_HZ, dz / distance * rule.speed / TICK_HZ);
+      moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
     }
     return;
   }
@@ -1621,7 +1979,7 @@ function stepStageEnemy(world, enemy, players) {
     const shape = { type: 'sector', originX: enemy.x, originZ: enemy.z, angle: enemy.facing, range: rule.range, halfAngle: rule.halfAngle };
     beginEnemyTelegraph(world, enemy, target, shape, rule.behavior, rule.windupTicks);
   } else if (distance > 0.001) {
-    moveEntity(world, enemy, dx / distance * rule.speed / TICK_HZ, dz / distance * rule.speed / TICK_HZ);
+    moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
   }
 }
 
@@ -1791,10 +2149,14 @@ function stageStep(world, inputsByPlayerId) {
     pickupLoot(world, player);
   }
   resolvePendingHits(world, iFramesAtTickStart);
+  resolvePendingImpacts(world);
   if (world.partySize > 1) stepRevives(world, players);
   for (const enemy of stageActiveEnemies(world)) stepStageEnemy(world, enemy, players);
   for (const enemy of world.entities) {
-    if (enemy.kind === 'enemy') enemy.hitFlashTicks = Math.max(0, enemy.hitFlashTicks - 1);
+    if (enemy.kind === 'enemy') {
+      enemy.hitFlashTicks = Math.max(0, enemy.hitFlashTicks - 1);
+      enemy.slowTicks = Math.max(0, (enemy.slowTicks ?? 0) - 1);
+    }
   }
   cleanupEntities(world);
   updateStageProgress(world);

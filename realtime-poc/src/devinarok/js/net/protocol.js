@@ -10,6 +10,7 @@ const ENTITY_FIELDS = [
   'state',
   'anim',
   'attackPhase',
+  'attackPattern',
   'attackShape',
   'attackRemaining',
   'skill',
@@ -23,7 +24,9 @@ const ENTITY_FIELDS = [
   'radius',
   'motion',
   'characterKind',
+  'family',
   'look',
+  'slowTicks',
 ];
 
 const ENTITY_FIELD_SET = new Set(ENTITY_FIELDS);
@@ -40,6 +43,7 @@ const ENTITY_DEFAULTS = {
   invulnerable: false,
   spawnTicksLeft: 0,
   attackPhase: null,
+  attackPattern: null,
   attackShape: null,
   attackRemaining: 0,
   skill: null,
