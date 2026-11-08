@@ -6,11 +6,11 @@ import {
   step,
 } from './devinarok/js/sim/world.js';
 import { equipmentLook } from './devinarok/js/content/items.js';
+import { isStageUnlocked } from './devinarok/js/content/stages.js';
 import { decodeMessage, encodeMessage, PROTOCOL_VERSION } from './devinarok/js/net/protocol.js';
 import { SIM_HASH } from './devinarok/js/net/sim-version.js';
 
 const ROOM_CODE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
-const STAGE_IDS = ['C1', 'C2', 'C3', 'CB', 'F1', 'F2', 'F3', 'FB', 'K1', 'K2', 'K3', 'KB'];
 const TICK_MS = 1000 / 30;
 const SNAPSHOT_INTERVAL = 2;
 const FULL_INTERVAL = 30;
@@ -59,6 +59,7 @@ type RoomRecord = {
   players: PlayerRecord[];
   hostId: string | null;
   stageId: string;
+  difficulty: string;
   nextOrder: number;
   public?: boolean;
 };
@@ -86,7 +87,7 @@ type TokenRecord = {
 };
 
 function newRoom(): RoomRecord {
-  return { players: [], hostId: null, stageId: 'C1', nextOrder: 0, public: true };
+  return { players: [], hostId: null, stageId: 'C1', difficulty: 'normal', nextOrder: 0, public: true };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -106,9 +107,8 @@ function normalizeCharacter(value: unknown): Character {
   };
 }
 
-function stageUnlocked(stageId: string, character: Character): boolean {
-  const index = STAGE_IDS.indexOf(stageId);
-  return index >= 0 && (index === 0 || character.clearedStages?.includes(STAGE_IDS[index - 1]) === true);
+function stageUnlocked(stageId: string, character: Character, difficulty = 'normal'): boolean {
+  return isStageUnlocked(stageId, character.clearedStages ?? [], difficulty);
 }
 
 function normalizeInput(value: any): QueuedInput | null {
@@ -214,7 +214,8 @@ export class DevinarokRoomDO {
   }
 
   private async readRoom(): Promise<RoomRecord> {
-    return (await this.ctx.storage.get<RoomRecord>('lobby')) ?? newRoom();
+    const room = (await this.ctx.storage.get<RoomRecord>('lobby')) ?? newRoom();
+    return { ...room, difficulty: room.difficulty ?? 'normal' };
   }
 
   private async writeRoom(room: RoomRecord): Promise<void> {
@@ -260,6 +261,7 @@ export class DevinarokRoomDO {
       players,
       hostId: currentRoom.hostId,
       stageId: currentRoom.stageId,
+      difficulty: currentRoom.difficulty,
       public: currentRoom.public !== false,
     };
     for (const socket of this.connectedSockets(undefined, except)) this.send(socket, message);
@@ -284,6 +286,7 @@ export class DevinarokRoomDO {
           code: this.roomCode,
           hostName: host?.name ?? '',
           stageId: room.stageId,
+          difficulty: room.difficulty,
           hostLevel: host?.character.level ?? 1,
           public: isPublic,
         },
@@ -408,12 +411,16 @@ export class DevinarokRoomDO {
         break;
       case 'lobby.stage':
         if (playerId !== room.hostId || typeof message.stageId !== 'string') return;
-        if (!stageUnlocked(message.stageId, player.character)) {
-          const socket = this.connectedSockets(playerId)[0];
-          if (socket) this.send(socket, { t: 'error', code: 'stage-locked' });
-          return;
+        {
+          const difficulty = typeof message.difficulty === 'string' ? message.difficulty : 'normal';
+          if (!stageUnlocked(message.stageId, player.character, difficulty)) {
+            const socket = this.connectedSockets(playerId)[0];
+            if (socket) this.send(socket, { t: 'error', code: 'stage-locked' });
+            return;
+          }
+          room.stageId = message.stageId;
+          room.difficulty = difficulty;
         }
-        room.stageId = message.stageId;
         break;
       case 'lobby.public':
         if (playerId !== room.hostId) {
@@ -449,7 +456,7 @@ export class DevinarokRoomDO {
       if (socket) this.send(socket, { t: 'error', code: 'not-ready' });
       return;
     }
-    if (!stageUnlocked(room.stageId, host.character)) {
+    if (!stageUnlocked(room.stageId, host.character, room.difficulty)) {
       const socket = this.connectedSockets(room.hostId ?? undefined)[0];
       if (socket) this.send(socket, { t: 'error', code: 'stage-locked' });
       return;
@@ -461,6 +468,7 @@ export class DevinarokRoomDO {
     this.world = createStageWorld({
       seed,
       stageId: room.stageId,
+      difficulty: room.difficulty,
       inputDriven: true,
       party: connected.map((player) => ({
         playerId: player.playerId,
@@ -494,6 +502,7 @@ export class DevinarokRoomDO {
       runId: this.runId,
       seed,
       stageId: room.stageId,
+      difficulty: room.difficulty,
       party: connected.map((player) => ({
         playerId: player.playerId,
         name: player.name,
@@ -820,6 +829,8 @@ export class DevinarokRoomDO {
       roomIndex: this.world?.roomIndex ?? 0,
       roomCleared: Boolean(this.world?.roomCleared),
       doorCountdown: this.world?.doorCountdown ?? null,
+      stageId: this.world?.stageId ?? null,
+      difficulty: this.world?.difficulty ?? 'normal',
       openDoors: { ...(this.world?.openDoors ?? {}) },
       activeEnemyIds: [...(this.world?.roomEnemyIds ?? [])],
     };
