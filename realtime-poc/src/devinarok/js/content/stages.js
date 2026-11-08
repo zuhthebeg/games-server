@@ -873,6 +873,13 @@ export function isStageUnlocked(stageId, clearedStages = [], difficulty = 'norma
   return clearedStages.includes(clearKey(STAGE_LIST[index - 1].id));
 }
 
+export function latestStage(difficulty = 'normal', clearedStages = []) {
+  const unlocked = STAGE_LIST.filter((stage) => isStageUnlocked(stage.id, clearedStages, difficulty));
+  if (!unlocked.length) return STAGE_LIST[0].id;
+  const uncleared = unlocked.filter((stage) => !clearedStages.includes(stageClearKey(stage.id, difficulty)));
+  return (uncleared.at(-1) ?? unlocked.at(-1)).id;
+}
+
 export const STAGES = Object.fromEntries(STAGE_LIST.map((stage) => [stage.id, stage]));
 
 const hubProps = [];
@@ -898,21 +905,21 @@ hubProps.push(
   { model: 'assets/env/candle_lit.glb', x: -8, z: 8, rotY: 0 },
   { model: 'assets/env/candle_lit.glb', x: 8, z: 8, rotY: 0 },
   { model: 'assets/env/table_long_decorated_A.glb', x: 0, z: -9.5, rotY: 0 },
-  { model: 'assets/env/table_medium_decorated_A.glb', x: -4.5, z: -3.5, rotY: Math.PI / 2 },
-  { model: 'assets/env/table_medium_decorated_A.glb', x: 4.5, z: -3.5, rotY: -Math.PI / 2 },
-  { model: 'assets/env/table_small_decorated_A.glb', x: 0, z: -5.5, rotY: 0 },
-  { model: 'assets/env/chair.glb', x: -2, z: -5.5, rotY: Math.PI / 2 },
-  { model: 'assets/env/chair.glb', x: 2, z: -5.5, rotY: -Math.PI / 2 },
+  { model: 'assets/env/table_medium_decorated_A.glb', x: -7.5, z: -3.5, rotY: Math.PI / 2 },
+  { model: 'assets/env/table_medium_decorated_A.glb', x: 7.5, z: -3.5, rotY: -Math.PI / 2 },
+  { model: 'assets/env/table_small_decorated_A.glb', x: -7.5, z: -5.5, rotY: 0 },
+  { model: 'assets/env/chair.glb', x: -6, z: -5.5, rotY: Math.PI / 2 },
+  { model: 'assets/env/chair.glb', x: -8.5, z: -5.5, rotY: -Math.PI / 2 },
   { model: 'assets/env/chest.glb', x: -8, z: 4, rotY: Math.PI / 2 },
   { model: 'assets/env/stool.glb', x: -6, z: -1, rotY: 0 },
-  { model: 'assets/env/stool.glb', x: 5.5, z: -2.5, rotY: 0 },
-  { model: 'assets/env/shelf_large.glb', x: 5.3, z: -5.5, rotY: -Math.PI / 2 },
+  { model: 'assets/env/stool.glb', x: 7.5, z: -2.5, rotY: 0 },
+  { model: 'assets/env/shelf_large.glb', x: 8, z: -5.5, rotY: -Math.PI / 2 },
   { model: 'assets/env/keg_decorated.glb', x: -8, z: -4.5, rotY: 0 },
   { model: 'assets/env/barrel_large.glb', x: 8, z: 4, rotY: 0 },
   { model: 'assets/env/crates_stacked.glb', x: -5, z: -1, rotY: 0, obstacleId: 'hub-crates' },
   { model: 'assets/env/barrel_large.glb', x: 5, z: 1, rotY: 0, obstacleId: 'hub-barrel' },
-  { model: 'assets/env/column.glb', x: -5, z: -6, rotY: 0, obstacleId: 'hub-pillar-left' },
-  { model: 'assets/env/column.glb', x: 5, z: -6, rotY: 0, obstacleId: 'hub-pillar-right' },
+  { model: 'assets/env/column.glb', x: -8.5, z: -2, rotY: 0, obstacleId: 'hub-pillar-left' },
+  { model: 'assets/env/column.glb', x: 8.5, z: 2, rotY: 0, obstacleId: 'hub-pillar-right' },
 );
 
 const hubObstacles = [];
@@ -923,16 +930,16 @@ export const HUB_ARENA = {
   width: 20,
   depth: 20,
   bounds: { minX: -10, maxX: 10, minZ: -10, maxZ: 10 },
-  playerSpawn: { x: 0, z: 3 },
+  playerSpawn: { x: 0, z: 1 },
   spawnPoints: [],
   rooms: [],
   doors: [],
   obstacles: hubObstacles,
   props: hubProps,
   npcs: [
-    { id: 'blacksmith', name: '대장장이', model: 'Barbarian', x: -2.2, z: -3, rotY: Math.PI / 2, panel: 'blacksmith' },
-    { id: 'merchant', name: '상인', model: 'Rogue_Hooded', x: 2.2, z: -3, rotY: -Math.PI / 2, panel: 'merchant' },
-    { id: 'innkeeper', name: '주인', model: 'Mage', x: 0, z: -7, rotY: Math.PI, panel: 'board' },
-    { id: 'sanctuary', name: '법당', model: 'knight', x: 5.1, z: -7, rotY: Math.PI, panel: 'sanctuary' },
+    { id: 'blacksmith', name: '대장장이', model: 'Barbarian', x: -3, z: -2.6, rotY: Math.PI / 2, panel: 'blacksmith' },
+    { id: 'merchant', name: '상인', model: 'Rogue_Hooded', x: 3, z: -2.6, rotY: -Math.PI / 2, panel: 'merchant' },
+    { id: 'innkeeper', name: '주인', model: 'Mage', x: 0, z: -5.4, rotY: Math.PI, panel: 'board' },
+    { id: 'sanctuary', name: '법당', model: 'knight', x: 3.2, z: -5.6, rotY: Math.PI, panel: 'sanctuary' },
   ],
 };

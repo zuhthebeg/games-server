@@ -26,6 +26,7 @@ export const BUTTONS = {
   SKILL1: 4,
   SKILL2: 8,
   SKILL3: 16,
+  SKILL4: 128,
   INTERACT: 32,
   POTION: 64,
 };
@@ -145,7 +146,7 @@ function normalizeInput(player, rawInput) {
     moveX: clampInput(rawInput.moveX, -127, 127, previous.moveX),
     moveZ: clampInput(rawInput.moveZ, -127, 127, previous.moveZ),
     aim: clampInput(rawInput.aim, 0, 255, previous.aim),
-    buttons: clampInput(rawInput.buttons, 0, 127, 0),
+    buttons: clampInput(rawInput.buttons, 0, 255, 0),
     ...(Number.isFinite(rawInput.ad) && player.family !== 'sword'
       ? {
         ad: Math.round(clamp(
@@ -470,7 +471,7 @@ export function addPlayer(world, {
     dodgeCooldownTicks: 0,
     hitFlashTicks: 0,
     moving: false,
-    skillCooldowns: { 1: 0, 2: 0, 3: 0 },
+    skillCooldowns: { 1: 0, 2: 0, 3: 0, 4: 0 },
     skillCast: null,
     pierceShotsRemaining: 0,
     guardTicks: 0,
@@ -1415,6 +1416,8 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
   rewind = true,
   maxTargets = Infinity,
   slowTicks = 0,
+  stunTicks = 0,
+  knockback = 0,
   forceCritical = false,
   viewLag = player.viewLag,
   viewTick = player.lastInput?.viewTick,
@@ -1474,6 +1477,19 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
       guarded,
       shape,
     );
+    if (!enemy.dead && stunTicks > 0 && !enemy.boss) {
+      enemy.stunnedTicks = Math.max(enemy.stunnedTicks ?? 0, stunTicks);
+      enemy.attackPhase = null;
+      enemy.attackShape = null;
+      enemy.attackRemaining = 0;
+      enemy.attackCooldownTicks = Math.max(enemy.attackCooldownTicks ?? 0, stunTicks);
+    }
+    if (!enemy.dead && knockback > 0) {
+      const dx = enemy.x - sourceX;
+      const dz = enemy.z - sourceZ;
+      const distance = Math.hypot(dx, dz) || 1;
+      moveEntity(world, enemy, dx / distance * knockback, dz / distance * knockback);
+    }
     const heal = Math.floor(damage * player.stats.lifesteal / 100);
     if (heal) player.hp = Math.min(player.maxHp, player.hp + heal);
     if (!enemy.dead && slowTicks > 0) enemy.slowTicks = Math.max(enemy.slowTicks ?? 0, slowTicks);
@@ -1499,6 +1515,7 @@ function queuePendingImpact(world, impact) {
     resolveTick: pending.resolveTick,
     endsTick: pending.endsTick,
     hitEvery: pending.hitEvery,
+    hitsRemaining: pending.hitsRemaining,
     viewLag: pending.viewLag,
     ...(Number.isSafeInteger(pending.viewTick) ? { viewTick: pending.viewTick } : {}),
     shape: copyShape(pending.shape),
@@ -1511,6 +1528,21 @@ function queuePendingImpact(world, impact) {
 function resolvePendingImpacts(world) {
   const remaining = [];
   for (const impact of world.pendingImpacts) {
+    if (impact.kind === 'rain') {
+      if (world.tick < impact.resolveTick || (world.tick - impact.resolveTick) % impact.hitEvery !== 0) {
+        remaining.push(impact);
+        continue;
+      }
+      const player = world.entities.find((entity) => entity.kind === 'player' && entity.playerId === impact.ownerId);
+      if (!player || player.dead || player.downed || !player.connected) continue;
+      playerStrike(world, player, impact.shape, impact.motionMult, impact.id, [], impact.skillId, {
+        viewLag: impact.viewLag,
+        viewTick: impact.viewTick,
+      });
+      impact.hitsRemaining -= 1;
+      if (impact.hitsRemaining > 0) remaining.push(impact);
+      continue;
+    }
     if (impact.kind === 'burn') {
       if (world.tick < impact.resolveTick) {
         remaining.push(impact);
@@ -1546,6 +1578,8 @@ function resolvePendingImpacts(world) {
       impact.skillId,
       {
         slowTicks: impact.slowTicks ?? 0,
+        stunTicks: impact.stunTicks ?? 0,
+        knockback: impact.knockback ?? 0,
         viewLag: impact.viewLag,
         viewTick: impact.viewTick,
       },
@@ -1571,11 +1605,14 @@ function skillDuration(name) {
   return skill.windupTicks ?? skill.dashTicks ?? 1;
 }
 
-function startSkillMotion(ctx, player, id, seq) {
+function startSkillMotion(ctx, player, id, seq, input) {
   const name = familySkillName(player, id);
   const skill = SKILLS[name];
   if (!skill) return null;
   const castId = `${player.playerId}:${seq}`;
+  const target = ['rain', 'meteor'].includes(name)
+    ? aimedPoint(ctx, player, skill.range, skill.fallbackDistance, input)
+    : null;
   player.skillCast = {
     id,
     name,
@@ -1589,6 +1626,12 @@ function startSkillMotion(ctx, player, id, seq) {
     originX: player.x,
     originZ: player.z,
     angle: player.facing,
+    targetX: name === 'quake'
+      ? player.x + Math.cos(player.facing) * skill.forwardOffset
+      : target?.x,
+    targetZ: name === 'quake'
+      ? player.z + Math.sin(player.facing) * skill.forwardOffset
+      : target?.z,
   };
   return { entityId: player.id, playerId: player.playerId, castId, skill: id, skillName: skill.name, family: player.family ?? 'sword' };
 }
@@ -1606,7 +1649,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   let pressed = input.buttons & ~player.previousButtons;
   player.previousButtons = input.buttons;
   const counterRequested = Boolean((pressed & BUTTONS.ATTACK) && player.counterReadyTicks > 0);
-  if (counterRequested) pressed &= ~(BUTTONS.SKILL1 | BUTTONS.SKILL2 | BUTTONS.SKILL3);
+  if (counterRequested) pressed &= ~(BUTTONS.SKILL1 | BUTTONS.SKILL2 | BUTTONS.SKILL3 | BUTTONS.SKILL4);
   if (counterRequested && player.skillCast) {
     const castId = player.skillCast.castId;
     if (castId && Array.isArray(ctx.pendingImpacts)) {
@@ -1622,6 +1665,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     ? 0
     : clamp((Number.isSafeInteger(ctx.tick) ? ctx.tick : 0) - viewTick, 0, 12);
   const events = [];
+  const skillImpacts = [];
   let skillStrike = null;
   const skillStrikes = [];
   let attackStrike = null;
@@ -1650,9 +1694,12 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     }
   }
 
-  const skillId = pressed & BUTTONS.SKILL1 ? 1 : pressed & BUTTONS.SKILL2 ? 2 : pressed & BUTTONS.SKILL3 ? 3 : 0;
-  if (skillId && !player.skillCast && player.skillCooldowns[skillId] === 0) {
-    const payload = startSkillMotion(ctx, player, skillId, input.seq);
+  const skillId = pressed & BUTTONS.SKILL1 ? 1
+    : pressed & BUTTONS.SKILL2 ? 2
+      : pressed & BUTTONS.SKILL3 ? 3
+        : pressed & BUTTONS.SKILL4 ? 4 : 0;
+  if (skillId && !(skillId === 4 && player.level < 7) && !player.skillCast && player.skillCooldowns[skillId] === 0) {
+    const payload = startSkillMotion(ctx, player, skillId, input.seq, input);
     if (payload) {
       const skill = SKILLS[familySkillName(player, skillId)];
       const cooldownTicks = Math.max(1, Math.round(skill.cooldownTicks * (
@@ -1660,6 +1707,26 @@ export function stepPlayerMotion(ctx, player, rawInput) {
       )));
       player.skillCooldowns[skillId] = cooldownTicks;
       events.push({ type: 'skill', payload, cooldownTicks });
+      if (skillId === 4) {
+        const cast = player.skillCast;
+        const shape = {
+          type: 'circle',
+          originX: cast.targetX,
+          originZ: cast.targetZ,
+          radius: skill.radius,
+        };
+        events.push({
+          type: 'skillTelegraph',
+          payload: {
+            castId: cast.castId,
+            ownerId: player.playerId,
+            skillName: cast.name,
+            startTick: ctx.tick,
+            resolveTick: ctx.tick + skill.windupTicks - 1,
+            shape,
+          },
+        });
+      }
     }
   }
   if ((pressed & BUTTONS.POTION) && player.potions > 0 && player.potionCooldownTicks === 0 && player.potionTicks === 0) {
@@ -1741,6 +1808,60 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         moveEntity(ctx, player, Math.cos(angle) * stepDistance, Math.sin(angle) * stepDistance);
       }
       blinks.push({ ownerId: player.playerId, castSeq: cast.seq, from, to: { x: player.x, z: player.z } });
+    }
+    if (cast.name === 'quake' && cast.tick === skill.windupTicks) {
+      const shape = {
+        type: 'circle',
+        originX: cast.targetX,
+        originZ: cast.targetZ,
+        radius: skill.radius,
+      };
+      addSkillStrike({
+        shape,
+        motionMult: skill.motionMult,
+        castId: cast.castId,
+        hitTargets: cast.hitTargets,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+        stunTicks: skill.stunTicks,
+      });
+      skillImpacts.push({ castSeq: cast.seq, castId: cast.castId, shape, kind: 'quake' });
+    } else if (cast.name === 'rain' && cast.tick === skill.windupTicks) {
+      pendingImpacts.push({
+        id: cast.castId,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: cast.seq,
+        resolveTick: ctx.tick,
+        endsTick: ctx.tick + skill.hitEvery * (skill.hitCount - 1),
+        hitEvery: skill.hitEvery,
+        hitsRemaining: skill.hitCount,
+        shape: { type: 'circle', originX: cast.targetX, originZ: cast.targetZ, radius: skill.radius },
+        motionMult: skill.motionMult,
+        kind: 'rain',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+        sourceX: player.x,
+        sourceZ: player.z,
+      });
+    } else if (cast.name === 'meteor' && cast.tick === skill.windupTicks) {
+      pendingImpacts.push({
+        id: cast.castId,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: cast.seq,
+        resolveTick: ctx.tick,
+        shape: { type: 'circle', originX: cast.targetX, originZ: cast.targetZ, radius: skill.radius },
+        motionMult: skill.motionMult,
+        knockback: skill.knockback,
+        kind: 'meteor',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+        sourceX: player.x,
+        sourceZ: player.z,
+      });
     }
     if (cast.name === 'spin' && cast.tick >= skill.windupTicks && cast.tick < skill.windupTicks + skill.activeTicks) {
       addSkillStrike({
@@ -1921,7 +2042,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   player.hitFlashTicks = Math.max(0, player.hitFlashTicks - 1);
   player.potionCooldownTicks = Math.max(0, player.potionCooldownTicks - 1);
   player.counterReadyTicks = Math.max(0, player.counterReadyTicks - (counterStrike ? 0 : 1));
-  for (const id of [1, 2, 3]) player.skillCooldowns[id] = Math.max(0, player.skillCooldowns[id] - 1);
+  for (const id of [1, 2, 3, 4]) player.skillCooldowns[id] = Math.max(0, player.skillCooldowns[id] - 1);
   let potionHeal = 0;
   if (player.potionTicks > 0) {
     potionHeal = Math.ceil(player.potionHealRemaining / player.potionHealTicks);
@@ -1929,7 +2050,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     player.potionHealTicks -= 1;
     player.potionTicks -= 1;
   }
-  return { input, pressed, events, skillStrike, skillStrikes, attackStrike, counterStrike, pendingImpacts, shots, blinks, potionHeal };
+  return { input, pressed, events, skillStrike, skillStrikes, skillImpacts, attackStrike, counterStrike, pendingImpacts, shots, blinks, potionHeal };
 }
 
 function startPlayerDodge(ctx, player, directionX, directionZ, input, events) {
@@ -2017,6 +2138,7 @@ function advanceStagePlayer(world, player, rawInput) {
     const motion = stepPlayerMotion(world, player, input);
     for (const event of motion.events) {
       if (event.type === 'skill') emit(world, 'cast', event.payload);
+      else if (event.type === 'skillTelegraph') emit(world, 'skillTelegraph', event.payload);
       else if (event.type === 'dodge') emit(world, 'dodge', { entityId: player.id, playerId: player.playerId });
       else if (event.type === 'potion') applyPotion(world, player, event.seq);
       else emit(world, 'cast', event.payload);
@@ -2028,8 +2150,22 @@ function advanceStagePlayer(world, player, rawInput) {
     for (const strike of skillStrikes) {
       playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
         maxTargets: strike.maxTargets,
+        stunTicks: strike.stunTicks,
+        knockback: strike.knockback,
         viewLag: player.viewLag,
         viewTick: strike.viewTick ?? motion.input.viewTick,
+      });
+    }
+    for (const impact of motion.skillImpacts) {
+      emit(world, 'impact', {
+        id: impact.castId,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: impact.castSeq,
+        fireTick: world.tick,
+        resolveTick: world.tick,
+        shape: impact.shape,
+        kind: impact.kind,
       });
     }
     if (motion.counterStrike) {
