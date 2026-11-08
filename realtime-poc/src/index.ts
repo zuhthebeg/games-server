@@ -28,7 +28,10 @@ export default {
 
     const devinarok = url.pathname.match(/^\/devinarok\/([ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6})$/);
     if (devinarok) {
-      const stub = env.DEVINAROK_ROOM.get(env.DEVINAROK_ROOM.idFromName(devinarok[1]));
+      const stub = env.DEVINAROK_ROOM.get(
+        env.DEVINAROK_ROOM.idFromName(devinarok[1]),
+        { locationHint: 'apac-ne' },
+      );
       return stub.fetch(req);
     }
 

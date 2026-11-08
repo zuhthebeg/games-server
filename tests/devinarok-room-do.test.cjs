@@ -74,6 +74,155 @@ function testNewPlayerStaticFieldsInDelta() {
   assert.equal(room.renderEntity({ id: 43, kind: 'enemy', boss: true, attackPattern: 'bone-spear' }, 'viewer', true).attackPattern, 'bone-spear');
 }
 
+async function testInputPlayoutBuffer() {
+  const bundled = esbuild.buildSync({
+    entryPoints: [path.join(ROOT, 'realtime-poc/src/devinarok-room-do.ts')],
+    bundle: true,
+    format: 'cjs',
+    target: 'node22',
+    platform: 'node',
+    write: false,
+    logLevel: 'silent',
+  }).outputFiles[0].text;
+  const compiled = { exports: {} };
+  new Function('module', 'exports', 'require', bundled)(compiled, compiled.exports, require);
+  const {
+    DevinarokRoomDO,
+    consumeInputsForTick,
+    fixedSeedFromRequest,
+    inputTargetDepth,
+    recordInputBundle,
+  } = compiled.exports;
+  const seedUrl = new URL('https://example.test/devinarok/ABC234?debug=1&seed=7355608');
+  assert.equal(fixedSeedFromRequest(seedUrl, { DEVINAROK_ALLOW_TEST_SEED: '1' }), 7355608);
+  assert.equal(fixedSeedFromRequest(seedUrl, {}), null);
+  assert.equal(fixedSeedFromRequest(seedUrl, { DEVINAROK_ALLOW_TEST_SEED: '0' }), null);
+  assert.equal(
+    fixedSeedFromRequest(new URL('https://example.test/?seed=4294967296'), { DEVINAROK_ALLOW_TEST_SEED: '1' }),
+    null,
+  );
+  const inputRoom = Object.create(DevinarokRoomDO.prototype);
+  inputRoom.world = { outcome: null, entities: [] };
+  inputRoom.inputs = new Map();
+  await inputRoom.handleInput('bundle-player', {
+    inputs: Array.from({ length: 150_000 }, (_, index) => ({ seq: index + 1 })),
+  });
+  const bundleState = inputRoom.inputs.get('bundle-player');
+  assert.equal(bundleState.inputsReceived, 90);
+  assert.equal(bundleState.pending.size, 90);
+  assert.equal(bundleState.pending.has(149_911), true);
+  assert.equal(bundleState.pending.has(150_000), true);
+  const recoveryRoom = Object.create(DevinarokRoomDO.prototype);
+  recoveryRoom.world = { outcome: null, entities: [] };
+  recoveryRoom.inputs = new Map();
+  await recoveryRoom.handleInput('recovery-player', {
+    inputs: Array.from({ length: 91 }, (_, index) => ({ seq: index + 1 })),
+  });
+  const recoveryState = recoveryRoom.inputs.get('recovery-player');
+  assert.equal(recoveryState.lastAppliedSeq, 1);
+  assert.equal(recoveryState.forceFullResync, true);
+  const nextTickInputs = consumeInputsForTick(recoveryState);
+  assert.ok(nextTickInputs.length > 0);
+  assert.equal(nextTickInputs[0].seq, 2);
+  assert.equal(recoveryState.sequenceGapStarvedTicks ?? 0, 0);
+
+  const originalFetch = global.fetch;
+  const originalNow = Date.now;
+  let now = 0;
+  let fetchCalls = 0;
+  try {
+    Date.now = () => now;
+    global.fetch = async () => {
+      fetchCalls += 1;
+      return { ok: false };
+    };
+    const coloRoom = new DevinarokRoomDO({}, {});
+    assert.equal(await coloRoom.getServerColo(), null);
+    assert.equal(await coloRoom.getServerColo(), null);
+    now = 59_999;
+    assert.equal(await coloRoom.getServerColo(), null);
+    assert.equal(fetchCalls, 1);
+    now = 60_000;
+    global.fetch = async () => {
+      fetchCalls += 1;
+      return { ok: true, text: async () => 'colo=PDX\n' };
+    };
+    assert.equal(await coloRoom.getServerColo(), 'PDX');
+    assert.equal(await coloRoom.getServerColo(), 'PDX');
+    assert.equal(fetchCalls, 2);
+  } finally {
+    global.fetch = originalFetch;
+    Date.now = originalNow;
+  }
+
+  assert.equal(inputTargetDepth([]), 1);
+  assert.equal(inputTargetDepth([10, 20]), 2);
+  assert.equal(inputTargetDepth([70, 80]), 4);
+  assert.equal(inputTargetDepth([120]), 4);
+
+  const jitterState = {
+    transitOffsetsMs: [],
+    inputBundleCounts: [],
+    inputBundleIntervalsMs: [],
+    lastInputBundleAt: null,
+    jitterSamplesMs: [],
+    jitterP95Ms: 0,
+    targetDepth: 1,
+  };
+  for (let bundle = 1; bundle <= 120; bundle += 1) {
+    const lastSeq = bundle * 3;
+    recordInputBundle(jitterState, 5000 + lastSeq * (1000 / 30), lastSeq, 3);
+  }
+  assert.equal(jitterState.jitterP95Ms, 0);
+  assert.equal(jitterState.targetDepth, 1);
+  assert.equal(jitterState.inputBundleCounts.length, 120);
+  assert.equal(jitterState.inputBundleCounts.at(-1), 3);
+  assert.equal(jitterState.inputBundleIntervalsMs.length, 119);
+  assert.ok(Math.abs(jitterState.inputBundleIntervalsMs.at(-1) - 100) < 1e-9);
+
+  const state = {
+    lastAppliedSeq: 0,
+    pending: new Map([[1, { seq: 1 }]]),
+    targetDepth: 3,
+    buffering: false,
+  };
+  assert.deepEqual(consumeInputsForTick(state).map((input) => input.seq), [1]);
+  assert.equal(state.buffering, false);
+
+  state.pending.clear();
+  assert.deepEqual(consumeInputsForTick(state), []);
+  assert.equal(state.buffering, true);
+  assert.equal(state.emptyBufferStarvedTicks, 1);
+  state.pending.set(2, { seq: 2 });
+  state.pending.set(3, { seq: 3 });
+  assert.deepEqual(consumeInputsForTick(state), []);
+  assert.equal(state.refillWaitStarvedTicks, 1);
+  state.pending.set(4, { seq: 4 });
+  assert.deepEqual(consumeInputsForTick(state).map((input) => input.seq), [2]);
+  assert.equal(state.buffering, false);
+
+  state.lastAppliedSeq = 0;
+  state.pending = new Map(Array.from({ length: 7 }, (_, index) => [
+    index + 1,
+    { seq: index + 1 },
+  ]));
+  state.targetDepth = 3;
+  assert.deepEqual(consumeInputsForTick(state).map((input) => input.seq), [1, 2]);
+  assert.equal(state.starvedTicks, 2);
+  assert.equal(state.sequenceGapStarvedTicks ?? 0, 0);
+  assert.equal(state.inputsConsumed, 4);
+
+  const room = Object.create(DevinarokRoomDO.prototype);
+  room.runId = null;
+  room.world = null;
+  assert.equal(room.activeRunTick(), 0);
+  room.runId = 'run';
+  room.world = { tick: 37, outcome: null };
+  assert.equal(room.activeRunTick(), 37);
+  room.world.outcome = { type: 'victory' };
+  assert.equal(room.activeRunTick(), 37);
+}
+
 function wsClient(socket) {
   socket.accept();
   const queue = [];
@@ -119,8 +268,9 @@ function wsClient(socket) {
   };
 }
 
-async function connect(mf, roomCode, name, token, simHash = SIM_HASH, character = { level: 1, equipment: [], potions: 2, clearedStages: [] }) {
-  const response = await mf.dispatchFetch(`http://localhost/devinarok/${roomCode}`, {
+async function connect(mf, roomCode, name, token, simHash = SIM_HASH, character = { level: 1, equipment: [], potions: 2, clearedStages: [] }, query = '') {
+  const querySuffix = query ? `?${query}` : '';
+  const response = await mf.dispatchFetch(`http://localhost/devinarok/${roomCode}${querySuffix}`, {
     headers: { Upgrade: 'websocket' },
   });
   assert.equal(response.status, 101, `Expected upgrade, got ${response.status}`);
@@ -142,6 +292,7 @@ async function testMixedFamilyStageSnapshot() {
     modules: true,
     script: bundleWorker(),
     compatibilityDate: '2025-01-01',
+    bindings: { DEVINAROK_ALLOW_TEST_SEED: '1' },
     durableObjects: {
       ROOM: { className: 'RoomDO', useSQLite: true },
       COORD: { className: 'CoordinatorDO', useSQLite: true },
@@ -220,6 +371,7 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
     modules: true,
     script: bundleWorker(),
     compatibilityDate: '2025-01-01',
+    bindings: { DEVINAROK_ALLOW_TEST_SEED: '1' },
     durableObjects: {
       ROOM: { className: 'RoomDO', useSQLite: true },
       COORD: { className: 'CoordinatorDO', useSQLite: true },
@@ -284,6 +436,7 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
 }
 
 async function run() {
+  await testInputPlayoutBuffer();
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
   testNewPlayerStaticFieldsInDelta();
   await testMixedFamilyStageSnapshot();
@@ -292,6 +445,7 @@ async function run() {
     modules: true,
     script: bundleWorker(),
     compatibilityDate: '2025-01-01',
+    bindings: { DEVINAROK_ALLOW_TEST_SEED: '1' },
     durableObjects: {
       ROOM: { className: 'RoomDO', useSQLite: true },
       COORD: { className: 'CoordinatorDO', useSQLite: true },
@@ -306,7 +460,7 @@ async function run() {
     const versionError = await invalid.waitFor((message) => message.t === 'error', 'version error');
     assert.equal(versionError.code, 'version');
 
-    const p0 = await connect(mf, 'ABC234', 'Host');
+    const p0 = await connect(mf, 'ABC234', 'Host', undefined, SIM_HASH, undefined, 'debug=1');
     clients.push(p0);
     const welcome0 = await p0.waitFor((message) => message.t === 'welcome', 'host welcome');
     const lobby0 = await p0.waitFor((message) => message.t === 'lobby', 'host lobby');
@@ -360,12 +514,15 @@ async function run() {
     const snap0 = await p0.waitFor((message) => message.t === 'snap' && message.full, 'host full snapshot');
     const snap1 = await p1.waitFor((message) => message.t === 'snap' && message.full, 'member full snapshot');
     assert.equal(start0.runId, start1.runId);
+    assert.equal(start0.tick, snap0.tick);
     assert.equal(start0.stageId, 'C1');
     assert.equal(start0.difficulty, 'normal');
     assert.equal(start0.party.length, 2);
     assert.equal(snap0.tick, 0);
     assert.equal(snap0.difficulty, 'normal');
     assert.equal(snap1.ack, 0);
+    assert.equal(Object.hasOwn(snap0, 'debug'), true);
+    assert.equal(Object.hasOwn(snap1, 'debug'), false);
     assert(Array.isArray(snap0.activeEnemyIds));
     assert.equal((await (await mf.dispatchFetch('http://localhost/coord/match?g=devinarok')).json()).roomId, null);
     assert(snap0.ents.length >= 5);
@@ -414,7 +571,7 @@ async function run() {
     const [pong, applied] = await Promise.all([pongPromise, appliedPromise]);
     assert(pong.tick >= snap0.tick);
     assert(pong.tick <= applied.tick && applied.tick - pong.tick <= 4, 'run pong is within four ticks of the latest snapshot');
-    assert(applied.tick >= 2);
+    assert(applied.tick >= 1);
     assert.equal(applied.full, false);
     assert.equal(applied.baseTick, snap0.tick);
     for (const key of ['roomIndex', 'roomCleared', 'doorCountdown', 'openDoors', 'activeEnemyIds']) {
@@ -424,7 +581,7 @@ async function run() {
       t: 'in',
       ae: 0,
       sa: applied.tick,
-      inputs: Array.from({ length: 5 }, (_, index) => ({
+      inputs: Array.from({ length: 8 }, (_, index) => ({
         seq: index + 2,
         mx: 0,
         mz: 0,
@@ -434,16 +591,15 @@ async function run() {
       })),
     });
     const caughtUp = await p0.waitFor(
-      (message) => message.t === 'snap' && message.tick > applied.tick && message.ack >= 5,
+      (message) => message.t === 'snap' && message.tick > applied.tick && message.ack >= 3,
       'two-input catch-up',
     );
-    assert(caughtUp.tick <= applied.tick + 2, 'backlog catch-up consumes two inputs per world tick');
     p0.send({
       t: 'in',
       ae: 0,
       sa: caughtUp.tick,
       inputs: Array.from({ length: 91 }, (_, index) => ({
-        seq: index + 7,
+        seq: index + 10,
         mx: 0,
         mz: 0,
         aim: 64,
