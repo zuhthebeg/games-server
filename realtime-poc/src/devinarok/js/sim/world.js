@@ -898,7 +898,7 @@ export function calculatePlayerStats(level = 1, equipment = []) {
   const setCounts = {};
   for (const item of equipment) {
     const base = ITEMS[item.itemId];
-    const setId = item.setId ?? base?.setId;
+    const setId = base?.setId;
     if (setId && ITEM_SETS[setId]) setCounts[setId] = (setCounts[setId] ?? 0) + 1;
     if (base) {
       const bonus = item.enhance ? item.enhance * Math.max(1, Math.round(base.value * 0.08)) : 0;
