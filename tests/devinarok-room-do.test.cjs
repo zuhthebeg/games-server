@@ -89,9 +89,18 @@ function testInputPlayoutBuffer() {
   const {
     DevinarokRoomDO,
     consumeInputsForTick,
+    fixedSeedFromRequest,
     inputTargetDepth,
     recordInputBundle,
   } = compiled.exports;
+  const seedUrl = new URL('https://example.test/devinarok/ABC234?debug=1&seed=7355608');
+  assert.equal(fixedSeedFromRequest(seedUrl, { DEVINAROK_ALLOW_TEST_SEED: '1' }), 7355608);
+  assert.equal(fixedSeedFromRequest(seedUrl, {}), null);
+  assert.equal(fixedSeedFromRequest(seedUrl, { DEVINAROK_ALLOW_TEST_SEED: '0' }), null);
+  assert.equal(
+    fixedSeedFromRequest(new URL('https://example.test/?seed=4294967296'), { DEVINAROK_ALLOW_TEST_SEED: '1' }),
+    null,
+  );
   assert.equal(inputTargetDepth([]), 1);
   assert.equal(inputTargetDepth([10, 20]), 2);
   assert.equal(inputTargetDepth([70, 80]), 4);
@@ -228,6 +237,7 @@ async function testMixedFamilyStageSnapshot() {
     modules: true,
     script: bundleWorker(),
     compatibilityDate: '2025-01-01',
+    bindings: { DEVINAROK_ALLOW_TEST_SEED: '1' },
     durableObjects: {
       ROOM: { className: 'RoomDO', useSQLite: true },
       COORD: { className: 'CoordinatorDO', useSQLite: true },
@@ -306,6 +316,7 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
     modules: true,
     script: bundleWorker(),
     compatibilityDate: '2025-01-01',
+    bindings: { DEVINAROK_ALLOW_TEST_SEED: '1' },
     durableObjects: {
       ROOM: { className: 'RoomDO', useSQLite: true },
       COORD: { className: 'CoordinatorDO', useSQLite: true },
@@ -379,6 +390,7 @@ async function run() {
     modules: true,
     script: bundleWorker(),
     compatibilityDate: '2025-01-01',
+    bindings: { DEVINAROK_ALLOW_TEST_SEED: '1' },
     durableObjects: {
       ROOM: { className: 'RoomDO', useSQLite: true },
       COORD: { className: 'CoordinatorDO', useSQLite: true },

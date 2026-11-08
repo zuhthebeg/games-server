@@ -141,6 +141,14 @@ function normalizeInput(value: any): QueuedInput | null {
   return input;
 }
 
+export function fixedSeedFromRequest(url: URL, env: unknown): number | null {
+  if ((env as { DEVINAROK_ALLOW_TEST_SEED?: string } | null)?.DEVINAROK_ALLOW_TEST_SEED !== '1') {
+    return null;
+  }
+  const seed = Number(url.searchParams.get('seed'));
+  return Number.isSafeInteger(seed) && seed > 0 && seed <= 0xffffffff ? seed : null;
+}
+
 function inputState(lastAppliedSeq = 0): InputState {
   return {
     lastAppliedSeq,
@@ -747,8 +755,7 @@ export class DevinarokRoomDO {
     }
     if (url.searchParams.get('debug') === '1') {
       this.debugMetrics = true;
-      const seed = Number(url.searchParams.get('seed'));
-      this.fixedSeed = Number.isSafeInteger(seed) && seed > 0 && seed <= 0xffffffff ? seed : null;
+      this.fixedSeed = fixedSeedFromRequest(url, this.env);
     }
     const pair = new WebSocketPair();
     const client = pair[0];
