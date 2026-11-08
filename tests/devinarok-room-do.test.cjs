@@ -225,8 +225,9 @@ function wsClient(socket) {
   };
 }
 
-async function connect(mf, roomCode, name, token, simHash = SIM_HASH, character = { level: 1, equipment: [], potions: 2, clearedStages: [] }) {
-  const response = await mf.dispatchFetch(`http://localhost/devinarok/${roomCode}`, {
+async function connect(mf, roomCode, name, token, simHash = SIM_HASH, character = { level: 1, equipment: [], potions: 2, clearedStages: [] }, query = '') {
+  const querySuffix = query ? `?${query}` : '';
+  const response = await mf.dispatchFetch(`http://localhost/devinarok/${roomCode}${querySuffix}`, {
     headers: { Upgrade: 'websocket' },
   });
   assert.equal(response.status, 101, `Expected upgrade, got ${response.status}`);
@@ -416,7 +417,7 @@ async function run() {
     const versionError = await invalid.waitFor((message) => message.t === 'error', 'version error');
     assert.equal(versionError.code, 'version');
 
-    const p0 = await connect(mf, 'ABC234', 'Host');
+    const p0 = await connect(mf, 'ABC234', 'Host', undefined, SIM_HASH, undefined, 'debug=1');
     clients.push(p0);
     const welcome0 = await p0.waitFor((message) => message.t === 'welcome', 'host welcome');
     const lobby0 = await p0.waitFor((message) => message.t === 'lobby', 'host lobby');
@@ -477,6 +478,8 @@ async function run() {
     assert.equal(snap0.tick, 0);
     assert.equal(snap0.difficulty, 'normal');
     assert.equal(snap1.ack, 0);
+    assert.equal(Object.hasOwn(snap0, 'debug'), true);
+    assert.equal(Object.hasOwn(snap1, 'debug'), false);
     assert(Array.isArray(snap0.activeEnemyIds));
     assert.equal((await (await mf.dispatchFetch('http://localhost/coord/match?g=devinarok')).json()).roomId, null);
     assert(snap0.ents.length >= 5);

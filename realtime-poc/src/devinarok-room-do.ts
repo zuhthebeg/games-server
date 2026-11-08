@@ -293,7 +293,7 @@ export class DevinarokRoomDO {
   private lastDisconnectAt: number | null = null;
   private teleportPending = false;
   private finishingRun = false;
-  private debugMetrics = false;
+  private debugSockets = new WeakSet<WebSocket>();
   private fixedSeed: number | null = null;
   private serverColoPromise: Promise<string | null> | null = null;
   private edgeColos = new WeakMap<WebSocket, string | null>();
@@ -759,8 +759,8 @@ export class DevinarokRoomDO {
         started: Boolean(this.world && !this.world.outcome),
       });
     }
-    if (url.searchParams.get('debug') === '1') {
-      this.debugMetrics = true;
+    const debugRequested = url.searchParams.get('debug') === '1';
+    if (debugRequested) {
       this.fixedSeed = fixedSeedFromRequest(url, this.env);
     }
     const pair = new WebSocketPair();
@@ -771,6 +771,7 @@ export class DevinarokRoomDO {
       (request as Request & { cf?: { colo?: string } }).cf?.colo ?? null,
     );
     this.ctx.acceptWebSocket(server);
+    if (debugRequested) this.debugSockets.add(server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -953,7 +954,7 @@ export class DevinarokRoomDO {
     return events;
   }
 
-  private snapshotFor(playerId: string, forceFull: boolean): Record<string, unknown> {
+  private snapshotFor(playerId: string, forceFull: boolean, includeDebug: boolean): Record<string, unknown> {
     const input = this.ensureInputState(playerId);
     const tick = this.world?.tick ?? 0;
     const currentEntities = (this.world?.entities ?? [])
@@ -983,7 +984,7 @@ export class DevinarokRoomDO {
       tick,
       ack: input.lastAppliedSeq,
       full,
-      ...(this.debugMetrics ? {
+      ...(includeDebug ? {
         debug: {
           starvedTicks: input.starvedTicks,
           emptyBufferStarvedTicks: input.emptyBufferStarvedTicks,
@@ -1050,7 +1051,7 @@ export class DevinarokRoomDO {
   private sendSnapshot(socket: WebSocket, playerId: string, full: boolean): void {
     const input = this.ensureInputState(playerId);
     const forceFull = full || input.forceFullResync;
-    const sent = this.send(socket, this.snapshotFor(playerId, forceFull));
+    const sent = this.send(socket, this.snapshotFor(playerId, forceFull, this.debugSockets.has(socket)));
     if (forceFull && sent) input.forceFullResync = false;
   }
 
