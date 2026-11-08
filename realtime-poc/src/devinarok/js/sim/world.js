@@ -1523,9 +1523,10 @@ function applyPotion(world, player, seq) {
 
 export function stepPlayerMotion(ctx, player, rawInput) {
   const input = normalizeInput(player, rawInput);
-  const pressed = input.buttons & ~player.previousButtons;
+  let pressed = input.buttons & ~player.previousButtons;
   player.previousButtons = input.buttons;
   const counterRequested = Boolean((pressed & BUTTONS.ATTACK) && player.counterReadyTicks > 0);
+  if (counterRequested) pressed &= ~(BUTTONS.SKILL1 | BUTTONS.SKILL2 | BUTTONS.SKILL3);
   if (counterRequested && player.skillCast) {
     const castId = player.skillCast.castId;
     if (castId && Array.isArray(ctx.pendingImpacts)) {
