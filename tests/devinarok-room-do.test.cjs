@@ -74,7 +74,7 @@ function testNewPlayerStaticFieldsInDelta() {
   assert.equal(room.renderEntity({ id: 43, kind: 'enemy', boss: true, attackPattern: 'bone-spear' }, 'viewer', true).attackPattern, 'bone-spear');
 }
 
-function testInputPlayoutBuffer() {
+async function testInputPlayoutBuffer() {
   const bundled = esbuild.buildSync({
     entryPoints: [path.join(ROOT, 'realtime-poc/src/devinarok-room-do.ts')],
     bundle: true,
@@ -101,6 +101,17 @@ function testInputPlayoutBuffer() {
     fixedSeedFromRequest(new URL('https://example.test/?seed=4294967296'), { DEVINAROK_ALLOW_TEST_SEED: '1' }),
     null,
   );
+  const inputRoom = Object.create(DevinarokRoomDO.prototype);
+  inputRoom.world = { outcome: null, entities: [] };
+  inputRoom.inputs = new Map();
+  await inputRoom.handleInput('bundle-player', {
+    inputs: Array.from({ length: 150_000 }, (_, index) => ({ seq: index + 1 })),
+  });
+  const bundleState = inputRoom.inputs.get('bundle-player');
+  assert.equal(bundleState.inputsReceived, 90);
+  assert.equal(bundleState.pending.size, 90);
+  assert.equal(bundleState.pending.has(149_911), true);
+  assert.equal(bundleState.pending.has(150_000), true);
   assert.equal(inputTargetDepth([]), 1);
   assert.equal(inputTargetDepth([10, 20]), 2);
   assert.equal(inputTargetDepth([70, 80]), 4);
@@ -381,7 +392,7 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
 }
 
 async function run() {
-  testInputPlayoutBuffer();
+  await testInputPlayoutBuffer();
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
   testNewPlayerStaticFieldsInDelta();
   await testMixedFamilyStageSnapshot();

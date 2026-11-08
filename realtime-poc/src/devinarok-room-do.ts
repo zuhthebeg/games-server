@@ -659,10 +659,16 @@ export class DevinarokRoomDO {
     }
     if (message.sr === true) state.forceFullResync = true;
     if (!Array.isArray(message.inputs)) return;
-    const inputs = message.inputs.map(normalizeInput).filter((input): input is QueuedInput => Boolean(input));
+    const inputs = message.inputs
+      .slice(-MAX_PENDING_INPUTS)
+      .map(normalizeInput)
+      .filter((input): input is QueuedInput => Boolean(input));
     if (inputs.length) {
       state.inputsReceived += inputs.length;
-      const lastSeqInBundle = Math.max(...inputs.map((input) => input.seq));
+      let lastSeqInBundle = inputs[0].seq;
+      for (let index = 1; index < inputs.length; index += 1) {
+        lastSeqInBundle = Math.max(lastSeqInBundle, inputs[index].seq);
+      }
       recordInputBundle(state, Date.now(), lastSeqInBundle, inputs.length);
       for (const input of inputs) queueInput(state, input);
     }
