@@ -256,11 +256,10 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
       host.send({ t: 'lobby.stage', stageId });
       await host.waitFor((message) => message.t === 'lobby' && message.stageId === stageId, `host selected unlocked ${stageId}`);
     }
-    host.send({ t: 'lobby.ready', ready: true });
     guest.send({ t: 'lobby.ready', ready: true });
     await host.waitFor(
-      (message) => message.t === 'lobby' && message.players.every((player) => player.ready),
-      'castle party ready',
+      (message) => message.t === 'lobby' && message.players.some((player) => player.playerId !== message.hostId && player.ready),
+      'guest ready while host remains unready',
     );
     host.send({ t: 'lobby.start' });
     const [hostStart, guestStart] = await Promise.all([
@@ -269,6 +268,15 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
     ]);
     assert.equal(hostStart.stageId, 'KB');
     assert.equal(guestStart.stageId, 'KB');
+
+    const solo = await connect(mf, 'FST235', 'SoloHost', null, SIM_HASH, {
+      level: 1, equipment: [], potions: 2, clearedStages: [],
+    });
+    clients.push(solo);
+    await solo.waitFor((message) => message.t === 'welcome', 'solo host welcome');
+    await solo.waitFor((message) => message.t === 'lobby', 'solo host lobby');
+    solo.send({ t: 'lobby.start' });
+    assert.equal((await solo.waitFor((message) => message.t === 'start', 'solo host start')).stageId, 'C1');
   } finally {
     for (const client of clients) client.close();
     await mf.dispose();
@@ -478,6 +486,21 @@ async function run() {
     p2.send({ t: 'leave' });
     const transferred = await p3.waitFor((message) => message.t === 'lobby' && message.hostId === welcome3.playerId, 'host transfer');
     assert.equal(transferred.players.length, 1);
+    for (let attempts = 0; attempts < 20; attempts += 1) {
+      listed = await (await mf.dispatchFetch('http://localhost/coord/rooms?g=devinarok')).json();
+      if (listed.rooms.some((room) => room.roomId === 'devinarok:CDE234' && room.players === 1)) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert(listed.rooms.some((room) => room.roomId === 'devinarok:CDE234' && room.players === 1));
+    const p3Closed = p3.waitForClose();
+    p3.close();
+    await p3Closed;
+    for (let attempts = 0; attempts < 20; attempts += 1) {
+      listed = await (await mf.dispatchFetch('http://localhost/coord/rooms?g=devinarok')).json();
+      if (!listed.rooms.some((room) => room.roomId === 'devinarok:CDE234')) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(listed.rooms.some((room) => room.roomId === 'devinarok:CDE234'), false);
     console.log('✓ version gate, lobby, start, compact snapshots, ping, input ack, cap resync, reconnect, and result');
   } finally {
     for (const client of clients) client.close();

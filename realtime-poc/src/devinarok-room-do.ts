@@ -120,7 +120,7 @@ function normalizeInput(value: any): QueuedInput | null {
     moveX: clamp(Math.trunc(Number(value.mx) || 0), -127, 127),
     moveZ: clamp(Math.trunc(Number(value.mz) || 0), -127, 127),
     aim: clamp(Math.trunc(Number(value.aim) || 0), 0, 255),
-    buttons: clamp(Math.trunc(Number(value.b) || 0), 0, 127),
+    buttons: clamp(Math.trunc(Number(value.b) || 0), 0, 255),
   };
   if (Number.isFinite(value.ad)) input.ad = Math.max(0, Math.round(Number(value.ad) * 10) / 10);
   if (Number.isSafeInteger(value.vt)) input.viewTick = value.vt;
@@ -233,7 +233,7 @@ export class DevinarokRoomDO {
   private sendError(socket: WebSocket, code: string): void {
     this.send(socket, { t: 'error', code });
     closeSocket(socket, 1008, code);
-    void this.readRoom().then((room) => this.reportToCoord(room, 'update')).catch(() => {});
+    void this.readRoom().then((room) => this.reportToCoord(room, 'update', socket)).catch(() => {});
   }
 
   private connectedSockets(playerId?: string, except?: WebSocket): WebSocket[] {
@@ -268,11 +268,11 @@ export class DevinarokRoomDO {
     await this.writeRoom(currentRoom);
   }
 
-  private async reportToCoord(room: RoomRecord, event: string): Promise<void> {
+  private async reportToCoord(room: RoomRecord, event: string, except?: WebSocket): Promise<void> {
     try {
       const coordinator = this.env?.COORD;
       if (!coordinator) return;
-      const connected = new Set(this.connectedSockets().map(socketPlayerId).filter(Boolean));
+      const connected = new Set(this.connectedSockets(undefined, except).map(socketPlayerId).filter(Boolean));
       const host = room.players.find((player) => player.playerId === room.hostId);
       const isPublic = room.public !== false;
       const body = {
@@ -451,7 +451,12 @@ export class DevinarokRoomDO {
       .filter((player) => player.connected && this.connectedSockets(player.playerId).length)
       .sort((a, b) => a.order - b.order);
     const host = room.players.find((player) => player.playerId === room.hostId);
-    if (!connected.length || connected.length !== room.players.length || !host || !connected.every((player) => player.ready)) {
+    if (
+      !connected.length ||
+      connected.length !== room.players.length ||
+      !host ||
+      !connected.filter((player) => player.playerId !== host.playerId).every((player) => player.ready)
+    ) {
       const socket = this.connectedSockets(room.hostId ?? undefined)[0];
       if (socket) this.send(socket, { t: 'error', code: 'not-ready' });
       return;
@@ -572,7 +577,7 @@ export class DevinarokRoomDO {
     await this.writeRoom(room);
     closeSocket(socket);
     await this.broadcastLobby(room, socket);
-    await this.reportToCoord(room, 'update');
+    await this.reportToCoord(room, 'update', socket);
     if (this.world?.outcome) await this.finishRun();
     else if (!room.players.some((entry) => entry.connected)) this.pauseForReconnect();
   }
@@ -657,7 +662,7 @@ export class DevinarokRoomDO {
           if (record.playerId === playerId) record.expiresAt = Date.now() + RECONNECT_MS;
         });
         await this.broadcastLobby(room, socket);
-        await this.reportToCoord(room, 'update');
+        await this.reportToCoord(room, 'update', socket);
         if (!room.players.some((entry) => entry.connected)) this.pauseForReconnect();
       } finally {
         closeSocket(socket);
