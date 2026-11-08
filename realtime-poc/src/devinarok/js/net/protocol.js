@@ -27,6 +27,10 @@ const ENTITY_FIELDS = [
   'family',
   'look',
   'slowTicks',
+  'counterReadyTicks',
+  'counterAttackerId',
+  'perfectPaid',
+  'dodgeStartTick',
 ];
 
 const ENTITY_FIELD_SET = new Set(ENTITY_FIELDS);
@@ -51,6 +55,10 @@ const ENTITY_DEFAULTS = {
   downed: false,
   teleport: false,
   roomChanged: false,
+  counterReadyTicks: 0,
+  counterAttackerId: null,
+  perfectPaid: false,
+  dodgeStartTick: null,
 };
 
 export function roundToHundredth(value) {

@@ -777,7 +777,13 @@ export class DevinarokRoomDO {
           look: entity.look,
         } : {}),
       } : {}),
-      ...(entity.kind === 'player' && entity.playerId === playerId ? { motion: structuredClone(entity) } : {}),
+      ...(entity.kind === 'player' && entity.playerId === playerId ? {
+        motion: structuredClone(entity),
+        counterReadyTicks: entity.counterReadyTicks ?? 0,
+        counterAttackerId: entity.counterAttackerId ?? null,
+        perfectPaid: Boolean(entity.perfectPaid),
+        dodgeStartTick: entity.dodgeStartTick ?? null,
+      } : {}),
       teleport: Boolean(this.teleportPending),
       roomChanged: Boolean(this.teleportPending),
     };
