@@ -125,6 +125,7 @@ export function applyOperations(character, itemMap, operations, characterId) {
         const item = nextItems[operation.uid];
         if (!item || item.characterId !== characterId) throw new Error('Item is not owned by this character');
         if (!SLOTS.has(operation.slot)) throw new TypeError('Invalid equipment slot');
+        if (ITEMS[item.itemId]?.slot !== operation.slot) throw new TypeError('Item does not fit equipment slot');
         if (nextItems[operation.uid].requiredLevel > nextCharacter.level) {
           throw new RangeError('Character level is too low');
         }

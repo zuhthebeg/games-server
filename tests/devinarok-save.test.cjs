@@ -98,6 +98,7 @@ const charactersRoute = bundle('functions/api/devinarok/characters.ts');
 const enhanceRoute = bundle('functions/api/devinarok/enhance.ts');
 const importRoute = bundle('functions/api/devinarok/import.ts');
 const validators = bundle('functions/lib/devinarok/validation.ts');
+const saveOps = bundle('functions/lib/devinarok/js/save/ops.js');
 const shared = bundle('functions/api/devinarok/_shared.ts');
 const itemContent = bundle('functions/lib/devinarok/js/content/items.js');
 const stageContent = bundle('functions/lib/devinarok/js/content/stages.js');
@@ -248,6 +249,14 @@ test('import and settlement share strict affix validation for dropped items', ()
   }
   assert.throws(() => validateSettlement({ ...item, enhance: 1 }), /invalid-item/);
   assert.throws(() => validateSettlement({ ...item, slot: 'weapon' }), /invalid-item/);
+});
+
+test('server save operations reject equipping an item outside its base slot', () => {
+  const character = { id: 'hero', level: 1, equipment: { weapon: null, head: null, body: null, hands: null, feet: null } };
+  const item = { uid: 'sword', characterId: 'hero', itemId: 'rusted-sword', slot: null, requiredLevel: 1 };
+  assert.throws(() => saveOps.applyOperations(character, { sword: item }, [
+    { type: 'equip', uid: 'sword', slot: 'head' },
+  ], 'hero'), TypeError);
 });
 
 test('hub grants only the exact paired family starter-weapon purchase', () => {
