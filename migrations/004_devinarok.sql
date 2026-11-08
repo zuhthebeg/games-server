@@ -13,10 +13,11 @@ CREATE TABLE IF NOT EXISTS devinarok_characters (
 );
 
 CREATE TABLE IF NOT EXISTS devinarok_items (
-    uid TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
+    uid TEXT NOT NULL,
     char_id TEXT NOT NULL,
-    data_json TEXT NOT NULL
+    data_json TEXT NOT NULL,
+    PRIMARY KEY (user_id, uid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_devinarok_items_character

@@ -98,13 +98,41 @@ const charactersRoute = bundle('functions/api/devinarok/characters.ts');
 const enhanceRoute = bundle('functions/api/devinarok/enhance.ts');
 const importRoute = bundle('functions/api/devinarok/import.ts');
 const validators = bundle('functions/lib/devinarok/validation.ts');
+const shared = bundle('functions/api/devinarok/_shared.ts');
 const itemContent = bundle('functions/lib/devinarok/js/content/items.js');
 const stageContent = bundle('functions/lib/devinarok/js/content/stages.js');
+const affixContent = bundle('functions/lib/devinarok/js/content/affixes.js');
+
+test('item UIDs are unique per user', async () => {
+  const env = environment();
+  await shared.ensureTables(env.DB);
+  env.DB.prepare('INSERT INTO devinarok_items (user_id, uid, char_id, data_json) VALUES (?, ?, ?, ?)')
+    .bind('user-1', 'shared-uid', 'char-1', '{}').run();
+  assert.doesNotThrow(() => env.DB.prepare(
+    'INSERT INTO devinarok_items (user_id, uid, char_id, data_json) VALUES (?, ?, ?, ?)',
+  ).bind('user-2', 'shared-uid', 'char-2', '{}').run());
+  assert.throws(() => env.DB.prepare(
+    'INSERT INTO devinarok_items (user_id, uid, char_id, data_json) VALUES (?, ?, ?, ?)',
+  ).bind('user-1', 'shared-uid', 'char-3', '{}').run());
+});
 
 test('settlement caps use the specified XP and gold formulas and reject excess rewards', () => {
   const caps = validators.settlementCaps('C1', 'normal', 1);
-  assert.equal(caps.xpCap, 2 * caps.baseXp * 1 * 2);
-  assert.equal(caps.goldCap, 2 * caps.enemyCount * 5 * caps.effectiveLevel * 1 * 2);
+  const tier = stageContent.DIFFICULTIES.normal;
+  const goldGain = 1 + (5 * (
+    affixContent.AFFIXES.goldGain.max + affixContent.AFFIXES.goldGain.perIlvl * 20
+  )) / 100;
+  const xpGain = 1 + (5 * (
+    affixContent.AFFIXES.xpGain.max + affixContent.AFFIXES.xpGain.perIlvl * 20
+  )) / 100;
+  assert.equal(caps.xpCap, Math.ceil(caps.baseXp * tier.xpMult * xpGain * 1.25));
+  assert.equal(caps.goldCap, Math.ceil(
+    5 * caps.effectiveLevel * tier.goldMult * goldGain * caps.enemyCount * 1.25,
+  ));
+  assert.equal(caps.summonerBudget, 0);
+  assert.equal(caps.bossAddBudget, 40);
+  assert.equal(caps.maxSummonerAddXp, 0);
+  assert.equal(caps.maxBossAddXp, 0);
   assert.equal(caps.itemCap, caps.enemyCount + 2 * caps.bossCount);
   const character = { id: 'c', level: 1, potions: 0, clearedStages: [], rev: 1 };
   assert.throws(() => validators.validateOps({

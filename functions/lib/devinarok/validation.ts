@@ -14,11 +14,31 @@ const HUB_OPS = new Set([
 const SETTLEMENT_OPS = new Set(['gainXp', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions']);
 const VALID_DIFFICULTIES = ['normal', 'nightmare', 'hell'];
 const MAX_ITEMS = 40;
+const SUMMONER_BUDGET = 60;
+const BOSS_ADD_BUDGET = 40;
 const integer = (value, min = 0, max = Number.MAX_SAFE_INTEGER) => (
   Number.isSafeInteger(value) && value >= min && value <= max
 );
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const reject = (message) => { throw new TypeError(message); };
+
+function addXp(enemyIds) {
+  let maxXp = 0;
+  for (const enemyId of enemyIds) {
+    const rule = ENEMIES[enemyId];
+    if (!rule) reject('invalid-stage-content');
+    maxXp = Math.max(maxXp, rule.xp);
+  }
+  return maxXp;
+}
+
+function summonerAddXp(rule) {
+  return addXp([rule.summon?.enemy ?? 'minion']);
+}
+
+function bossAddEnemyIds(rule) {
+  return Object.keys(rule.patterns?.['summon-wave']?.enemies ?? { minion: 1 });
+}
 
 export function settlementCaps(stageId, difficulty, partySize = 1) {
   const stage = STAGES[stageId];
@@ -27,24 +47,57 @@ export function settlementCaps(stageId, difficulty, partySize = 1) {
   let enemyCount = 0;
   let bossCount = 0;
   let baseXp = 0;
+  let summonerBudget = 0;
+  let maxSummonerAddXp = 0;
+  let maxBossAddXp = 0;
   for (const room of stage.rooms) {
     for (const wave of room.waves) {
       const rule = ENEMIES[wave.enemy];
       if (!rule || !integer(wave.count, 1)) reject('invalid-stage-content');
       enemyCount += wave.count;
       baseXp += rule.xp * wave.count;
-      if (rule.behavior === 'boss-patterns') bossCount += wave.count;
+      if (rule.behavior === 'summoner') {
+        summonerBudget += SUMMONER_BUDGET * wave.count;
+        maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(rule));
+      }
+      if (rule.behavior === 'boss-patterns') {
+        bossCount += wave.count;
+        const addEnemyIds = bossAddEnemyIds(rule);
+        maxBossAddXp = Math.max(maxBossAddXp, addXp(addEnemyIds));
+        for (const enemyId of addEnemyIds) {
+          const addRule = ENEMIES[enemyId];
+          if (addRule.behavior === 'summoner') {
+            summonerBudget += SUMMONER_BUDGET * BOSS_ADD_BUDGET * wave.count;
+            maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(addRule));
+          }
+        }
+      }
     }
   }
   const effectiveLevel = effectiveStageLevel(stage, difficulty);
+  const maxGoldGain = 5 * (AFFIXES.goldGain.max + AFFIXES.goldGain.perIlvl * 20);
+  const maxXpGain = 5 * (AFFIXES.xpGain.max + AFFIXES.xpGain.perIlvl * 20);
+  const goldGainMultiplier = 1 + maxGoldGain / 100;
+  const xpGainMultiplier = 1 + maxXpGain / 100;
+  const perEnemyGoldMax = 5 * effectiveLevel * tier.goldMult;
   return {
     enemyCount,
     bossCount,
     baseXp,
     effectiveLevel,
-    xpCap: 2 * baseXp * tier.xpMult * 2,
-    goldCap: 2 * enemyCount * 5 * effectiveLevel * tier.goldMult * 2,
-    itemCap: enemyCount + 2 * bossCount,
+    summonerBudget,
+    maxSummonerAddXp,
+    bossAddBudget: BOSS_ADD_BUDGET,
+    maxBossAddXp,
+    xpCap: Math.ceil((
+      baseXp
+      + 0.25 * maxSummonerAddXp * summonerBudget
+      + maxBossAddXp * BOSS_ADD_BUDGET * bossCount
+    ) * tier.xpMult * xpGainMultiplier * 1.25),
+    goldCap: Math.ceil(perEnemyGoldMax * goldGainMultiplier * (
+      enemyCount + 0.25 * summonerBudget + BOSS_ADD_BUDGET * bossCount
+    ) * 1.25),
+    itemCap: enemyCount + 2 * bossCount + 20 * bossCount,
     roomCount: stage.rooms.length,
   };
 }

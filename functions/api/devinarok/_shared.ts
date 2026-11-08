@@ -23,7 +23,8 @@ export async function ensureTables(DB: D1Database) {
     last_settlement_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, char_id)
   )`).run();
   await DB.prepare(`CREATE TABLE IF NOT EXISTS devinarok_items (
-    uid TEXT PRIMARY KEY, user_id TEXT NOT NULL, char_id TEXT NOT NULL, data_json TEXT NOT NULL
+    user_id TEXT NOT NULL, uid TEXT NOT NULL, char_id TEXT NOT NULL, data_json TEXT NOT NULL,
+    PRIMARY KEY (user_id, uid)
   )`).run();
   await DB.prepare('CREATE INDEX IF NOT EXISTS idx_devinarok_items_character ON devinarok_items(user_id, char_id)').run();
   await DB.prepare(`CREATE TABLE IF NOT EXISTS devinarok_ledger (
