@@ -578,7 +578,7 @@ export class DevinarokRoomDO {
     closeSocket(socket);
     await this.broadcastLobby(room, socket);
     await this.reportToCoord(room, 'update', socket);
-    if (this.world?.outcome) await this.finishRun();
+    if (this.world?.outcome) await this.finishRun(socket);
     else if (!room.players.some((entry) => entry.connected)) this.pauseForReconnect();
   }
 
@@ -913,13 +913,13 @@ export class DevinarokRoomDO {
     this.teleportPending = false;
   }
 
-  private async finishRun(): Promise<void> {
+  private async finishRun(except?: WebSocket): Promise<void> {
     if (!this.world || this.finishingRun) return;
     this.finishingRun = true;
     this.clearLoop();
     this.broadcastSnapshots(true);
     const room = await this.readRoom();
-    for (const socket of this.connectedSockets()) {
+    for (const socket of this.connectedSockets(undefined, except)) {
       const playerId = socketPlayerId(socket);
       const result = playerId ? this.world.results[playerId] : null;
       if (result) this.send(socket, { t: 'result', runId: this.runId, result });
@@ -928,7 +928,7 @@ export class DevinarokRoomDO {
     try { await this.ctx.storage.deleteAlarm(); } catch {}
     await this.ctx.storage.delete('activeRunId');
     await this.writeRoom(room);
-    await this.reportToCoord(room, 'update');
+    await this.reportToCoord(room, 'update', except);
   }
 
   async alarm(): Promise<void> {
