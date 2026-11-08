@@ -114,15 +114,29 @@ function validateItemFields(item, {
     || !Array.isArray(item.affixes ?? [])
   ) reject('invalid-item');
   const affixes = item.affixes ?? [];
-  if (item.legendaryId != null && !LEGENDARIES.some(({ id }) => id === item.legendaryId)) {
-    reject('invalid-legendary');
+  const legendary = item.legendaryId == null
+    ? null
+    : LEGENDARIES.find(({ id }) => id === item.legendaryId);
+  if (item.legendaryId != null && !legendary) reject('invalid-legendary');
+  const uniqueAffixes = affixes.filter((affix) => affix?.unique != null);
+  if (uniqueAffixes.length !== Number(Boolean(legendary))) reject('invalid-legendary');
+  if (legendary) {
+    const uniqueAffix = uniqueAffixes[0];
+    if (
+      uniqueAffix.unique !== legendary.id
+      || uniqueAffix.id !== legendary.stat
+      || uniqueAffix.value !== legendary.value
+    ) reject('invalid-legendary');
   }
-  if (affixes.length > RARITIES[item.rarity].affixes + Number(item.legendaryId != null)) reject('invalid-item');
+  if (affixes.length - uniqueAffixes.length > RARITIES[item.rarity].affixes) reject('invalid-item');
   if (settlement && (item.enhance ?? 0) !== 0) reject('invalid-item');
   if (settlement && Object.hasOwn(item, 'slot') && item.slot !== null) reject('invalid-item');
   if (affixes.some((affix) => {
+    if (item.legendaryId != null && affix?.unique === item.legendaryId) return false;
     const rule = AFFIXES[affix?.id];
-    return !rule || !Number.isFinite(affix.value) || affix.value < rule.min || affix.value > rule.max;
+    const min = rule && Math.round(rule.min + rule.perIlvl * item.ilvl) - 1;
+    const max = rule && Math.round(rule.max + rule.perIlvl * item.ilvl);
+    return !rule || !Number.isFinite(affix.value) || affix.value < min || affix.value > max;
   })) reject('invalid-item');
   if (item.rarity === 'set' && !base.setId) reject('invalid-set-item');
   if (item.setId != null && item.setId !== base.setId) reject('invalid-set-item');

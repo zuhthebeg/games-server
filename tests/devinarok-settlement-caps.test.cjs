@@ -25,7 +25,9 @@ const { ENEMIES } = bundle('functions/lib/devinarok/js/content/enemies.js');
 const { ITEM_BASES } = bundle('functions/lib/devinarok/js/content/items.js');
 const { DIFFICULTIES, STAGE_LIST, STAGES, effectiveStageLevel, stageClearKey } = bundle('functions/lib/devinarok/js/content/stages.js');
 const validators = bundle('functions/lib/devinarok/validation.ts');
-const { BUTTONS, COMBO_TIMELINES, createStageWorld, step } = bundle('realtime-poc/src/devinarok/js/sim/world.js');
+const {
+  BUTTONS, COMBO_TIMELINES, createStageWorld, rollStageItem, step,
+} = bundle('realtime-poc/src/devinarok/js/sim/world.js');
 
 const SUMMONER_BUDGET = 60;
 const BOSS_ADD_BUDGET = 40;
@@ -341,4 +343,86 @@ test('max-affix boss bot settlements pass validateOps for every tier and family'
     }
   }
   console.log(`M5d max-affix boss settlements: ${JSON.stringify(summaries)}`);
+});
+
+test('200 real item rolls at ilvl 1–20 pass import and settlement validation', () => {
+  const stageId = 'KB';
+  const difficulty = 'hell';
+  const clearKey = stageClearKey(stageId, difficulty);
+  const clearedStages = Object.keys(DIFFICULTIES)
+    .flatMap((tier) => STAGE_LIST.map((stage) => stageClearKey(stage.id, tier)))
+    .filter((key) => key !== clearKey);
+  const character = {
+    id: 'rolled-item-validator',
+    name: '검증기사',
+    kind: 'knight',
+    level: 20,
+    xp: 0,
+    gold: 0,
+    potions: 5,
+    rev: 1,
+    debugUsed: false,
+    equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    clearedStages,
+    records: {},
+  };
+  const levels = new Set();
+  const items = [];
+  for (let index = 0; index < 200; index += 1) {
+    const ilvl = index % 20 + 1;
+    const rarity = ilvl >= 15 && ilvl === 15
+      ? 'set'
+      : ['common', 'magic', 'rare', 'legendary'][index % 4];
+    const world = createStageWorld({
+      seed: 8000 + index,
+      stageId,
+      difficulty,
+      playerId: character.id,
+      character: { level: 20 },
+    });
+    const rolled = rollStageItem(world, { stageLevel: ilvl, forcedRarity: rarity });
+    const item = {
+      uid: `rolled-${index}`,
+      characterId: character.id,
+      slot: null,
+      ...rolled,
+    };
+    levels.add(item.ilvl);
+    items.push(item);
+    assert.doesNotThrow(() => validators.validateImport({ character, items: [item] }), `import ${index}: ${JSON.stringify(item)}`);
+    assert.doesNotThrow(() => validators.validateOps({
+      character,
+      items: [],
+      ops: [
+        { type: 'grantItem', ...item },
+        { type: 'clearStage', stageId: clearKey },
+      ],
+      context: { kind: 'settlement', stageId, difficulty, partySize: 1, outcome: 'clear' },
+      lastSettlementAt: 0,
+      now: 100000,
+    }), `settlement ${index}: ${JSON.stringify(item)}`);
+  }
+  assert.deepEqual([...levels].sort((left, right) => left - right), Array.from({ length: 20 }, (_, index) => index + 1));
+  assert.ok(items.some((item) => item.legendaryId), 'includes real legendary rolls');
+  assert.ok(items.some((item) => item.rarity === 'set'), 'includes real set rolls');
+
+  const legendary = items.find((item) => item.legendaryId);
+  const forgedLegendary = {
+    ...legendary,
+    affixes: legendary.affixes.map((affix) => (
+      affix.unique === legendary.legendaryId ? { ...affix, value: affix.value + 1 } : affix
+    )),
+  };
+  assert.throws(() => validators.validateImport({ character, items: [forgedLegendary] }), /invalid-legendary/);
+  assert.throws(() => validators.validateOps({
+    character,
+    items: [],
+    ops: [
+      { type: 'grantItem', ...forgedLegendary },
+      { type: 'clearStage', stageId: clearKey },
+    ],
+    context: { kind: 'settlement', stageId, difficulty, partySize: 1, outcome: 'clear' },
+    lastSettlementAt: 0,
+    now: 100000,
+  }), /invalid-legendary/);
 });
