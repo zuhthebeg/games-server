@@ -295,7 +295,9 @@ export class DevinarokRoomDO {
   private finishingRun = false;
   private debugSockets = new WeakSet<WebSocket>();
   private fixedSeed: number | null = null;
-  private serverColoPromise: Promise<string | null> | null = null;
+  private serverColo: string | null = null;
+  private serverColoRetryAt = 0;
+  private serverColoLookupPromise: Promise<string | null> | null = null;
   private edgeColos = new WeakMap<WebSocket, string | null>();
 
   constructor(ctx: DurableObjectState, env: unknown) {
@@ -327,21 +329,28 @@ export class DevinarokRoomDO {
   }
 
   private getServerColo(): Promise<string | null> {
-    if (!this.serverColoPromise) {
-      this.serverColoPromise = (async () => {
-        try {
-          const response = await fetch('https://www.cloudflare.com/cdn-cgi/trace', {
-            signal: AbortSignal.timeout(1000),
-          });
-          if (!response.ok) return null;
-          const trace = await response.text();
-          return trace.match(/(?:^|\n)colo=([A-Z0-9-]+)/)?.[1] ?? null;
-        } catch {
-          return null;
-        }
-      })();
-    }
-    return this.serverColoPromise;
+    if (this.serverColo) return Promise.resolve(this.serverColo);
+    if (this.serverColoLookupPromise) return this.serverColoLookupPromise;
+    const now = Date.now();
+    if (now < this.serverColoRetryAt) return Promise.resolve(null);
+    this.serverColoRetryAt = now + 60_000;
+    this.serverColoLookupPromise = Promise.resolve().then(async () => {
+      try {
+        const response = await fetch('https://www.cloudflare.com/cdn-cgi/trace', {
+          signal: AbortSignal.timeout(1000),
+        });
+        if (!response.ok) return null;
+        const trace = await response.text();
+        const colo = trace.match(/(?:^|\n)colo=([A-Z0-9-]+)/)?.[1] ?? null;
+        if (colo) this.serverColo = colo;
+        return colo;
+      } catch {
+        return null;
+      } finally {
+        this.serverColoLookupPromise = null;
+      }
+    });
+    return this.serverColoLookupPromise;
   }
 
   private sendError(socket: WebSocket, code: string): void {

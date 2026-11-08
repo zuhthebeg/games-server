@@ -112,6 +112,36 @@ async function testInputPlayoutBuffer() {
   assert.equal(bundleState.pending.size, 90);
   assert.equal(bundleState.pending.has(149_911), true);
   assert.equal(bundleState.pending.has(150_000), true);
+
+  const originalFetch = global.fetch;
+  const originalNow = Date.now;
+  let now = 0;
+  let fetchCalls = 0;
+  try {
+    Date.now = () => now;
+    global.fetch = async () => {
+      fetchCalls += 1;
+      return { ok: false };
+    };
+    const coloRoom = new DevinarokRoomDO({}, {});
+    assert.equal(await coloRoom.getServerColo(), null);
+    assert.equal(await coloRoom.getServerColo(), null);
+    now = 59_999;
+    assert.equal(await coloRoom.getServerColo(), null);
+    assert.equal(fetchCalls, 1);
+    now = 60_000;
+    global.fetch = async () => {
+      fetchCalls += 1;
+      return { ok: true, text: async () => 'colo=PDX\n' };
+    };
+    assert.equal(await coloRoom.getServerColo(), 'PDX');
+    assert.equal(await coloRoom.getServerColo(), 'PDX');
+    assert.equal(fetchCalls, 2);
+  } finally {
+    global.fetch = originalFetch;
+    Date.now = originalNow;
+  }
+
   assert.equal(inputTargetDepth([]), 1);
   assert.equal(inputTargetDepth([10, 20]), 2);
   assert.equal(inputTargetDepth([70, 80]), 4);
