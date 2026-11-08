@@ -1,0 +1,350 @@
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const path = require('node:path');
+const test = require('node:test');
+const esbuild = require(path.join(__dirname, '../node_modules/esbuild'));
+const { DatabaseSync } = require('node:sqlite');
+
+const ROOT = path.join(__dirname, '..');
+const SECRET = 'devinarok-test-secret';
+
+function bundle(file) {
+  const output = esbuild.buildSync({
+    entryPoints: [path.join(ROOT, file)],
+    bundle: true,
+    format: 'cjs',
+    target: 'node22',
+    platform: 'node',
+    write: false,
+    logLevel: 'silent',
+  }).outputFiles[0].text;
+  const loaded = { exports: {} };
+  new Function('module', 'exports', 'require', output)(loaded, loaded.exports, require);
+  return loaded.exports;
+}
+
+class D1Statement {
+  constructor(database, sql) { this.database = database; this.sql = sql; this.values = []; }
+  bind(...values) { this.values = values; return this; }
+  first() { return this.database.prepare(this.sql).get(...this.values) ?? null; }
+  all() { return { results: this.database.prepare(this.sql).all(...this.values) }; }
+  run() {
+    const result = this.database.prepare(this.sql).run(...this.values);
+    return { meta: { changes: Number(result.changes) } };
+  }
+}
+
+class D1Database {
+  constructor() {
+    this.sqlite = new DatabaseSync(':memory:');
+    this.sqlite.exec('CREATE TABLE users (id TEXT PRIMARY KEY, is_anonymous INTEGER NOT NULL DEFAULT 0)');
+    this.sqlite.prepare('INSERT INTO users (id, is_anonymous) VALUES (?, ?)').run('user-1', 0);
+    this.sqlite.prepare('INSERT INTO users (id, is_anonymous) VALUES (?, ?)').run('anonymous-row', 1);
+  }
+  prepare(sql) { return new D1Statement(this.sqlite, sql); }
+  batch(statements) {
+    this.sqlite.exec('BEGIN');
+    try {
+      const results = statements.map((statement) => statement.run());
+      this.sqlite.exec('COMMIT');
+      return results;
+    } catch (error) {
+      this.sqlite.exec('ROLLBACK');
+      throw error;
+    }
+  }
+}
+
+function token(payload) {
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = encode({ alg: 'HS256', typ: 'JWT' });
+  const body = encode({ ...payload, exp: Math.floor(Date.now() / 1000) + 3600 });
+  const signature = crypto.createHmac('sha256', SECRET).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${signature}`;
+}
+
+function request(method, url, body, authorization) {
+  return new Request(`https://relay.test${url}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+function environment() {
+  return { DB: new D1Database(), JWT_SECRET: SECRET };
+}
+
+async function createCharacter(commit, env, auth, id = 'char-1') {
+  const response = await commit({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: id,
+      baseRev: 0,
+      idempotencyKey: `create-${id}`,
+      context: { kind: 'hub' },
+      ops: [{ type: 'createCharacter', name: '기사', kind: 'knight' }],
+    }, auth),
+    env,
+  });
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+  return response.json();
+}
+
+const commits = bundle('functions/api/devinarok/commit.ts');
+const charactersRoute = bundle('functions/api/devinarok/characters.ts');
+const enhanceRoute = bundle('functions/api/devinarok/enhance.ts');
+const importRoute = bundle('functions/api/devinarok/import.ts');
+const validators = bundle('functions/lib/devinarok/validation.ts');
+const itemContent = bundle('functions/lib/devinarok/js/content/items.js');
+const stageContent = bundle('functions/lib/devinarok/js/content/stages.js');
+
+test('settlement caps use the specified XP and gold formulas and reject excess rewards', () => {
+  const caps = validators.settlementCaps('C1', 'normal', 1);
+  assert.equal(caps.xpCap, 2 * caps.baseXp * 1 * 2);
+  assert.equal(caps.goldCap, 2 * caps.enemyCount * 5 * caps.effectiveLevel * 1 * 2);
+  assert.equal(caps.itemCap, caps.enemyCount + 2 * caps.bossCount);
+  const character = { id: 'c', level: 1, potions: 0, clearedStages: [], rev: 1 };
+  assert.throws(() => validators.validateOps({
+    character,
+    ops: [
+      { type: 'gainXp', amount: caps.xpCap + 1 },
+      { type: 'grantGold', amount: 0 },
+      { type: 'setPotions', count: 0 },
+      { type: 'clearStage', stageId: 'C1' },
+    ],
+    context: { kind: 'settlement', stageId: 'C1', difficulty: 'normal', partySize: 1, outcome: 'clear' },
+    now: Date.now(),
+  }), /settlement-cap-exceeded/);
+});
+
+test('settlement rejects excess gold, items, item level, potions, and too-fast records', () => {
+  const stageId = 'C1';
+  const difficulty = 'normal';
+  const caps = validators.settlementCaps(stageId, difficulty, 1);
+  const key = stageContent.stageClearKey(stageId, difficulty);
+  const floor = 150 * caps.roomCount;
+  const character = { id: 'c', level: 1, potions: 0, clearedStages: [] };
+  const baseOps = [
+    { type: 'gainXp', amount: 0 },
+    { type: 'grantGold', amount: 0 },
+    { type: 'setPotions', count: 0 },
+    { type: 'clearStage', stageId: key },
+    { type: 'recordClear', key, ticks: floor },
+  ];
+  const validate = (ops, options = {}) => validators.validateOps({
+    character, ops, context: { kind: 'settlement', stageId, difficulty, partySize: 1, outcome: 'clear' },
+    ...options,
+  });
+  assert.throws(() => validate(baseOps.map((op) => op.type === 'grantGold'
+    ? { ...op, amount: caps.goldCap + 1 } : op)), /settlement-cap-exceeded/);
+
+  const tooManyItems = [
+    ...baseOps,
+    ...Array.from({ length: caps.itemCap + 1 }, (_, index) => ({
+      type: 'grantItem', uid: `loot-${index}`, itemId: 'rusted-sword',
+      rarity: 'common', ilvl: 1, affixes: [],
+    })),
+  ];
+  assert.throws(() => validate(tooManyItems), /settlement-cap-exceeded/);
+
+  const tooHigh = [
+    ...baseOps.slice(0, 3),
+    { type: 'grantItem', uid: 'too-high', itemId: 'rusted-sword', rarity: 'common', ilvl: caps.effectiveLevel + 3, affixes: [] },
+    ...baseOps.slice(3),
+  ];
+  assert.throws(() => validate(tooHigh), /invalid-item/);
+  assert.throws(() => validate(baseOps.map((op) => op.type === 'setPotions'
+    ? { ...op, count: 1 } : op)), /invalid-potions/);
+  assert.throws(() => validate(baseOps.map((op) => op.type === 'recordClear'
+    ? { ...op, ticks: floor - 1 } : op)), /invalid-stage-record/);
+  assert.throws(() => validate(baseOps, { now: 20_000, lastSettlementAt: 10_001 }), /settlement-rate-limit/);
+});
+
+test('hub grants only the exact paired family starter-weapon purchase', () => {
+  const starter = itemContent.FAMILY_STARTER_WEAPONS[0];
+  const valid = [
+    { type: 'spendGold', amount: starter.price },
+    {
+      type: 'grantItem', uid: 'starter', itemId: starter.itemId,
+      rarity: 'common', ilvl: 1, enhance: 0, affixes: [],
+    },
+  ];
+  assert.doesNotThrow(() => validators.validateOps({
+    character: { id: 'c', gold: starter.price }, ops: valid, context: { kind: 'hub' },
+  }));
+  assert.throws(() => validators.validateOps({
+    character: { id: 'c', gold: starter.price },
+    ops: [{ ...valid[1], uid: 'unpaired' }],
+    context: { kind: 'hub' },
+  }), /starter-weapon-purchase-invalid/);
+});
+
+test('settlements cannot bypass progression unlock chains', () => {
+  assert.throws(() => validators.validateOps({
+    character: { id: 'c', level: 1, potions: 0, clearedStages: [] },
+    ops: [
+      { type: 'gainXp', amount: 0 },
+      { type: 'grantGold', amount: 0 },
+      { type: 'setPotions', count: 0 },
+      { type: 'clearStage', stageId: 'KB' },
+    ],
+    context: { kind: 'settlement', stageId: 'KB', difficulty: 'normal', partySize: 1, outcome: 'clear' },
+  }), /stage-locked/);
+});
+
+test('set rarity is accepted only on a non-normal boss settlement with a set base', () => {
+  const stages = stageContent;
+  const normalClears = stages.STAGE_LIST.map((stage) => stages.stageClearKey(stage.id, 'normal'));
+  const nightmareClears = stages.STAGE_LIST
+    .filter((stage) => stage.id !== 'KB')
+    .map((stage) => stages.stageClearKey(stage.id, 'nightmare'));
+  const character = {
+    id: 'c', level: 20, potions: 0, clearedStages: [...normalClears, ...nightmareClears],
+  };
+  const makeOps = (key) => [
+    { type: 'gainXp', amount: 0 },
+    { type: 'grantGold', amount: 0 },
+    { type: 'setPotions', count: 0 },
+    { type: 'grantItem', uid: 'set-item', itemId: 'oath-sword', rarity: 'set', ilvl: 15, affixes: [] },
+    { type: 'clearStage', stageId: key },
+    { type: 'recordClear', key, ticks: 150 * stages.STAGES.KB.rooms.length },
+  ];
+  const nightmareKey = stages.stageClearKey('KB', 'nightmare');
+  assert.doesNotThrow(() => validators.validateOps({
+    character,
+    ops: makeOps(nightmareKey),
+    context: { kind: 'settlement', stageId: 'KB', difficulty: 'nightmare', partySize: 1, outcome: 'clear' },
+  }));
+  assert.throws(() => validators.validateOps({
+    character: { ...character, clearedStages: normalClears },
+    ops: makeOps('KB'),
+    context: { kind: 'settlement', stageId: 'KB', difficulty: 'normal', partySize: 1, outcome: 'clear' },
+  }), /invalid-set-item/);
+});
+
+test('commit is idempotent, revision conflicts return 409, and debug commits mark permanently', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  await createCharacter(commits.onRequestPost, env, auth);
+  const body = {
+    characterId: 'char-1',
+    baseRev: 1,
+    idempotencyKey: 'grant-once',
+    context: { kind: 'debug' },
+    ops: [{ type: 'grantGold', amount: 50 }, { type: 'markDebug' }],
+  };
+  const first = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', body, auth), env,
+  });
+  const second = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', body, auth), env,
+  });
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  const saved = await second.json();
+  assert.equal(saved.character.rev, 2);
+  assert.equal(saved.character.gold, 50);
+  assert.equal(saved.character.debugUsed, true);
+  const stale = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', { ...body, idempotencyKey: 'stale' }, auth), env,
+  });
+  assert.equal(stale.status, 409);
+});
+
+test('anonymous JWT claims and anonymous users rows both receive 403 login-required', async () => {
+  const env = environment();
+  const missing = await charactersRoute.onRequestGet({
+    request: request('GET', '/api/devinarok/characters'), env,
+  });
+  const invalid = await charactersRoute.onRequestGet({
+    request: request('GET', '/api/devinarok/characters', undefined, 'not-a-jwt'), env,
+  });
+  assert.equal(missing.status, 401);
+  assert.equal((await missing.json()).error, 'unauthorized');
+  assert.equal(invalid.status, 401);
+  assert.equal((await invalid.json()).error, 'unauthorized');
+  const claimResponse = await charactersRoute.onRequestGet({
+    request: request('GET', '/api/devinarok/characters', undefined, token({ sub: 'guest', isAnonymous: true })),
+    env,
+  });
+  const rowResponse = await charactersRoute.onRequestGet({
+    request: request('GET', '/api/devinarok/characters', undefined, token({ sub: 'anonymous-row' })),
+    env,
+  });
+  assert.equal(claimResponse.status, 403);
+  assert.equal((await claimResponse.json()).error, 'login-required');
+  assert.equal(rowResponse.status, 403);
+  assert.equal((await rowResponse.json()).error, 'login-required');
+});
+
+test('imports enforce level-XP consistency and the six-character account cap', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  const makeSnapshot = (id) => ({
+    character: {
+      id, name: `기사${id.slice(-1)}`, kind: 'knight', level: 1, xp: 0, gold: 0,
+      potions: 3, rev: 1, debugUsed: false, equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+      clearedStages: [], records: {},
+    },
+    items: [],
+  });
+  for (let index = 0; index < 6; index += 1) {
+    const result = await importRoute.onRequestPost({
+      request: request('POST', '/api/devinarok/import', makeSnapshot(`import-${index}`), auth),
+      env,
+    });
+    assert.equal(result.status, 201);
+  }
+  const overLimit = await importRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/import', makeSnapshot('import-6'), auth),
+    env,
+  });
+  assert.equal(overLimit.status, 409);
+  assert.equal((await overLimit.json()).error, 'character-limit');
+
+  const invalidXp = makeSnapshot('invalid-xp');
+  invalidXp.character.level = 2;
+  invalidXp.character.xp = Math.round(60 * 2 ** 1.6);
+  const invalid = await importRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/import', invalidXp, auth),
+    env,
+  });
+  assert.equal(invalid.status, 422);
+});
+
+test('cloud enhancement uses a server-generated roll and persists cost, revision, and result', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  await createCharacter(commits.onRequestPost, env, auth);
+  const setup = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: 1,
+      idempotencyKey: 'enhance-fixture',
+      context: { kind: 'debug' },
+      ops: [
+        { type: 'grantGold', amount: 200 },
+        { type: 'grantItem', uid: 'enhance-item', itemId: 'rusted-sword', rarity: 'common', ilvl: 1, enhance: 1, affixes: [] },
+        { type: 'markDebug' },
+      ],
+    }, auth),
+    env,
+  });
+  assert.equal(setup.status, 200);
+  const result = await enhanceRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/enhance', {
+      characterId: 'char-1', baseRev: 2, uid: 'enhance-item', roll: 'client-controlled',
+    }, auth),
+    env,
+  });
+  assert.equal(result.status, 200);
+  const saved = await result.json();
+  assert.ok(Number.isSafeInteger(saved.roll) && saved.roll >= 0 && saved.roll < 10000);
+  assert.equal(saved.success, saved.roll < 9500);
+  assert.equal(saved.character.rev, 3);
+  assert.equal(saved.character.gold, 40);
+  assert.equal(saved.items[0].enhance, saved.success ? 2 : 1);
+});
