@@ -12,7 +12,7 @@ import { SIM_HASH } from './devinarok/js/net/sim-version.js';
 
 const ROOM_CODE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
 const TICK_MS = 1000 / 30;
-const SNAPSHOT_INTERVAL = 2;
+const SNAPSHOT_INTERVAL = 1;
 const FULL_INTERVAL = 30;
 const MAX_EVENTS = 256;
 const MAX_PENDING_INPUTS = 90;
@@ -79,6 +79,20 @@ type InputState = {
   snapshotAck: number | null;
   pending: Map<number, QueuedInput>;
   forceFullResync: boolean;
+  starvedTicks: number;
+  emptyBufferStarvedTicks: number;
+  refillWaitStarvedTicks: number;
+  sequenceGapStarvedTicks: number;
+  inputsReceived: number;
+  inputsConsumed: number;
+  buffering: boolean;
+  transitOffsetsMs: number[];
+  inputBundleCounts: number[];
+  inputBundleIntervalsMs: number[];
+  lastInputBundleAt: number | null;
+  jitterSamplesMs: number[];
+  jitterP95Ms: number;
+  targetDepth: number;
 };
 
 type TokenRecord = {
@@ -133,6 +147,20 @@ function inputState(lastAppliedSeq = 0): InputState {
     snapshotAck: null,
     pending: new Map(),
     forceFullResync: false,
+    starvedTicks: 0,
+    emptyBufferStarvedTicks: 0,
+    refillWaitStarvedTicks: 0,
+    sequenceGapStarvedTicks: 0,
+    inputsReceived: 0,
+    inputsConsumed: 0,
+    buffering: false,
+    transitOffsetsMs: [],
+    inputBundleCounts: [],
+    inputBundleIntervalsMs: [],
+    lastInputBundleAt: null,
+    jitterSamplesMs: [],
+    jitterP95Ms: 0,
+    targetDepth: 1,
   };
 }
 
@@ -147,17 +175,73 @@ function queueInput(state: InputState, input: QueuedInput): void {
   }
 }
 
-function consumeInputsForTick(state: InputState): QueuedInput[] {
-  const limit = state.pending.size > 2 ? 2 : 1;
+export function inputTargetDepth(jitterSamplesMs: number[]): number {
+  const sorted = [...jitterSamplesMs].sort((left, right) => left - right);
+  const jitterP95 = sorted.length
+    ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]
+    : 0;
+  return Math.max(1, Math.min(4, Math.ceil(jitterP95 / 33.3) + 1));
+}
+
+export function recordInputBundle(
+  state: InputState,
+  arrivalAt: number,
+  lastSeqInBundle: number,
+  inputCount: number,
+): void {
+  state.transitOffsetsMs.push(arrivalAt - lastSeqInBundle * TICK_MS);
+  state.inputBundleCounts.push(inputCount);
+  if (state.lastInputBundleAt !== null) {
+    state.inputBundleIntervalsMs.push(arrivalAt - state.lastInputBundleAt);
+    if (state.inputBundleIntervalsMs.length > 120) state.inputBundleIntervalsMs.shift();
+  }
+  state.lastInputBundleAt = arrivalAt;
+  if (state.transitOffsetsMs.length > 120) state.transitOffsetsMs.shift();
+  if (state.inputBundleCounts.length > 120) state.inputBundleCounts.shift();
+  const minimumOffset = Math.min(...state.transitOffsetsMs);
+  state.jitterSamplesMs = state.transitOffsetsMs.map((offset) => {
+    const jitter = Math.max(0, offset - minimumOffset);
+    const precisionTolerance = Number.EPSILON *
+      Math.max(1, Math.abs(offset), Math.abs(minimumOffset)) * 4;
+    return jitter <= precisionTolerance ? 0 : jitter;
+  });
+  const sorted = [...state.jitterSamplesMs].sort((left, right) => left - right);
+  state.jitterP95Ms = sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
+  state.targetDepth = inputTargetDepth(state.jitterSamplesMs);
+}
+
+export function consumeInputsForTick(state: InputState): QueuedInput[] {
+  const starve = (reason: 'empty' | 'refill' | 'sequence-gap'): QueuedInput[] => {
+    state.starvedTicks = (state.starvedTicks ?? 0) + 1;
+    if (reason === 'empty') {
+      state.emptyBufferStarvedTicks = (state.emptyBufferStarvedTicks ?? 0) + 1;
+    } else if (reason === 'refill') {
+      state.refillWaitStarvedTicks = (state.refillWaitStarvedTicks ?? 0) + 1;
+    } else {
+      state.sequenceGapStarvedTicks = (state.sequenceGapStarvedTicks ?? 0) + 1;
+    }
+    return [];
+  };
+  const expectedSeq = state.lastAppliedSeq + 1;
+  if (!state.pending.has(expectedSeq)) {
+    state.buffering = true;
+    return starve(state.pending.size ? 'sequence-gap' : 'empty');
+  }
+  if (state.buffering) {
+    if (state.pending.size < state.targetDepth) return starve('refill');
+    state.buffering = false;
+  }
+  const limit = state.pending.size > state.targetDepth + 2 ? 2 : 1;
   const consumed: QueuedInput[] = [];
   while (consumed.length < limit) {
-    const nextSeq = state.lastAppliedSeq + 1;
-    const next = state.pending.get(nextSeq);
+    const sequence = state.lastAppliedSeq + 1;
+    const next = state.pending.get(sequence);
     if (!next) break;
-    state.pending.delete(nextSeq);
-    state.lastAppliedSeq = nextSeq;
+    state.pending.delete(sequence);
+    state.lastAppliedSeq = sequence;
     consumed.push(next);
   }
+  state.inputsConsumed = (state.inputsConsumed ?? 0) + consumed.length;
   return consumed;
 }
 
@@ -201,6 +285,10 @@ export class DevinarokRoomDO {
   private lastDisconnectAt: number | null = null;
   private teleportPending = false;
   private finishingRun = false;
+  private debugMetrics = false;
+  private fixedSeed: number | null = null;
+  private serverColoPromise: Promise<string | null> | null = null;
+  private edgeColos = new WeakMap<WebSocket, string | null>();
 
   constructor(ctx: DurableObjectState, env: unknown) {
     this.ctx = ctx;
@@ -228,6 +316,24 @@ export class DevinarokRoomDO {
       return true;
     } catch {}
     return false;
+  }
+
+  private getServerColo(): Promise<string | null> {
+    if (!this.serverColoPromise) {
+      this.serverColoPromise = (async () => {
+        try {
+          const response = await fetch('https://www.cloudflare.com/cdn-cgi/trace', {
+            signal: AbortSignal.timeout(1000),
+          });
+          if (!response.ok) return null;
+          const trace = await response.text();
+          return trace.match(/(?:^|\n)colo=([A-Z0-9-]+)/)?.[1] ?? null;
+        } catch {
+          return null;
+        }
+      })();
+    }
+    return this.serverColoPromise;
   }
 
   private sendError(socket: WebSocket, code: string): void {
@@ -369,6 +475,8 @@ export class DevinarokRoomDO {
       token: assignedToken,
       roomCode: this.roomCode,
       hostId: room.hostId,
+      serverColo: await this.getServerColo(),
+      edgeColo: this.edgeColos.get(socket) ?? null,
     });
     await this.broadcastLobby(room);
     await this.reportToCoord(room, wasEmpty ? 'create' : 'update');
@@ -468,7 +576,7 @@ export class DevinarokRoomDO {
     }
     if (this.world && !this.world.outcome) return;
 
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0] || 1;
+    const seed = this.fixedSeed ?? (crypto.getRandomValues(new Uint32Array(1))[0] || 1);
     this.runId = crypto.randomUUID();
     this.world = createStageWorld({
       seed,
@@ -543,9 +651,12 @@ export class DevinarokRoomDO {
     }
     if (message.sr === true) state.forceFullResync = true;
     if (!Array.isArray(message.inputs)) return;
-    for (const raw of message.inputs) {
-      const input = normalizeInput(raw);
-      if (input) queueInput(state, input);
+    const inputs = message.inputs.map(normalizeInput).filter((input): input is QueuedInput => Boolean(input));
+    if (inputs.length) {
+      state.inputsReceived += inputs.length;
+      const lastSeqInBundle = Math.max(...inputs.map((input) => input.seq));
+      recordInputBundle(state, Date.now(), lastSeqInBundle, inputs.length);
+      for (const input of inputs) queueInput(state, input);
     }
   }
 
@@ -618,8 +729,7 @@ export class DevinarokRoomDO {
   }
 
   private activeRunTick(): number {
-    if (this.runId === null || !this.world || this.world.outcome) return 0;
-    return this.world.tick;
+    return this.world?.tick ?? 0;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -635,9 +745,18 @@ export class DevinarokRoomDO {
         started: Boolean(this.world && !this.world.outcome),
       });
     }
+    if (url.searchParams.get('debug') === '1') {
+      this.debugMetrics = true;
+      const seed = Number(url.searchParams.get('seed'));
+      this.fixedSeed = Number.isSafeInteger(seed) && seed > 0 && seed <= 0xffffffff ? seed : null;
+    }
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
+    this.edgeColos.set(
+      server,
+      (request as Request & { cf?: { colo?: string } }).cf?.colo ?? null,
+    );
     this.ctx.acceptWebSocket(server);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -710,7 +829,7 @@ export class DevinarokRoomDO {
       void this.finishRun();
       return;
     }
-    if (catchup && this.world.tick % SNAPSHOT_INTERVAL === 0) {
+    if (catchup) {
       this.broadcastSnapshots(this.world.tick % FULL_INTERVAL === 0);
     }
   }
@@ -725,7 +844,8 @@ export class DevinarokRoomDO {
         this.world.entities.find((entity: any) => entity.id === id)?.playerId === playerId
       ))) continue;
       seen.add(playerId);
-      const queuedInputs = consumeInputsForTick(this.ensureInputState(playerId));
+      const inputState = this.ensureInputState(playerId);
+      const queuedInputs = consumeInputsForTick(inputState);
       if (queuedInputs.length) {
         inputs[playerId] = queuedInputs.map((input) => ({
           seq: input.seq,
@@ -850,6 +970,29 @@ export class DevinarokRoomDO {
       tick,
       ack: input.lastAppliedSeq,
       full,
+      ...(this.debugMetrics ? {
+        debug: {
+          starvedTicks: input.starvedTicks,
+          emptyBufferStarvedTicks: input.emptyBufferStarvedTicks,
+          refillWaitStarvedTicks: input.refillWaitStarvedTicks,
+          sequenceGapStarvedTicks: input.sequenceGapStarvedTicks,
+          inputsReceived: input.inputsReceived,
+          inputsConsumed: input.inputsConsumed,
+          inputTargetDepth: input.targetDepth,
+          jitterP95Ms: input.jitterP95Ms,
+          inputBundleInputP95: input.inputBundleCounts.length
+            ? [...input.inputBundleCounts].sort((left, right) => left - right)[
+              Math.ceil(input.inputBundleCounts.length * 0.95) - 1
+            ]
+            : 0,
+          inputBundlesObserved: input.inputBundleCounts.length,
+          inputBundleIntervalP95Ms: input.inputBundleIntervalsMs.length
+            ? [...input.inputBundleIntervalsMs].sort((left, right) => left - right)[
+              Math.ceil(input.inputBundleIntervalsMs.length * 0.95) - 1
+            ]
+            : 0,
+        },
+      } : {}),
     };
     if (full) Object.assign(snapshot, metadata);
     else {
