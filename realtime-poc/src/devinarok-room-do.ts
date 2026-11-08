@@ -668,10 +668,21 @@ export class DevinarokRoomDO {
     }
     if (message.sr === true) state.forceFullResync = true;
     if (!Array.isArray(message.inputs)) return;
+    const truncated = message.inputs.length > MAX_PENDING_INPUTS;
     const inputs = message.inputs
       .slice(-MAX_PENDING_INPUTS)
       .map(normalizeInput)
       .filter((input): input is QueuedInput => Boolean(input));
+    if (truncated) {
+      state.forceFullResync = true;
+      if (inputs.length) {
+        let minSeqOfKept = inputs[0].seq;
+        for (let index = 1; index < inputs.length; index += 1) {
+          minSeqOfKept = Math.min(minSeqOfKept, inputs[index].seq);
+        }
+        state.lastAppliedSeq = Math.max(state.lastAppliedSeq, minSeqOfKept - 1);
+      }
+    }
     if (inputs.length) {
       state.inputsReceived += inputs.length;
       let lastSeqInBundle = inputs[0].seq;

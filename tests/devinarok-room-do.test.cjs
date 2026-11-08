@@ -112,6 +112,19 @@ async function testInputPlayoutBuffer() {
   assert.equal(bundleState.pending.size, 90);
   assert.equal(bundleState.pending.has(149_911), true);
   assert.equal(bundleState.pending.has(150_000), true);
+  const recoveryRoom = Object.create(DevinarokRoomDO.prototype);
+  recoveryRoom.world = { outcome: null, entities: [] };
+  recoveryRoom.inputs = new Map();
+  await recoveryRoom.handleInput('recovery-player', {
+    inputs: Array.from({ length: 91 }, (_, index) => ({ seq: index + 1 })),
+  });
+  const recoveryState = recoveryRoom.inputs.get('recovery-player');
+  assert.equal(recoveryState.lastAppliedSeq, 1);
+  assert.equal(recoveryState.forceFullResync, true);
+  const nextTickInputs = consumeInputsForTick(recoveryState);
+  assert.ok(nextTickInputs.length > 0);
+  assert.equal(nextTickInputs[0].seq, 2);
+  assert.equal(recoveryState.sequenceGapStarvedTicks ?? 0, 0);
 
   const originalFetch = global.fetch;
   const originalNow = Date.now;
