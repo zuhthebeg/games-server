@@ -121,6 +121,35 @@ test('item UIDs are unique per user', async () => {
   ).bind('user-1', 'shared-uid', 'char-3', '{}').run());
 });
 
+test('ledger idempotency keys are scoped by user', async () => {
+  const env = environment();
+  const auth1 = token({ sub: 'user-1' });
+  const auth2 = token({ sub: 'user-2' });
+  await createCharacter(commits.onRequestPost, env, auth1, 'shared-char');
+  await createCharacter(commits.onRequestPost, env, auth2, 'shared-char');
+
+  const commitFor = (auth, amount) => commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'shared-char',
+      baseRev: 1,
+      idempotencyKey: 'shared-key',
+      context: { kind: 'debug' },
+      ops: [{ type: 'grantGold', amount }, { type: 'markDebug' }],
+    }, auth),
+    env,
+  });
+  const first = await commitFor(auth1, 7);
+  const second = await commitFor(auth2, 11);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal((await first.json()).character.gold, 7);
+  assert.equal((await second.json()).character.gold, 11);
+  assert.equal(env.DB.prepare(`SELECT COUNT(*) AS n FROM devinarok_ledger
+    WHERE char_id = ? AND idem_key = ?`).bind('shared-char', 'shared-key').first().n, 2);
+  assert.equal((await (await commitFor(auth1, 99)).json()).character.gold, 7);
+  assert.equal((await (await commitFor(auth2, 99)).json()).character.gold, 11);
+});
+
 test('account deletion removes Devinarok data in child-first order', async () => {
   const env = environment();
   await shared.ensureTables(env.DB);

@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS devinarok_ledger (
     idem_key TEXT,
     ops_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (char_id, idem_key)
+    UNIQUE (user_id, char_id, idem_key)
 );
 
 CREATE INDEX IF NOT EXISTS idx_devinarok_ledger_user_created

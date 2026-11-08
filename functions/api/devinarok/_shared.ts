@@ -30,7 +30,7 @@ export async function ensureTables(DB: D1Database) {
   await DB.prepare(`CREATE TABLE IF NOT EXISTS devinarok_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, char_id TEXT NOT NULL,
     rev INTEGER NOT NULL, idem_key TEXT, ops_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (char_id, idem_key)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (user_id, char_id, idem_key)
   )`).run();
   await DB.prepare('CREATE INDEX IF NOT EXISTS idx_devinarok_ledger_user_created ON devinarok_ledger(user_id, created_at)').run();
 }
