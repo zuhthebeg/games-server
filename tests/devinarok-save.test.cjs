@@ -191,6 +191,65 @@ test('settlement rejects excess gold, items, item level, potions, and too-fast r
   assert.throws(() => validate(baseOps, { now: 20_000, lastSettlementAt: 10_001 }), /settlement-rate-limit/);
 });
 
+test('import and settlement share strict affix validation for dropped items', () => {
+  const stageId = 'C1';
+  const difficulty = 'normal';
+  const key = stageContent.stageClearKey(stageId, difficulty);
+  const item = {
+    uid: 'loot',
+    itemId: 'rusted-sword',
+    rarity: 'common',
+    ilvl: 1,
+    enhance: 0,
+    affixes: [],
+  };
+  const character = { id: 'settlement', level: 1, potions: 0, clearedStages: [] };
+  const validateSettlement = (drop) => validators.validateOps({
+    character,
+    ops: [
+      { type: 'gainXp', amount: 0 },
+      { type: 'grantGold', amount: 0 },
+      { type: 'setPotions', count: 0 },
+      { type: 'grantItem', ...drop },
+      { type: 'clearStage', stageId: key },
+      { type: 'recordClear', key, ticks: 150 * stageContent.STAGES[stageId].rooms.length },
+    ],
+    context: { kind: 'settlement', stageId, difficulty, partySize: 1, outcome: 'clear' },
+  });
+  const importCharacter = {
+    ...character,
+    id: 'imported',
+    name: '기사',
+    kind: 'knight',
+    xp: 0,
+    gold: 0,
+    potions: 3,
+    rev: 1,
+    debugUsed: false,
+    equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    clearedStages: [],
+    records: {},
+  };
+  const validateImport = (candidate) => validators.validateImport({
+    character: importCharacter,
+    items: [candidate],
+  });
+
+  assert.doesNotThrow(() => validateSettlement(item));
+  assert.doesNotThrow(() => validateSettlement({ ...item, slot: null }));
+  for (const invalid of [
+    { affixes: [{ id: 'unknown-stat', value: 1 }] },
+    { affixes: [{ id: 'attackPercent', value: 0 }] },
+    { rarity: 'magic', affixes: [{ id: 'attackPercent', value: 100 }] },
+  ]) {
+    const candidate = { ...item, ...invalid };
+    assert.throws(() => validateSettlement(candidate), /invalid-item/, JSON.stringify(candidate));
+    assert.throws(() => validateImport(candidate), /invalid-item/, JSON.stringify(candidate));
+  }
+  assert.throws(() => validateSettlement({ ...item, enhance: 1 }), /invalid-item/);
+  assert.throws(() => validateSettlement({ ...item, slot: 'weapon' }), /invalid-item/);
+});
+
 test('hub grants only the exact paired family starter-weapon purchase', () => {
   const starter = itemContent.FAMILY_STARTER_WEAPONS[0];
   const valid = [

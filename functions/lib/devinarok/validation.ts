@@ -102,18 +102,38 @@ export function settlementCaps(stageId, difficulty, partySize = 1) {
   };
 }
 
-function validateGrantedItem(operation, {
-  difficulty, bossStage, settlement = false, maxIlvl = 20,
+function validateItemFields(item, {
+  characterId, maxIlvl = 20, settlement = false,
 } = {}) {
-  const base = ITEMS[operation.itemId];
-  if (!base || !integer(operation.ilvl, 1, maxIlvl) || operation.ilvl < base.requiredLevel) reject('invalid-item');
-  if (!integer(operation.enhance ?? 0, 0, 10)) reject('invalid-item');
-  if (!Object.hasOwn(RARITIES, operation.rarity)) reject('invalid-item');
-  if (operation.rarity === 'set' && (
-    !settlement || difficulty === 'normal' || !bossStage || !base.setId
-  )) reject('invalid-set-item');
-  if (operation.legendaryId != null && !LEGENDARIES.some(({ id }) => id === operation.legendaryId)) reject('invalid-legendary');
-  if (operation.setId != null && operation.setId !== base.setId) reject('invalid-set-item');
+  const base = ITEMS[item.itemId];
+  if (
+    !base || (characterId && item.characterId && item.characterId !== characterId)
+    || !integer(item.ilvl, 1, maxIlvl) || item.ilvl < base.requiredLevel
+    || !integer(item.enhance ?? 0, 0, 10)
+    || !Object.hasOwn(RARITIES, item.rarity)
+    || !Array.isArray(item.affixes ?? [])
+  ) reject('invalid-item');
+  const affixes = item.affixes ?? [];
+  if (item.legendaryId != null && !LEGENDARIES.some(({ id }) => id === item.legendaryId)) {
+    reject('invalid-legendary');
+  }
+  if (affixes.length > RARITIES[item.rarity].affixes + Number(item.legendaryId != null)) reject('invalid-item');
+  if (settlement && (item.enhance ?? 0) !== 0) reject('invalid-item');
+  if (settlement && Object.hasOwn(item, 'slot') && item.slot !== null) reject('invalid-item');
+  if (affixes.some((affix) => {
+    const rule = AFFIXES[affix?.id];
+    return !rule || !Number.isFinite(affix.value) || affix.value < rule.min || affix.value > rule.max;
+  })) reject('invalid-item');
+  if (item.rarity === 'set' && !base.setId) reject('invalid-set-item');
+  if (item.setId != null && item.setId !== base.setId) reject('invalid-set-item');
+  return base;
+}
+
+function validateGrantedItem(operation, { difficulty, bossStage, maxIlvl = 20 } = {}) {
+  const base = validateItemFields(operation, { maxIlvl, settlement: true });
+  if (operation.rarity === 'set' && (difficulty === 'normal' || !bossStage || !base.setId)) {
+    reject('invalid-set-item');
+  }
 }
 
 export function validateOps({ character, items = [], ops, context, lastSettlementAt = 0, now = Date.now() }) {
@@ -174,7 +194,6 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
       validateGrantedItem(op, {
         difficulty,
         bossStage: stage.boss,
-        settlement: true,
         maxIlvl: Math.min(20, caps.effectiveLevel + 2),
       });
     } else if (op.type === 'clearStage') {
@@ -200,24 +219,10 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
 
 function validateItem(item, character, seen) {
   if (!object(item) || typeof item.uid !== 'string' || !item.uid || seen.has(item.uid)) reject('invalid-item');
-  const base = ITEMS[item.itemId];
-  if (
-    !base || (item.characterId && item.characterId !== character.id)
-    || !integer(item.ilvl, 1, Math.min(20, character.level + 2))
-    || item.ilvl < base.requiredLevel
-    || !integer(item.enhance ?? 0, 0, 10)
-    || !Object.hasOwn(RARITIES, item.rarity)
-    || !Array.isArray(item.affixes ?? [])
-    || (item.affixes?.length ?? 0) > (RARITIES[item.rarity]?.affixes ?? 0)
-  ) reject('invalid-item');
-  const affixes = item.affixes ?? [];
-  if (affixes.some((affix) => {
-    const rule = AFFIXES[affix?.id];
-    return !rule || !Number.isFinite(affix.value) || affix.value < rule.min
-      || affix.value > rule.max + rule.perIlvl * item.ilvl;
-  })) reject('invalid-item');
-  if (item.legendaryId != null && !LEGENDARIES.some(({ id }) => id === item.legendaryId)) reject('invalid-legendary');
-  if (item.rarity === 'set' && !base.setId) reject('invalid-set-item');
+  const base = validateItemFields(item, {
+    characterId: character.id,
+    maxIlvl: Math.min(20, character.level + 2),
+  });
   seen.add(item.uid);
   return {
     ...item,
