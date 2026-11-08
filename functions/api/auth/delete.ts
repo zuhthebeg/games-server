@@ -44,6 +44,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
         // 테이블별로 따로 지운다. 없는 테이블(런타임 생성 전)은 무시.
         const tables = [
+            'devinarok_items', 'devinarok_ledger', 'devinarok_characters',
             'refresh_tokens', 'user_data', 'user_traits',
             'voicematch_rankings', 'rankings', 'rank_daily',
             'rank_checkin', 'boss_encounters',

@@ -26,10 +26,11 @@ function bundle(file) {
 class D1Statement {
   constructor(database, sql) { this.database = database; this.sql = sql; this.values = []; }
   bind(...values) { this.values = values; return this; }
-  first() { return this.database.prepare(this.sql).get(...this.values) ?? null; }
-  all() { return { results: this.database.prepare(this.sql).all(...this.values) }; }
+  first() { return this.database.sqlite.prepare(this.sql).get(...this.values) ?? null; }
+  all() { return { results: this.database.sqlite.prepare(this.sql).all(...this.values) }; }
   run() {
-    const result = this.database.prepare(this.sql).run(...this.values);
+    this.database.statements.push(this.sql);
+    const result = this.database.sqlite.prepare(this.sql).run(...this.values);
     return { meta: { changes: Number(result.changes) } };
   }
 }
@@ -37,11 +38,13 @@ class D1Statement {
 class D1Database {
   constructor() {
     this.sqlite = new DatabaseSync(':memory:');
-    this.sqlite.exec('CREATE TABLE users (id TEXT PRIMARY KEY, is_anonymous INTEGER NOT NULL DEFAULT 0)');
+    this.sqlite.exec('CREATE TABLE users (id TEXT PRIMARY KEY, is_anonymous INTEGER NOT NULL DEFAULT 0, password_hash TEXT)');
+    this.statements = [];
     this.sqlite.prepare('INSERT INTO users (id, is_anonymous) VALUES (?, ?)').run('user-1', 0);
+    this.sqlite.prepare('INSERT INTO users (id, is_anonymous) VALUES (?, ?)').run('user-2', 0);
     this.sqlite.prepare('INSERT INTO users (id, is_anonymous) VALUES (?, ?)').run('anonymous-row', 1);
   }
-  prepare(sql) { return new D1Statement(this.sqlite, sql); }
+  prepare(sql) { return new D1Statement(this, sql); }
   batch(statements) {
     this.sqlite.exec('BEGIN');
     try {
@@ -95,6 +98,7 @@ async function createCharacter(commit, env, auth, id = 'char-1') {
 
 const commits = bundle('functions/api/devinarok/commit.ts');
 const charactersRoute = bundle('functions/api/devinarok/characters.ts');
+const deleteRoute = bundle('functions/api/auth/delete.ts');
 const enhanceRoute = bundle('functions/api/devinarok/enhance.ts');
 const importRoute = bundle('functions/api/devinarok/import.ts');
 const validators = bundle('functions/lib/devinarok/validation.ts');
@@ -115,6 +119,33 @@ test('item UIDs are unique per user', async () => {
   assert.throws(() => env.DB.prepare(
     'INSERT INTO devinarok_items (user_id, uid, char_id, data_json) VALUES (?, ?, ?, ?)',
   ).bind('user-1', 'shared-uid', 'char-3', '{}').run());
+});
+
+test('account deletion removes Devinarok data in child-first order', async () => {
+  const env = environment();
+  await shared.ensureTables(env.DB);
+  env.DB.prepare(`INSERT INTO devinarok_characters
+    (user_id, char_id, rev, level, xp, gold, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind('user-1', 'char-1', 1, 1, 0, 0, '{}').run();
+  env.DB.prepare('INSERT INTO devinarok_items (user_id, uid, char_id, data_json) VALUES (?, ?, ?, ?)')
+    .bind('user-1', 'item-1', 'char-1', '{}').run();
+  env.DB.prepare('INSERT INTO devinarok_ledger (user_id, char_id, rev, idem_key, ops_json) VALUES (?, ?, ?, ?, ?)')
+    .bind('user-1', 'char-1', 1, 'commit-1', '[]').run();
+  const statementOffset = env.DB.statements.length;
+
+  const response = await deleteRoute.onRequestPost({
+    request: request('POST', '/api/auth/delete', undefined, token({ sub: 'user-1' })),
+    env,
+  });
+
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+  const deletions = env.DB.statements.slice(statementOffset)
+    .filter((sql) => /^DELETE FROM devinarok_/.test(sql))
+    .map((sql) => sql.match(/^DELETE FROM (\w+)/)[1]);
+  assert.deepEqual(deletions, ['devinarok_items', 'devinarok_ledger', 'devinarok_characters']);
+  for (const table of deletions) {
+    assert.equal(env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first().n, 0);
+  }
 });
 
 test('settlement caps use the specified XP and gold formulas and reject excess rewards', () => {
