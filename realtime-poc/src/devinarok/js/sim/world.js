@@ -1863,7 +1863,6 @@ function startPlayerCounter(world, player, input) {
     shape = makeLineShape(player.x, player.z, angle, 3.5, 1.6);
     motionMult = 1.8;
     player.facing = angle;
-    moveEntity(world, player, Math.cos(angle) * 3.5, Math.sin(angle) * 3.5);
     player.iFrames = Math.max(player.iFrames, 4);
   } else if (player.family === 'crossbow') {
     shape = makeLineShape(player.x, player.z, angle, 12, 0.8);
