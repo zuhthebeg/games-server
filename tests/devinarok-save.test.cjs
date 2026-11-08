@@ -410,6 +410,41 @@ test('commit is idempotent, revision conflicts return 409, and debug commits mar
   assert.equal(stale.status, 409);
 });
 
+test('commit returns current state when it loses a concurrent idempotent write race', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  await createCharacter(commits.onRequestPost, env, auth);
+  const originalBatch = env.DB.batch.bind(env.DB);
+  let competingWrite = true;
+  env.DB.batch = (statements) => {
+    if (competingWrite) {
+      competingWrite = false;
+      originalBatch(statements);
+    }
+    return originalBatch(statements);
+  };
+
+  const result = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: 1,
+      idempotencyKey: 'raced-once',
+      context: { kind: 'debug' },
+      ops: [{ type: 'grantGold', amount: 23 }, { type: 'markDebug' }],
+    }, auth),
+    env,
+  });
+
+  assert.equal(result.status, 200);
+  const saved = await result.json();
+  assert.equal(saved.character.rev, 2);
+  assert.equal(saved.character.gold, 23);
+  assert.equal(saved.character.debugUsed, true);
+  assert.equal(env.DB.prepare(`SELECT COUNT(*) AS n FROM devinarok_ledger
+    WHERE user_id = ? AND char_id = ? AND idem_key = ?`)
+    .bind('user-1', 'char-1', 'raced-once').first().n, 1);
+});
+
 test('anonymous JWT claims and anonymous users rows both receive 403 login-required', async () => {
   const env = environment();
   const missing = await charactersRoute.onRequestGet({

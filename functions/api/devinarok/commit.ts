@@ -64,6 +64,14 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
         settlementAt: body.context.kind === 'settlement' ? now : null,
       });
       if (!stored) {
+        const raced = await DB.prepare(`SELECT rev FROM devinarok_ledger
+          WHERE user_id = ? AND char_id = ? AND idem_key = ?`)
+          .bind(userId, body.characterId, body.idempotencyKey).first<{ rev: number }>();
+        if (raced) {
+          const state = await loadCharacter(DB, userId, body.characterId);
+          if (!state) throw new ApiError(404, 'character-not-found');
+          return reply(publicState(state, userId));
+        }
         const latest = await loadCharacter(DB, userId, body.characterId);
         return reply({ error: 'conflict', ...(latest ? publicState(latest, userId) : {}) }, 409);
       }
