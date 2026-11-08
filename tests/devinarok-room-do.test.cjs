@@ -52,6 +52,25 @@ function testNewPlayerStaticFieldsInDelta() {
   assert.equal(firstDelta.family, 'crossbow');
   assert.deepEqual(firstDelta.look, look);
   assert.equal(room.renderEntity(player, 'viewer', false).look, undefined);
+  const localSnapshot = room.renderEntity({
+    ...player,
+    counterReadyTicks: 42,
+    counterAttackerId: 7,
+    perfectPaid: true,
+    dodgeStartTick: 18,
+  }, 'new-player', false);
+  assert.deepEqual([
+    localSnapshot.counterReadyTicks,
+    localSnapshot.counterAttackerId,
+    localSnapshot.perfectPaid,
+    localSnapshot.dodgeStartTick,
+  ], [42, 7, true, 18]);
+  assert.deepEqual([
+    localSnapshot.motion.counterReadyTicks,
+    localSnapshot.motion.counterAttackerId,
+    localSnapshot.motion.perfectPaid,
+    localSnapshot.motion.dodgeStartTick,
+  ], [42, 7, true, 18]);
   assert.equal(room.renderEntity({ id: 43, kind: 'enemy', boss: true, attackPattern: 'bone-spear' }, 'viewer', true).attackPattern, 'bone-spear');
 }
 
@@ -163,7 +182,8 @@ async function testMixedFamilyStageSnapshot() {
     const fields = [
       'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase', 'attackPattern', 'attackShape',
       'attackRemaining', 'skill', 'dodge', 'downed', 'ownerId', 'model', 'maxHp', 'name', 'item',
-      'radius', 'motion', 'characterKind', 'family', 'look', 'slowTicks',
+      'radius', 'motion', 'characterKind', 'family', 'look', 'slowTicks', 'counterReadyTicks',
+      'counterAttackerId', 'perfectPaid', 'dodgeStartTick',
     ];
     const expand = (compact) => {
       const [mask, ...rest] = compact;
@@ -184,6 +204,11 @@ async function testMixedFamilyStageSnapshot() {
       assert.equal(player.look.family, expected.family);
       assert.equal(player.look.weapon, expected.weapon);
     }
+    const ownPlayer = players.find((entry) => entry.family === 'sword');
+    assert.equal(ownPlayer.motion.counterReadyTicks, 0);
+    assert.equal(ownPlayer.motion.counterAttackerId, null);
+    assert.equal(ownPlayer.motion.perfectPaid, false);
+    assert.equal(ownPlayer.motion.dodgeStartTick, null);
   } finally {
     for (const client of clients) client.close();
     await mf.dispose();

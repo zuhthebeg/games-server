@@ -7,6 +7,8 @@ import { STAGES } from '../content/stages.js';
 import { HUB_ARENA } from '../content/stages.js';
 
 export const TICK_HZ = 30;
+export const PERFECT_DODGE_TICKS = 5;
+export const PARTY_PERFECT_DODGE_TICKS = 7;
 export const BUTTONS = {
   ATTACK: 1,
   DODGE: 2,
@@ -29,7 +31,7 @@ const PLAYER_RADIUS = 0.32;
 const PLAYER_MAX_HP = 100;
 const DODGE_DURATION_TICKS = 9;
 const DODGE_IFRAME_TICKS = 8;
-const DODGE_COOLDOWN_TICKS = 36;
+export const DODGE_COOLDOWN_TICKS = 36;
 const PLAYER_RESPAWN_TICKS = 90;
 
 const ENEMY_RULES = {
@@ -447,6 +449,12 @@ export function addPlayer(world, {
     dodgeTicks: 0,
     dodgeVectorX: 0,
     dodgeVectorZ: 0,
+    dodgeStartTick: null,
+    dodgeCooldownRefundTicks: 0,
+    dodgeBufferTicks: 0,
+    perfectPaid: false,
+    counterReadyTicks: 0,
+    counterAttackerId: null,
     iFrames: 0,
     dodgeCooldownTicks: 0,
     hitFlashTicks: 0,
@@ -515,6 +523,12 @@ function comboTimeline(player, step) {
     windupTicks: Math.max(1, Math.round(timeline.windupTicks / speed)),
     recoveryTicks: Math.max(1, Math.round(timeline.recoveryTicks / speed)),
   };
+}
+
+export function isAttackChainWindow(player) {
+  if (!player?.attack || player.attack.phase !== 'recovery') return false;
+  const timeline = comboTimeline(player, player.attack.step);
+  return player.attack.phaseTick >= timeline.recoveryTicks - timeline.chainWindowTicks;
 }
 
 function queueCombo(player, seq) {
@@ -724,13 +738,33 @@ function resolvePendingHits(world, iFramesAtTickStart = new Map()) {
       !player ||
       player.dead ||
       player.downed ||
-      !player.connected ||
-      player.iFrames > 0 ||
-      (iFramesAtTickStart.get(player.id) ?? 0) > 0
+      !player.connected
     ) continue;
+    if (player.iFrames > 0 || (iFramesAtTickStart.get(player.id) ?? 0) > 0) {
+      if (world.mode === 'stage' && enemy.kind === 'enemy') awardPerfectDodge(world, enemy, player);
+      continue;
+    }
     if (world.mode === 'stage') damagePlayerM1(world, enemy, player, hit.shape, hit.motionMult ?? 1, hit.knockback ?? 0);
     else damagePlayer(world, enemy, player, hit.shape, hit.damage ?? Math.round(enemy.attack * (hit.motionMult ?? 1)));
   }
+}
+
+function awardPerfectDodge(world, attacker, player) {
+  if (
+    player.perfectPaid ||
+    player.dodgeStartTick === null ||
+    player.dodgeTicks <= 0 ||
+    world.tick - player.dodgeStartTick >= (world.partySize > 1 ? PARTY_PERFECT_DODGE_TICKS : PERFECT_DODGE_TICKS)
+  ) return;
+  player.perfectPaid = true;
+  player.counterReadyTicks = 60;
+  player.counterAttackerId = attacker.id;
+  player.dodgeCooldownTicks = Math.max(0, player.dodgeCooldownTicks - player.dodgeCooldownRefundTicks);
+  emit(world, 'perfectDodge', {
+    entityId: player.id,
+    playerId: player.playerId,
+    attackerId: attacker.id,
+  });
 }
 
 function clearEnemyAttack(enemy, rules) {
@@ -1301,6 +1335,7 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
   rewind = true,
   maxTargets = Infinity,
   slowTicks = 0,
+  forceCritical = false,
   viewLag = player.viewLag,
   viewTick = player.lastInput?.viewTick,
 } = {}) {
@@ -1336,7 +1371,7 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
     if (hitTargets.includes(enemy.id) || enemy.invulnerable || enemy.spawnTicksLeft > 0) continue;
     if (enemy.dead) continue;
     hitTargets.push(enemy.id);
-    const critical = random(world) * 100 < player.stats.critChance;
+    const critical = forceCritical || random(world) * 100 < player.stats.critChance;
     const rawDamage = calculateDamage(player.stats.attack, motionMult, critical, player.stats.critDamage, enemy.defense ?? 0);
     const sourceX = Number.isFinite(shape.originX) ? shape.originX : player.x;
     const sourceZ = Number.isFinite(shape.originZ) ? shape.originZ : player.z;
@@ -1345,6 +1380,7 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
       && !shieldGuardLowered(world, enemy)
       && Math.abs(angleDifference(incomingAngle, target.facing ?? enemy.facing)) <= Math.PI / 3;
     const damage = guarded ? Math.max(1, Math.round(rawDamage * 0.5)) : rawDamage;
+    if (slowTicks > 0) enemy.slowTicks = Math.max(enemy.slowTicks ?? 0, slowTicks);
     killStageEnemy(
       world,
       player,
@@ -1487,8 +1523,19 @@ function applyPotion(world, player, seq) {
 
 export function stepPlayerMotion(ctx, player, rawInput) {
   const input = normalizeInput(player, rawInput);
-  const pressed = input.buttons & ~player.previousButtons;
+  let pressed = input.buttons & ~player.previousButtons;
   player.previousButtons = input.buttons;
+  const counterRequested = Boolean((pressed & BUTTONS.ATTACK) && player.counterReadyTicks > 0);
+  if (counterRequested) pressed &= ~(BUTTONS.SKILL1 | BUTTONS.SKILL2 | BUTTONS.SKILL3);
+  if (counterRequested && player.skillCast) {
+    const castId = player.skillCast.castId;
+    if (castId && Array.isArray(ctx.pendingImpacts)) {
+      ctx.pendingImpacts = ctx.pendingImpacts.filter((impact) => (
+        impact.ownerEntityId !== player.id || impact.id !== castId
+      ));
+    }
+    player.skillCast = null;
+  }
   player.lastInput = input;
   const viewTick = Number.isSafeInteger(rawInput?.viewTick) ? rawInput.viewTick : undefined;
   player.viewLag = viewTick === undefined
@@ -1498,6 +1545,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   let skillStrike = null;
   const skillStrikes = [];
   let attackStrike = null;
+  let counterStrike = null;
   const pendingImpacts = [];
   const shots = [];
   const blinks = [];
@@ -1538,6 +1586,29 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     player.potions -= 1;
     player.potionCooldownTicks = POTION.cooldownTicks;
     events.push({ type: 'potion', seq: input.seq });
+  }
+
+  let bufferedDodgeCreated = false;
+  if ((pressed & BUTTONS.DODGE) && player.dodgeCooldownTicks === 0) {
+    if (player.skillCast || player.attack?.phase === 'active') {
+      player.dodgeBufferTicks = 6;
+      bufferedDodgeCreated = true;
+    } else {
+      if (player.attack?.phase === 'windup') cancelPlayerAttack(ctx, player);
+      startPlayerDodge(ctx, player, directionX, directionZ, input, events);
+    }
+  } else if (
+    !(pressed & BUTTONS.DODGE) &&
+    player.dodgeBufferTicks > 0 &&
+    !bufferedDodgeCreated
+  ) {
+    if (!player.skillCast && player.attack?.phase !== 'active') {
+      player.dodgeBufferTicks = 0;
+      if (player.dodgeCooldownTicks === 0) {
+        if (player.attack?.phase === 'windup') cancelPlayerAttack(ctx, player);
+        startPlayerDodge(ctx, player, directionX, directionZ, input, events);
+      }
+    } else player.dodgeBufferTicks -= 1;
   }
 
   const moveSpeed = player.stats.moveSpeed / TICK_HZ;
@@ -1653,23 +1724,13 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     }
     if (cast.tick >= cast.ticks) player.skillCast = null;
   } else if (!player.skillCast) {
-    if ((pressed & BUTTONS.DODGE) && player.dodgeCooldownTicks === 0) {
-      player.dodgeVectorX = player.moving ? directionX : Math.cos(player.facing);
-      player.dodgeVectorZ = player.moving ? directionZ : Math.sin(player.facing);
-      player.dodgeTicks = DODGE_DURATION_TICKS;
-      player.iFrames = DODGE_IFRAME_TICKS;
-      const cooldownTicks = Math.round(DODGE_COOLDOWN_TICKS * (1 - player.stats.dodgeCooldownReduction / 100));
-      player.dodgeCooldownTicks = cooldownTicks;
-      events.push({
-        type: 'dodge',
-        cooldownTicks,
-      });
-    }
     if (player.dodgeTicks > 0) moveEntity(ctx, player, player.dodgeVectorX * 8.5 / TICK_HZ, player.dodgeVectorZ * 8.5 / TICK_HZ);
     else moveEntity(ctx, player, directionX * moveSpeed, directionZ * moveSpeed);
   }
 
-  if (pressed & BUTTONS.ATTACK) {
+  if (counterRequested) {
+    counterStrike = startPlayerCounter(ctx, player, input);
+  } else if (pressed & BUTTONS.ATTACK) {
     if (!player.attack) events.push({
       type: 'attack',
       payload: startPlayerAttackMotion(player, 1, input.seq),
@@ -1751,6 +1812,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   player.dodgeCooldownTicks = Math.max(0, player.dodgeCooldownTicks - 1);
   player.hitFlashTicks = Math.max(0, player.hitFlashTicks - 1);
   player.potionCooldownTicks = Math.max(0, player.potionCooldownTicks - 1);
+  player.counterReadyTicks = Math.max(0, player.counterReadyTicks - (counterStrike ? 0 : 1));
   for (const id of [1, 2, 3]) player.skillCooldowns[id] = Math.max(0, player.skillCooldowns[id] - 1);
   let potionHeal = 0;
   if (player.potionTicks > 0) {
@@ -1759,7 +1821,80 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     player.potionHealTicks -= 1;
     player.potionTicks -= 1;
   }
-  return { input, pressed, events, skillStrike, skillStrikes, attackStrike, pendingImpacts, shots, blinks, potionHeal };
+  return { input, pressed, events, skillStrike, skillStrikes, attackStrike, counterStrike, pendingImpacts, shots, blinks, potionHeal };
+}
+
+function startPlayerDodge(ctx, player, directionX, directionZ, input, events) {
+  player.dodgeVectorX = player.moving ? directionX : Math.cos(player.facing);
+  player.dodgeVectorZ = player.moving ? directionZ : Math.sin(player.facing);
+  player.dodgeTicks = DODGE_DURATION_TICKS;
+  player.iFrames = DODGE_IFRAME_TICKS;
+  const cooldownTicks = Math.round(DODGE_COOLDOWN_TICKS * (1 - player.stats.dodgeCooldownReduction / 100));
+  player.dodgeCooldownTicks = cooldownTicks;
+  player.dodgeCooldownRefundTicks = Math.ceil(cooldownTicks / 2);
+  player.dodgeStartTick = ctx.tick;
+  player.perfectPaid = false;
+  player.dodgeBufferTicks = 0;
+  events.push({ type: 'dodge', cooldownTicks, seq: input.seq });
+}
+
+function cancelPlayerAttack(world, player) {
+  const castId = player.attack?.castId;
+  if (castId && Array.isArray(world.pendingImpacts)) {
+    world.pendingImpacts = world.pendingImpacts.filter((impact) => (
+      impact.ownerEntityId !== player.id || impact.id !== castId
+    ));
+  }
+  player.attack = null;
+}
+
+function startPlayerCounter(world, player, input) {
+  const attacker = world.entities.find((entity) => entity.id === player.counterAttackerId && !entity.dead);
+  const dx = attacker ? attacker.x - player.x : 0;
+  const dz = attacker ? attacker.z - player.z : 0;
+  const angle = attacker && Math.hypot(dx, dz) > 0.0001
+    ? Math.atan2(dz, dx)
+    : player.facing;
+  const castId = `${player.playerId}:${input.seq}`;
+  const hitTargets = [];
+  let shape;
+  let motionMult;
+  let slowTicks = 0;
+  if (player.family === 'sword') {
+    shape = makeLineShape(player.x, player.z, angle, 3.5, 1.6);
+    motionMult = 1.8;
+    player.facing = angle;
+    player.iFrames = Math.max(player.iFrames, 4);
+  } else if (player.family === 'crossbow') {
+    shape = makeLineShape(player.x, player.z, angle, 12, 0.8);
+    motionMult = 2.0;
+    player.facing = angle;
+  } else {
+    shape = { type: 'circle', originX: player.x, originZ: player.z, radius: 2.8 };
+    motionMult = 1.6;
+    slowTicks = 45;
+  }
+  player.counterReadyTicks = 0;
+  player.counterAttackerId = null;
+  cancelPlayerAttack(world, player);
+  return {
+    shape,
+    motionMult,
+    castId,
+    hitTargets,
+    skillId: 'counter',
+    slowTicks,
+    viewTick: input.viewTick,
+    payload: {
+      entityId: player.id,
+      playerId: player.playerId,
+      castId,
+      family: player.family,
+      skillId: 'counter',
+      angle,
+      shape: copyShape(shape),
+    },
+  };
 }
 
 function advanceStagePlayer(world, player, rawInput) {
@@ -1781,6 +1916,16 @@ function advanceStagePlayer(world, player, rawInput) {
     for (const strike of skillStrikes) {
       playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
         maxTargets: strike.maxTargets,
+        viewLag: player.viewLag,
+        viewTick: strike.viewTick ?? motion.input.viewTick,
+      });
+    }
+    if (motion.counterStrike) {
+      const strike = motion.counterStrike;
+      emit(world, 'cast', strike.payload);
+      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
+        slowTicks: strike.slowTicks,
+        forceCritical: true,
         viewLag: player.viewLag,
         viewTick: strike.viewTick ?? motion.input.viewTick,
       });
