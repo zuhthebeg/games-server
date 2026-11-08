@@ -48,6 +48,35 @@ export const ITEM_BASES = [
   { id: 'king-plate', name: '해골 왕의 갑옷', slot: 'body', stat: 'maxHp', value: 67, requiredLevel: 13 },
   { id: 'king-gauntlets', name: '해골 왕의 건틀릿', slot: 'hands', stat: 'defense', value: 11, requiredLevel: 13 },
   { id: 'king-greaves', name: '해골 왕의 각반', slot: 'feet', stat: 'maxHp', value: 45, requiredLevel: 13 },
+  { id: 'nightmare-sword', name: '악몽의 장검', slot: 'weapon', family: 'sword', stat: 'attack', value: 45, requiredLevel: 15 },
+  { id: 'nightmare-crossbow', name: '악몽의 석궁', slot: 'weapon', family: 'crossbow', stat: 'attack', value: 45, requiredLevel: 15 },
+  { id: 'nightmare-staff', name: '악몽의 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 45, requiredLevel: 15 },
+  { id: 'nightmare-helm', name: '악몽 투구', slot: 'head', stat: 'maxHp', value: 40, requiredLevel: 15 },
+  { id: 'nightmare-plate', name: '악몽 흉갑', slot: 'body', stat: 'maxHp', value: 79, requiredLevel: 15 },
+  { id: 'nightmare-gauntlets', name: '악몽 건틀릿', slot: 'hands', stat: 'defense', value: 13, requiredLevel: 15 },
+  { id: 'nightmare-greaves', name: '악몽 각반', slot: 'feet', stat: 'maxHp', value: 53, requiredLevel: 15 },
+  { id: 'hell-sword', name: '지옥불 장검', slot: 'weapon', family: 'sword', stat: 'attack', value: 51, requiredLevel: 18 },
+  { id: 'hell-crossbow', name: '지옥불 석궁', slot: 'weapon', family: 'crossbow', stat: 'attack', value: 51, requiredLevel: 18 },
+  { id: 'hell-staff', name: '지옥불 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 51, requiredLevel: 18 },
+  { id: 'hell-helm', name: '지옥불 투구', slot: 'head', stat: 'maxHp', value: 46, requiredLevel: 18 },
+  { id: 'hell-plate', name: '지옥불 흉갑', slot: 'body', stat: 'maxHp', value: 91, requiredLevel: 18 },
+  { id: 'hell-gauntlets', name: '지옥불 건틀릿', slot: 'hands', stat: 'defense', value: 15, requiredLevel: 18 },
+  { id: 'hell-greaves', name: '지옥불 각반', slot: 'feet', stat: 'maxHp', value: 61, requiredLevel: 18 },
+  { id: 'oath-sword', name: '수호기사의 장검', slot: 'weapon', family: 'sword', stat: 'attack', value: 45, requiredLevel: 15, setId: 'guardian-oath' },
+  { id: 'oath-helm', name: '수호기사의 투구', slot: 'head', stat: 'maxHp', value: 40, requiredLevel: 15, setId: 'guardian-oath' },
+  { id: 'oath-plate', name: '수호기사의 흉갑', slot: 'body', stat: 'maxHp', value: 79, requiredLevel: 15, setId: 'guardian-oath' },
+  { id: 'oath-gauntlets', name: '수호기사의 건틀릿', slot: 'hands', stat: 'defense', value: 13, requiredLevel: 15, setId: 'guardian-oath' },
+  { id: 'oath-greaves', name: '수호기사의 각반', slot: 'feet', stat: 'maxHp', value: 53, requiredLevel: 15, setId: 'guardian-oath' },
+  { id: 'shadow-crossbow', name: '그림자 사냥꾼의 석궁', slot: 'weapon', family: 'crossbow', stat: 'attack', value: 45, requiredLevel: 15, setId: 'shadow-hunter' },
+  { id: 'shadow-helm', name: '그림자 사냥꾼의 투구', slot: 'head', stat: 'maxHp', value: 40, requiredLevel: 15, setId: 'shadow-hunter' },
+  { id: 'shadow-plate', name: '그림자 사냥꾼의 흉갑', slot: 'body', stat: 'maxHp', value: 79, requiredLevel: 15, setId: 'shadow-hunter' },
+  { id: 'shadow-gauntlets', name: '그림자 사냥꾼의 건틀릿', slot: 'hands', stat: 'defense', value: 13, requiredLevel: 15, setId: 'shadow-hunter' },
+  { id: 'shadow-greaves', name: '그림자 사냥꾼의 각반', slot: 'feet', stat: 'maxHp', value: 53, requiredLevel: 15, setId: 'shadow-hunter' },
+  { id: 'ember-staff', name: '잿불 현자의 지팡이', slot: 'weapon', family: 'staff', stat: 'attack', value: 45, requiredLevel: 15, setId: 'ember-sage' },
+  { id: 'ember-helm', name: '잿불 현자의 투구', slot: 'head', stat: 'maxHp', value: 40, requiredLevel: 15, setId: 'ember-sage' },
+  { id: 'ember-plate', name: '잿불 현자의 흉갑', slot: 'body', stat: 'maxHp', value: 79, requiredLevel: 15, setId: 'ember-sage' },
+  { id: 'ember-gauntlets', name: '잿불 현자의 건틀릿', slot: 'hands', stat: 'defense', value: 13, requiredLevel: 15, setId: 'ember-sage' },
+  { id: 'ember-greaves', name: '잿불 현자의 각반', slot: 'feet', stat: 'maxHp', value: 53, requiredLevel: 15, setId: 'ember-sage' },
 ];
 
 export const ITEMS = Object.fromEntries(ITEM_BASES.map((item) => [item.id, item]));
@@ -77,13 +106,41 @@ export function equipmentLook(equipment = []) {
   };
 }
 
-const RARITY_IDS = new Set(['common', 'magic', 'rare', 'legendary']);
+const RARITY_IDS = new Set(['common', 'magic', 'rare', 'legendary', 'set']);
 
 export const RARITIES = {
   common: { name: '일반', weight: 60, affixes: 0, color: 0xc7c2bb },
   magic: { name: '마법', weight: 30, affixes: 1, color: 0x6388ff },
   rare: { name: '희귀', weight: 9, affixes: 2, color: 0xf0c64f },
   legendary: { name: '전설', weight: 1, affixes: 3, color: 0xff8b38 },
+  set: { name: '세트', weight: 0, affixes: 2, color: 0x3fd68a },
+};
+
+export const ITEM_SETS = {
+  'guardian-oath': {
+    name: '수호기사의 맹세',
+    family: 'sword',
+    bonuses: [
+      { pieces: 2, description: '최대 체력 +15%' },
+      { pieces: 4, description: '반격 피해 +40% · 반격 준비 3초' },
+    ],
+  },
+  'shadow-hunter': {
+    name: '그림자 사냥꾼',
+    family: 'crossbow',
+    bonuses: [
+      { pieces: 2, description: '공격 속도 +10%' },
+      { pieces: 4, description: '완벽 회피 후 기본 사격 3회 관통' },
+    ],
+  },
+  'ember-sage': {
+    name: '잿불 현자',
+    family: 'staff',
+    bonuses: [
+      { pieces: 2, description: '기술 재사용 대기시간 -15%' },
+      { pieces: 4, description: '완벽 회피 반격 시 2초 화염 장판' },
+    ],
+  },
 };
 
 export const ELITE_RARITIES = [
@@ -96,6 +153,16 @@ export const ELITE_RARITIES = [
 export const BOSS_RARITIES = [
   { rarity: 'rare', weight: 80 },
   { rarity: 'legendary', weight: 20 },
+];
+
+export const BOSS_RARITIES_NIGHTMARE = [
+  { rarity: 'rare', weight: 60 },
+  { rarity: 'legendary', weight: 40 },
+];
+
+export const BOSS_RARITIES_HELL = [
+  { rarity: 'rare', weight: 40 },
+  { rarity: 'legendary', weight: 60 },
 ];
 
 export const LEGENDARIES = [

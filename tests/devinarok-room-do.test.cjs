@@ -230,7 +230,7 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
   try {
     await mf.ready;
     const host = await connect(mf, 'FST234', 'CastleHost', null, SIM_HASH, {
-      level: 14, equipment: [], potions: 2, clearedStages: ['CB', 'FB', 'K1', 'K2', 'K3'],
+      level: 14, equipment: [], potions: 2, clearedStages: ['CB', 'FB', 'K1', 'K2', 'K3', 'KB'],
     });
     clients.push(host);
     await host.waitFor((message) => message.t === 'welcome', 'castle host welcome');
@@ -244,6 +244,12 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
 
     host.send({ t: 'lobby.stage', stageId: 'F2' });
     assert.equal((await host.waitFor((message) => message.t === 'error', 'locked forest stage error')).code, 'stage-locked');
+    host.send({ t: 'lobby.stage', stageId: 'C1', difficulty: 'nightmare' });
+    await host.waitFor((message) => message.t === 'lobby' && message.difficulty === 'nightmare', 'unlocked nightmare tier');
+    host.send({ t: 'lobby.stage', stageId: 'C1', difficulty: 'hell' });
+    assert.equal((await host.waitFor((message) => message.t === 'error', 'locked hell tier')).code, 'stage-locked');
+    host.send({ t: 'lobby.stage', stageId: 'C1', difficulty: 'normal' });
+    await host.waitFor((message) => message.t === 'lobby' && message.difficulty === 'normal', 'normal tier restored');
     host.send({ t: 'lobby.stage', stageId: 'F1' });
     await host.waitFor((message) => message.t === 'lobby' && message.stageId === 'F1', 'host selected unlocked forest stage');
     for (const stageId of ['K1', 'K2', 'K3', 'KB']) {
@@ -300,12 +306,14 @@ async function run() {
     assert.equal(welcome0.hostId, welcome0.playerId);
     assert.equal(lobby0.players.length, 1);
     assert.equal(lobby0.public, true);
+    assert.equal(lobby0.difficulty, 'normal');
     let listed = await (await mf.dispatchFetch('http://localhost/coord/rooms?g=devinarok')).json();
     assert.equal(listed.rooms.length, 1);
     assert.deepEqual(listed.rooms[0].meta, {
       code: 'ABC234',
       hostName: 'Host',
       stageId: 'C1',
+      difficulty: 'normal',
       hostLevel: 1,
       public: true,
     });
@@ -326,6 +334,8 @@ async function run() {
 
     p0.send({ t: 'lobby.stage', stageId: 'C2' });
     assert.equal((await p0.waitFor((message) => message.t === 'error', 'locked stage error')).code, 'stage-locked');
+    p0.send({ t: 'lobby.stage', stageId: 'C1', difficulty: 'nightmare' });
+    assert.equal((await p0.waitFor((message) => message.t === 'error', 'locked nightmare error')).code, 'stage-locked');
     p0.send({ t: 'lobby.stage', stageId: 'C1' });
     p0.send({ t: 'lobby.ready', ready: true });
     p1.send({ t: 'lobby.ready', ready: true });
@@ -343,8 +353,10 @@ async function run() {
     const snap1 = await p1.waitFor((message) => message.t === 'snap' && message.full, 'member full snapshot');
     assert.equal(start0.runId, start1.runId);
     assert.equal(start0.stageId, 'C1');
+    assert.equal(start0.difficulty, 'normal');
     assert.equal(start0.party.length, 2);
     assert.equal(snap0.tick, 0);
+    assert.equal(snap0.difficulty, 'normal');
     assert.equal(snap1.ack, 0);
     assert(Array.isArray(snap0.activeEnemyIds));
     assert.equal((await (await mf.dispatchFetch('http://localhost/coord/match?g=devinarok')).json()).roomId, null);

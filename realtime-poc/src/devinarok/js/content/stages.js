@@ -811,14 +811,66 @@ export const STAGE_LIST = [
   ], { boss: true, region: 3 }),
 ];
 
-export function isStageUnlocked(stageId, clearedStages = []) {
+export const DIFFICULTIES = {
+  normal: {
+    label: '보통',
+    levelOffset: 0,
+    hpMult: 1,
+    atkMult: 1,
+    xpMult: 1,
+    goldMult: 1,
+    clearPrefix: '',
+  },
+  nightmare: {
+    label: '악몽',
+    levelOffset: 4,
+    hpMult: 1,
+    atkMult: 1.5,
+    xpMult: 1.8,
+    goldMult: 1.5,
+    clearPrefix: 'N:',
+  },
+  hell: {
+    label: '지옥',
+    levelOffset: 6,
+    hpMult: 1.2,
+    atkMult: 1.8,
+    xpMult: 2.6,
+    goldMult: 2,
+    clearPrefix: 'H:',
+  },
+};
+
+export function effectiveStageLevel(stage, difficulty = 'normal') {
+  const tier = DIFFICULTIES[difficulty];
+  const stageLevel = typeof stage === 'number' ? stage : stage?.stageLevel;
+  if (!tier || !Number.isFinite(stageLevel)) throw new TypeError('Invalid stage difficulty');
+  return Math.min(20, stageLevel + tier.levelOffset);
+}
+
+export function stageClearKey(stageId, difficulty = 'normal') {
+  const tier = DIFFICULTIES[difficulty];
+  if (!tier) throw new TypeError(`Unknown difficulty: ${difficulty}`);
+  return `${tier.clearPrefix}${stageId}`;
+}
+
+export function isDifficultyUnlocked(difficulty, clearedStages = []) {
+  if (difficulty === 'normal') return true;
+  if (difficulty === 'nightmare') return clearedStages.includes('KB');
+  if (difficulty === 'hell') return clearedStages.includes('N:KB');
+  return false;
+}
+
+export function isStageUnlocked(stageId, clearedStages = [], difficulty = 'normal') {
+  if (!isDifficultyUnlocked(difficulty, clearedStages)) return false;
   const index = STAGE_LIST.findIndex((stage) => stage.id === stageId);
   if (index < 0) return false;
   if (index === 0) return true;
+  const clearKey = (id) => stageClearKey(id, difficulty);
   const stage = STAGE_LIST[index];
-  if (stage.region === 2 && !clearedStages.includes('CB')) return false;
-  if (stage.region === 3 && !clearedStages.includes('FB')) return false;
-  return clearedStages.includes(STAGE_LIST[index - 1].id);
+  if (stage.region === 2 && !clearedStages.includes(clearKey('CB'))) return false;
+  if (stage.region === 3 && !clearedStages.includes(clearKey('FB'))) return false;
+  return clearedStages.includes(clearKey(STAGE_LIST[index - 1].id));
 }
 
 export const STAGES = Object.fromEntries(STAGE_LIST.map((stage) => [stage.id, stage]));

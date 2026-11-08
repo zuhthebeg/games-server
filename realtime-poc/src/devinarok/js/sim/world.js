@@ -1,9 +1,20 @@
 import { ARENA } from './arena.js';
 import { AFFIXES } from '../content/affixes.js';
 import { ENEMIES } from '../content/enemies.js';
-import { equipmentLook, ITEM_BASES, ITEMS, LEGENDARIES, RARITIES, BOSS_RARITIES, ELITE_RARITIES } from '../content/items.js';
+import {
+  equipmentLook,
+  ITEM_BASES,
+  ITEMS,
+  ITEM_SETS,
+  LEGENDARIES,
+  RARITIES,
+  BOSS_RARITIES,
+  BOSS_RARITIES_HELL,
+  BOSS_RARITIES_NIGHTMARE,
+  ELITE_RARITIES,
+} from '../content/items.js';
 import { FAMILY_SKILLS, POTION, SKILLS } from '../content/skills.js';
-import { STAGES } from '../content/stages.js';
+import { DIFFICULTIES, effectiveStageLevel, STAGES } from '../content/stages.js';
 import { HUB_ARENA } from '../content/stages.js';
 
 export const TICK_HZ = 30;
@@ -461,6 +472,7 @@ export function addPlayer(world, {
     moving: false,
     skillCooldowns: { 1: 0, 2: 0, 3: 0 },
     skillCast: null,
+    pierceShotsRemaining: 0,
     guardTicks: 0,
     viewLag: 0,
     potions: world.mode === 'stage' ? Math.max(0, Math.min(POTION.maxCarry, character.potions ?? 0)) : 0,
@@ -757,8 +769,12 @@ function awardPerfectDodge(world, attacker, player) {
     world.tick - player.dodgeStartTick >= (world.partySize > 1 ? PARTY_PERFECT_DODGE_TICKS : PERFECT_DODGE_TICKS)
   ) return;
   player.perfectPaid = true;
-  player.counterReadyTicks = 60;
+  player.counterReadyTicks = player.stats.counterReadyTicks ?? 60;
   player.counterAttackerId = attacker.id;
+  player.pierceShotsRemaining = Math.max(
+    player.pierceShotsRemaining ?? 0,
+    player.stats.pierceShots ?? 0,
+  );
   player.dodgeCooldownTicks = Math.max(0, player.dodgeCooldownTicks - player.dodgeCooldownRefundTicks);
   emit(world, 'perfectDodge', {
     entityId: player.id,
@@ -875,8 +891,15 @@ export function calculatePlayerStats(level = 1, equipment = []) {
   let goldGain = 0;
   let xpGain = 0;
   let spinCooldownSeconds = 0;
+  let counterDamagePct = 0;
+  let counterReadyTicks = 60;
+  let pierceShots = 0;
+  let counterFireField = false;
+  const setCounts = {};
   for (const item of equipment) {
     const base = ITEMS[item.itemId];
+    const setId = item.setId ?? base?.setId;
+    if (setId && ITEM_SETS[setId]) setCounts[setId] = (setCounts[setId] ?? 0) + 1;
     if (base) {
       const bonus = item.enhance ? item.enhance * Math.max(1, Math.round(base.value * 0.08)) : 0;
       const value = base.value + bonus;
@@ -902,6 +925,19 @@ export function calculatePlayerStats(level = 1, equipment = []) {
       if (key === 'spinCooldownSeconds') spinCooldownSeconds += value;
     }
   }
+  const family = equipmentLook(equipment).family;
+  const familySetCount = (setId) => (
+    ITEM_SETS[setId].family === family ? setCounts[setId] ?? 0 : 0
+  );
+  if (familySetCount('guardian-oath') >= 2) maxHp = Math.round(maxHp * 1.15);
+  if (familySetCount('guardian-oath') >= 4) {
+    counterDamagePct = 40;
+    counterReadyTicks = 90;
+  }
+  if (familySetCount('shadow-hunter') >= 2) attackSpeed += 10;
+  if (familySetCount('shadow-hunter') >= 4) pierceShots = 3;
+  if (familySetCount('ember-sage') >= 2) skillCooldownReduction += 15;
+  if (familySetCount('ember-sage') >= 4) counterFireField = true;
   return {
     maxHp: Math.max(1, maxHp),
     attack: Math.max(1, attack),
@@ -916,11 +952,21 @@ export function calculatePlayerStats(level = 1, equipment = []) {
     goldGain,
     xpGain,
     spinCooldownSeconds,
+    counterDamagePct,
+    counterReadyTicks,
+    pierceShots,
+    counterFireField,
+    setCounts,
   };
 }
 
-export function rarityForRoll(value, { elite = false, boss = false } = {}) {
-  const table = boss ? BOSS_RARITIES : elite ? ELITE_RARITIES : Object.entries(RARITIES).map(([rarity, entry]) => ({ rarity, weight: entry.weight }));
+export function rarityForRoll(value, { elite = false, boss = false, difficulty = 'normal' } = {}) {
+  const table = difficulty === 'nightmare'
+    ? boss ? BOSS_RARITIES_NIGHTMARE : ELITE_RARITIES
+    : difficulty === 'hell' && boss
+      ? BOSS_RARITIES_HELL
+      : boss ? BOSS_RARITIES : elite ? ELITE_RARITIES
+        : Object.entries(RARITIES).map(([rarity, entry]) => ({ rarity, weight: entry.weight }));
   let cursor = value * table.reduce((sum, row) => sum + row.weight, 0);
   for (const entry of table) {
     cursor -= entry.weight;
@@ -937,11 +983,29 @@ function rollAffix(world, ilvl) {
   return { id, value };
 }
 
-export function rollStageItem(world, { stageLevel = 1, elite = false, boss = false, forcedRarity = null } = {}) {
-  const rarity = forcedRarity ?? rarityForRoll(random(world), { elite, boss });
+export function rollStageItem(world, options = {}) {
+  const {
+    elite = false,
+    boss = false,
+    forcedRarity = null,
+  } = options;
+  const difficulty = options.difficulty ?? world.difficulty ?? 'normal';
+  const stageLevel = Math.min(20, options.stageLevel ?? world.effectiveLevel ?? world.stageLevel ?? 1);
+  const rarity = forcedRarity ?? rarityForRoll(random(world), { elite, boss, difficulty });
   if (!RARITIES[rarity]) throw new TypeError(`Unknown item rarity: ${rarity}`);
-  const ilvl = stageLevel + (boss ? 2 : 0);
-  const bases = ITEM_BASES.filter((item) => item.requiredLevel <= stageLevel);
+  const playerFamily = world.entities?.find((entity) => entity.kind === 'player')?.family;
+  const setId = options.setId ?? (
+    rarity === 'set'
+      ? Object.entries(ITEM_SETS).find(([, set]) => set.family === playerFamily)?.[0]
+      : null
+  );
+  const ilvl = Math.min(20, stageLevel + (boss ? 2 : 0));
+  const bases = ITEM_BASES.filter((item) => (
+    rarity === 'set'
+      ? item.setId === setId
+      : !item.setId && item.requiredLevel <= stageLevel
+  ));
+  if (!bases.length) throw new TypeError('No eligible item base for this drop');
   const base = bases[Math.floor(random(world) * bases.length)];
   const affixCount = RARITIES[rarity].affixes;
   const affixes = [];
@@ -960,12 +1024,14 @@ export function rollStageItem(world, { stageLevel = 1, elite = false, boss = fal
     enhance: 0,
     affixes,
     legendaryId: legendary?.id ?? null,
+    ...(base.setId ? { setId: base.setId } : {}),
   };
 }
 
 export function createStageWorld({
   seed = 1,
   stageId = 'C1',
+  difficulty = 'normal',
   playerId = 'hero',
   character = {},
   party,
@@ -973,6 +1039,8 @@ export function createStageWorld({
 } = {}) {
   const stage = STAGES[stageId];
   if (!stage) throw new TypeError(`Unknown stage: ${stageId}`);
+  const tier = DIFFICULTIES[difficulty];
+  if (!tier) throw new TypeError(`Unknown difficulty: ${difficulty}`);
   const members = party ?? [{ playerId, character }];
   if (!Array.isArray(members) || members.length < 1 || members.length > 4) {
     throw new RangeError('A stage party must contain one to four players');
@@ -981,6 +1049,8 @@ export function createStageWorld({
   world.mode = 'stage';
   world.stageId = stageId;
   world.stageLevel = stage.stageLevel;
+  world.difficulty = difficulty;
+  world.effectiveLevel = effectiveStageLevel(stage, difficulty);
   world.partySize = members.length;
   world.inputDriven = Boolean(inputDriven || members.length > 1);
   world.roomIndex = 0;
@@ -1022,9 +1092,10 @@ function spawnStageEnemy(world, enemyType, index, elite = false, position = null
   const rule = ENEMIES[enemyType];
   if (!rule) throw new TypeError(`Unknown enemy type: ${enemyType}`);
   const point = position ?? stagePoint(world, index);
-  const scale = 1 + 0.12 * (world.stageLevel - 1);
+  const tier = DIFFICULTIES[world.difficulty ?? 'normal'];
+  const scale = 1 + 0.12 * ((world.effectiveLevel ?? world.stageLevel) - 1);
   const partyScale = 1 + 0.75 * ((world.partySize ?? 1) - 1);
-  const soloMaxHp = Math.max(1, Math.round(rule.hp * scale * (elite ? 2.5 : 1)));
+  const soloMaxHp = Math.max(1, Math.round(rule.hp * scale * tier.hpMult * (elite ? 2.5 : 1)));
   const maxHp = Math.max(1, Math.round(soloMaxHp * partyScale));
   const enemy = {
     id: nextEntityId(world),
@@ -1038,7 +1109,7 @@ function spawnStageEnemy(world, enemyType, index, elite = false, position = null
     radius: rule.radius,
     hp: maxHp,
     maxHp,
-    attack: Math.max(1, Math.round(rule.attack * scale * (elite ? 1.3 : 1))),
+    attack: Math.max(1, Math.round(rule.attack * scale * tier.atkMult * (elite ? 1.3 : 1))),
     speed: rule.speed,
     dead: false,
     deathTicks: 0,
@@ -1219,7 +1290,8 @@ function makeAnnulusShape(x, z, innerRadius, outerRadius) {
 function randomGold(world, stageLevel, player) {
   const rule = { min: 2, max: 5 };
   const amount = (rule.min + Math.floor(random(world) * (rule.max - rule.min + 1))) * stageLevel;
-  return Math.max(1, Math.round(amount * (1 + (player?.stats.goldGain ?? 0) / 100)));
+  const goldMult = DIFFICULTIES[world.difficulty ?? 'normal'].goldMult;
+  return Math.max(1, Math.round(amount * goldMult * (1 + (player?.stats.goldGain ?? 0) / 100)));
 }
 
 function spawnLoot(world, x, z, loot) {
@@ -1254,21 +1326,29 @@ function dropRewards(world, enemy) {
   const rewardScale = enemy.summoned ? 0.25 : 1;
   const guaranteedCount = enemy.boss ? 2 : enemy.elite ? 1 : 0;
   const chance = enemy.elite || enemy.boss ? 1 : rule.dropChance;
+  const difficulty = DIFFICULTIES[world.difficulty ?? 'normal'];
+  const stageLevel = world.effectiveLevel ?? world.stageLevel;
   for (const player of stagePlayers(world)) {
     const reward = world.rewards[player.playerId];
-    const xp = Math.round(rule.xp * rewardScale * (1 + (player.stats.xpGain ?? 0) / 100));
+    const xp = Math.round(rule.xp * rewardScale * difficulty.xpMult * (1 + (player.stats.xpGain ?? 0) / 100));
     reward.xp += xp;
     emit(world, 'xp', { amount: xp, entityId: enemy.id, playerId: player.playerId });
     spawnLoot(world, enemy.x, enemy.z, {
       ownerId: player.playerId,
       lootType: 'gold',
-      gold: Math.max(1, Math.round(randomGold(world, world.stageLevel, player) * rewardScale)),
+      gold: Math.max(1, Math.round(randomGold(world, stageLevel, player) * rewardScale)),
     });
 
     if (enemy.summoned) continue;
     if (guaranteedCount) {
       for (let index = 0; index < guaranteedCount; index += 1) {
-        const item = rollStageItem(world, { stageLevel: world.stageLevel, elite: enemy.elite, boss: enemy.boss });
+        const setId = enemy.boss && world.difficulty !== 'normal'
+          ? Object.entries(ITEM_SETS).find(([, set]) => set.family === player.family)?.[0]
+          : null;
+        const setDrop = Boolean(setId && random(world) < 0.25);
+        const item = rollStageItem(world, setDrop
+          ? { stageLevel, boss: true, forcedRarity: 'set', setId }
+          : { stageLevel, elite: enemy.elite, boss: enemy.boss });
         spawnLoot(world, enemy.x + (index ? 0.3 : -0.3), enemy.z, {
           ownerId: player.playerId,
           lootType: 'item',
@@ -1276,7 +1356,7 @@ function dropRewards(world, enemy) {
         });
       }
     } else if (random(world) < chance) {
-      const item = rollStageItem(world, { stageLevel: world.stageLevel, elite: enemy.elite });
+      const item = rollStageItem(world, { stageLevel, elite: enemy.elite });
       spawnLoot(world, enemy.x + (random(world) - 0.5) * 0.5, enemy.z + (random(world) - 0.5) * 0.5, {
         ownerId: player.playerId,
         lootType: 'item',
@@ -1730,6 +1810,31 @@ export function stepPlayerMotion(ctx, player, rawInput) {
 
   if (counterRequested) {
     counterStrike = startPlayerCounter(ctx, player, input);
+    if (counterStrike && player.stats.counterFireField) {
+      const flame = SKILLS.flame;
+      pendingImpacts.push({
+        id: `${counterStrike.castId}:fire`,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: input.seq,
+        resolveTick: ctx.tick + 1,
+        shape: {
+          type: 'circle',
+          originX: counterStrike.fireFieldPoint.x,
+          originZ: counterStrike.fireFieldPoint.z,
+          radius: flame.radius,
+        },
+        motionMult: flame.motionMult * 0.5,
+        kind: 'burn',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
+        hitEvery: flame.hitEvery,
+        endsTick: ctx.tick + 1 + 2 * TICK_HZ,
+        skillId: flame.id,
+        sourceX: player.x,
+        sourceZ: player.z,
+      });
+    }
   } else if (pressed & BUTTONS.ATTACK) {
     if (!player.attack) events.push({
       type: 'attack',
@@ -1751,17 +1856,20 @@ export function stepPlayerMotion(ctx, player, rawInput) {
           viewTick: input.viewTick,
         };
       } else if (family === 'crossbow') {
+        const piercing = attack.piercing ?? player.pierceShotsRemaining > 0;
         attackStrike = {
           shape: makeLineShape(player.x, player.z, player.facing, timeline.range, timeline.width),
           motionMult: [0.6, 0.6, 0.95][attack.step - 1],
           castId: attack.castId,
           hitTargets: attack.hitTargets,
-          maxTargets: 1,
+          maxTargets: piercing ? Infinity : 1,
           viewTick: input.viewTick,
         };
         if (!attack.fired) {
+          attack.piercing = piercing;
           shots.push({ ownerId: player.playerId, x: player.x, z: player.z, angle: player.facing, length: timeline.range, castSeq: attack.seq });
           attack.fired = true;
+          if (piercing) player.pierceShotsRemaining = Math.max(0, player.pierceShotsRemaining - 1);
         }
       } else if (!attack.fired) {
         const point = aimedPoint(ctx, player, timeline.range, 6, input);
@@ -1860,6 +1968,9 @@ function startPlayerCounter(world, player, input) {
   let shape;
   let motionMult;
   let slowTicks = 0;
+  const fireFieldPoint = attacker
+    ? { x: attacker.x, z: attacker.z }
+    : { x: player.x + Math.cos(angle) * 2.8, z: player.z + Math.sin(angle) * 2.8 };
   if (player.family === 'sword') {
     shape = makeLineShape(player.x, player.z, angle, 3.5, 1.6);
     motionMult = 1.8;
@@ -1879,11 +1990,12 @@ function startPlayerCounter(world, player, input) {
   cancelPlayerAttack(world, player);
   return {
     shape,
-    motionMult,
+    motionMult: motionMult * (1 + (player.stats.counterDamagePct ?? 0) / 100),
     castId,
     hitTargets,
     skillId: 'counter',
     slowTicks,
+    fireFieldPoint,
     viewTick: input.viewTick,
     payload: {
       entityId: player.id,
@@ -2479,6 +2591,8 @@ function settlementResult(world, player, outcome) {
     items: outcome === 'clear' ? reward.items.map((item) => ({ ...item })) : [],
     lostItems: outcome === 'clear' ? [] : reward.items.map((item) => ({ ...item })),
     stageId: world.stageId,
+    difficulty: world.difficulty ?? 'normal',
+    ticks: world.tick,
     potions: player.potions,
   };
 }
