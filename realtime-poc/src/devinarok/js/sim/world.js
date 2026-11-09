@@ -1381,7 +1381,7 @@ function stageActiveEnemies(world) {
   return world.entities.filter((entity) => entity.kind === 'enemy' && !entity.dead && activeIds.has(entity.id));
 }
 
-function attackShapeHit(shape, target, targetRadius = 0) {
+export function attackShapeHit(shape, target, targetRadius = 0) {
   if (!shape) return false;
   if (shape.type === 'sector') return inSector(shape, target, targetRadius);
   if (shape.type === 'circle') return Math.hypot(target.x - shape.originX, target.z - shape.originZ) <= shape.radius + targetRadius;
