@@ -23,6 +23,7 @@ function bundle(file) {
 const { AFFIXES } = bundle('functions/lib/devinarok/js/content/affixes.js');
 const { ENEMIES } = bundle('functions/lib/devinarok/js/content/enemies.js');
 const { ITEM_BASES } = bundle('functions/lib/devinarok/js/content/items.js');
+const { objectiveBonusGold, objectiveExtraSpawns } = bundle('functions/lib/devinarok/js/content/objectives.js');
 const { DIFFICULTIES, STAGE_LIST, STAGES, effectiveStageLevel, stageClearKey } = bundle('functions/lib/devinarok/js/content/stages.js');
 const validators = bundle('functions/lib/devinarok/validation.ts');
 const { SKILLS } = bundle('functions/lib/devinarok/js/content/skills.js');
@@ -52,27 +53,43 @@ function calculateStaticMaximum(stage) {
   let summonerBudget = 0;
   let maxSummonerAddXp = 0;
   let maxBossAddXp = 0;
-  for (const room of stage.rooms) {
-    for (const wave of room.waves) {
-      const rule = ENEMIES[wave.enemy];
-      enemyCount += wave.count;
-      baseXp += rule.xp * wave.count;
-      if (rule.behavior === 'summoner') {
-        summonerBudget += SUMMONER_BUDGET * wave.count;
-        maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(rule));
-      }
-      if (rule.behavior === 'boss-patterns') {
-        bossCount += wave.count;
-        const addEnemyIds = bossAddEnemyIds(rule);
-        maxBossAddXp = Math.max(maxBossAddXp, addXp(addEnemyIds));
-        for (const enemyId of addEnemyIds) {
-          const addRule = ENEMIES[enemyId];
-          if (addRule?.behavior === 'summoner') {
-            summonerBudget += SUMMONER_BUDGET * BOSS_ADD_BUDGET * wave.count;
-            maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(addRule));
-          }
+  let objectiveRoomCount = 0;
+  const enemySpawnCaps = {};
+  const addSpawnCap = (enemy, count) => {
+    enemySpawnCaps[enemy] = (enemySpawnCaps[enemy] ?? 0) + count;
+  };
+  const addEnemyCount = (enemyId, count) => {
+    const rule = ENEMIES[enemyId];
+    enemyCount += count;
+    baseXp += rule.xp * count;
+    addSpawnCap(enemyId, count);
+    if (rule.behavior === 'summoner') {
+      summonerBudget += SUMMONER_BUDGET * count;
+      maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(rule));
+      addSpawnCap(rule.summon?.enemy ?? 'minion', SUMMONER_BUDGET * count);
+    }
+    if (rule.behavior === 'boss-patterns') {
+      bossCount += count;
+      const addEnemyIds = bossAddEnemyIds(rule);
+      maxBossAddXp = Math.max(maxBossAddXp, addXp(addEnemyIds));
+      for (const addEnemyId of addEnemyIds) addSpawnCap(addEnemyId, BOSS_ADD_BUDGET * count);
+      for (const addEnemyId of addEnemyIds) {
+        const addRule = ENEMIES[addEnemyId];
+        if (addRule?.behavior === 'summoner') {
+          summonerBudget += SUMMONER_BUDGET * BOSS_ADD_BUDGET * count;
+          maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(addRule));
+          addSpawnCap(addRule.summon?.enemy ?? 'minion', SUMMONER_BUDGET * BOSS_ADD_BUDGET * count);
         }
       }
+    }
+  };
+  for (const room of stage.rooms) {
+    for (const wave of room.waves) {
+      addEnemyCount(wave.enemy, wave.count);
+    }
+    if (room.objective) {
+      objectiveRoomCount += 1;
+      for (const spawn of objectiveExtraSpawns(room.objective)) addEnemyCount(spawn.enemy, spawn.count);
     }
   }
   return {
@@ -83,6 +100,8 @@ function calculateStaticMaximum(stage) {
     maxSummonerAddXp,
     bossAddBudget: BOSS_ADD_BUDGET,
     maxBossAddXp,
+    objectiveRoomCount,
+    enemySpawnCaps,
   };
 }
 
@@ -244,15 +263,20 @@ test('settlement caps cover every stage and tier including maximum summon reward
       const summonGold = 5 * effectiveLevel * tier.goldMult * goldGain * 0.25 * maximum.summonerBudget;
       const bossAddGold = 5 * effectiveLevel * tier.goldMult * goldGain
         * maximum.bossAddBudget * maximum.bossCount;
+      const objectiveGold = stage.rooms.reduce(
+        (sum, room) => sum + (room.objective ? objectiveBonusGold(stage, difficulty) : 0),
+        0,
+      );
 
       assert.equal(caps.enemyCount, maximum.enemyCount, `${difficulty}:${stage.id} enemy count`);
       assert.equal(caps.summonerBudget, maximum.summonerBudget, `${difficulty}:${stage.id} summoner budget`);
       assert.equal(caps.maxSummonerAddXp, maximum.maxSummonerAddXp, `${difficulty}:${stage.id} summoner XP`);
       assert.equal(caps.bossAddBudget, maximum.bossAddBudget, `${difficulty}:${stage.id} boss-add budget`);
       assert.equal(caps.maxBossAddXp, maximum.maxBossAddXp, `${difficulty}:${stage.id} boss-add XP`);
+      assert.deepEqual(caps.enemySpawnCaps, maximum.enemySpawnCaps, `${difficulty}:${stage.id} spawn caps`);
       assert.equal(caps.xpCap, Math.ceil((staticXp + summonXp + bossAddXp) * 1.25), `${difficulty}:${stage.id} XP formula`);
-      assert.equal(caps.goldCap, Math.ceil((staticGold + summonGold + bossAddGold) * 1.25), `${difficulty}:${stage.id} gold formula`);
-      assert.equal(caps.itemCap, maximum.enemyCount + 2 * maximum.bossCount + 20 * maximum.bossCount);
+      assert.equal(caps.goldCap, Math.ceil((staticGold + summonGold + bossAddGold) * 1.25) + objectiveGold, `${difficulty}:${stage.id} gold formula`);
+      assert.equal(caps.itemCap, maximum.enemyCount + 2 * maximum.bossCount + 20 * maximum.bossCount + maximum.objectiveRoomCount);
       assert.ok(caps.xpCap >= staticXp + summonXp + bossAddXp, `${difficulty}:${stage.id} XP maximum`);
       assert.ok(caps.goldCap >= staticGold + summonGold + bossAddGold, `${difficulty}:${stage.id} gold maximum`);
       assert.deepEqual(
@@ -273,6 +297,66 @@ test('settlement caps cover every stage and tier including maximum summon reward
       })),
     });
     assert.equal(party.roomEnemyIds.length, solo.roomEnemyIds.length, `${stageId} party enemy count`);
+  }
+});
+
+test('maximal honest objective clears fit settlement caps across six stages and three tiers', () => {
+  const clearedStages = Object.keys(DIFFICULTIES).flatMap((difficulty) => (
+    STAGE_LIST.map((stage) => stageClearKey(stage.id, difficulty))
+  ));
+  const itemBase = ITEM_BASES.find((base) => base.requiredLevel === 1 && !base.setId);
+  assert.ok(itemBase, 'a level-one non-set item base is available');
+  for (const stageId of ['C2', 'C3', 'F2', 'F3', 'K2', 'K3']) {
+    const stage = STAGES[stageId];
+    const maximum = calculateStaticMaximum(stage);
+    for (const difficulty of Object.keys(DIFFICULTIES)) {
+      const caps = validators.settlementCaps(stageId, difficulty);
+      const tier = DIFFICULTIES[difficulty];
+      const goldGain = 1 + (5 * (AFFIXES.goldGain.max + AFFIXES.goldGain.perIlvl * 20)) / 100;
+      const xpGain = 1 + (5 * (AFFIXES.xpGain.max + AFFIXES.xpGain.perIlvl * 20)) / 100;
+      const xp = Math.ceil((
+        maximum.baseXp * tier.xpMult * xpGain
+        + 0.25 * maximum.maxSummonerAddXp * maximum.summonerBudget * tier.xpMult * xpGain
+        + maximum.maxBossAddXp * maximum.bossAddBudget * maximum.bossCount * tier.xpMult * xpGain
+      ));
+      const gold = Math.ceil((
+        5 * effectiveStageLevel(stage, difficulty) * tier.goldMult * goldGain
+          * (maximum.enemyCount + 0.25 * maximum.summonerBudget + maximum.bossAddBudget * maximum.bossCount)
+        + stage.rooms.filter((room) => room.objective)
+          .reduce((sum) => sum + objectiveBonusGold(stage, difficulty), 0)
+      ));
+      const stageKey = stageClearKey(stageId, difficulty);
+      const ticks = 150 * stage.rooms.length;
+      const ops = [
+        { type: 'gainXp', amount: xp },
+        { type: 'grantGold', amount: gold },
+        { type: 'setPotions', count: 5 },
+        ...Array.from({ length: caps.itemCap }, (_, index) => ({
+          type: 'grantItem',
+          uid: `objective-${stageId}-${difficulty}-${index}`,
+          itemId: itemBase.id,
+          slot: null,
+          rarity: index === 0 ? 'rare' : 'common',
+          ilvl: 1,
+          enhance: 0,
+          affixes: [],
+        })),
+        { type: 'clearStage', stageId: stageKey },
+        { type: 'recordClear', key: stageKey, ticks },
+      ];
+      assert.ok(ops.length <= 128, `${difficulty}:${stageId} operation limit`);
+      assert.ok(xp <= caps.xpCap, `${difficulty}:${stageId} XP cap`);
+      assert.ok(gold <= caps.goldCap, `${difficulty}:${stageId} gold cap`);
+      assert.equal(caps.itemCap, maximum.enemyCount + 2 * maximum.bossCount + 20 * maximum.bossCount + 1);
+      assert.doesNotThrow(() => validators.validateOps({
+        character: { id: 'objective-cap', level: 20, potions: 5, clearedStages },
+        items: [],
+        ops,
+        context: { kind: 'settlement', stageId, difficulty, partySize: 1, outcome: 'clear', ticks },
+        lastSettlementAt: 0,
+        now: 100000,
+      }), `${difficulty}:${stageId} maximal objective settlement`);
+    }
   }
 });
 

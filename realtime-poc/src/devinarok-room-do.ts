@@ -991,12 +991,27 @@ export class DevinarokRoomDO {
     this.snapshotBaselines.set(playerId, baselines);
     const baseTick = input.snapshotAck;
     const baseline = baseTick === null ? undefined : baselines.get(baseTick);
+    const objective = this.world?.objective;
     const metadata = {
       roomIndex: this.world?.roomIndex ?? 0,
       roomCleared: Boolean(this.world?.roomCleared),
       doorCountdown: this.world?.doorCountdown ?? null,
       stageId: this.world?.stageId ?? null,
       difficulty: this.world?.difficulty ?? 'normal',
+      objective: objective ? {
+        type: objective.type,
+        state: objective.state,
+        roomIndex: objective.roomIndex,
+        ...(objective.progress !== undefined ? { progress: objective.progress } : {}),
+        ...(objective.required !== undefined ? { required: objective.required } : {}),
+        ...(objective.hp !== undefined ? { hp: objective.hp } : {}),
+        ...(objective.maxHp !== undefined ? { maxHp: objective.maxHp } : {}),
+        ...(objective.endsTick !== undefined ? { endsTick: objective.endsTick } : {}),
+        ...(objective.targetId !== undefined ? { targetId: objective.targetId } : {}),
+        ...(objective.x !== undefined ? { x: objective.x } : {}),
+        ...(objective.z !== undefined ? { z: objective.z } : {}),
+        ...(objective.radius !== undefined ? { radius: objective.radius } : {}),
+      } : null,
       openDoors: { ...(this.world?.openDoors ?? {}) },
       activeEnemyIds: [...(this.world?.roomEnemyIds ?? [])],
     };

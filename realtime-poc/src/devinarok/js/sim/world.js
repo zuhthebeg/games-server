@@ -16,12 +16,14 @@ import {
 } from '../content/items.js';
 import { FAMILY_SKILLS, POTION, SKILLS } from '../content/skills.js';
 import { masteryBonus, masteryRank } from '../content/mastery.js';
+import { objectiveBonusGold } from '../content/objectives.js';
 import { DIFFICULTIES, effectiveStageLevel, STAGES } from '../content/stages.js';
 import { HUB_ARENA } from '../content/stages.js';
 
 export const TICK_HZ = 30;
 export const PERFECT_DODGE_TICKS = 5;
 export const PARTY_PERFECT_DODGE_TICKS = 7;
+const WARD_TARGET_ID = -1;
 export const BUTTONS = {
   ATTACK: 1,
   DODGE: 2,
@@ -93,7 +95,16 @@ function copyArena(arena) {
     obstacles: arena.obstacles.map((obstacle) => ({ ...obstacle })),
     props: (arena.props ?? []).map((prop) => ({ ...prop })),
     doors: (arena.doors ?? []).map((door) => ({ ...door })),
-    rooms: (arena.rooms ?? []).map((room) => ({ ...room, waves: room.waves.map((wave) => ({ ...wave })) })),
+    rooms: (arena.rooms ?? []).map((room) => ({
+      ...room,
+      waves: room.waves.map((wave) => ({ ...wave })),
+      ...(room.objective ? {
+        objective: {
+          ...room.objective,
+          ...(room.objective.spawns ? { spawns: room.objective.spawns.map((spawn) => ({ ...spawn })) } : {}),
+        },
+      } : {}),
+    })),
   };
 }
 
@@ -745,6 +756,123 @@ function queueEnemyHit(world, enemy, player, shape, damage = null, motionMult = 
   });
 }
 
+function currentWard(world) {
+  const objective = world.objective;
+  if (objective?.type !== 'defend' || objective.state !== 'active') return null;
+  return {
+    id: WARD_TARGET_ID,
+    x: objective.x,
+    z: objective.z,
+    radius: objective.radius,
+    ward: true,
+  };
+}
+
+function failObjective(world) {
+  const objective = world.objective;
+  if (!objective || objective.state !== 'active') return;
+  objective.state = 'failed';
+  emit(world, 'objectiveFailed', { objectiveType: objective.type, roomIndex: objective.roomIndex });
+}
+
+function completeObjective(world, position = null) {
+  const objective = world.objective;
+  if (!objective || objective.state !== 'active') return;
+  objective.state = 'success';
+  if (objective.type === 'channel') {
+    objective.nextSpawnIndex = objective.pendingSpawns.length;
+  }
+  emit(world, 'objectiveComplete', { objectiveType: objective.type, roomIndex: objective.roomIndex });
+  const x = position?.x ?? objective.x ?? 0;
+  const z = position?.z ?? objective.z ?? world.arena.rooms[objective.roomIndex]?.centerZ ?? 0;
+  const bonusGold = objectiveBonusGold(STAGES[world.stageId], world.difficulty);
+  for (const player of stagePlayers(world)) {
+    spawnLoot(world, x, z, { ownerId: player.playerId, lootType: 'gold', gold: bonusGold });
+    const item = rollStageItem(world, {
+      stageLevel: world.effectiveLevel ?? world.stageLevel,
+      elite: true,
+      forcedRarity: 'rare',
+    });
+    spawnLoot(world, x, z, { ownerId: player.playerId, lootType: 'item', item });
+  }
+}
+
+function damageWard(world, enemy, hit) {
+  const objective = world.objective;
+  const ward = currentWard(world);
+  if (
+    !ward
+    || !enemy?.objectiveTarget
+    || !world.entities.some((entity) => entity.id === enemy.id && !entity.dead)
+    || !attackShapeHit(hit.shape, ward, ward.radius)
+  ) return false;
+  const damage = calculateDamage(enemy.attack, hit.motionMult ?? 1, false, 1, 0);
+  objective.hp = Math.max(0, objective.hp - damage);
+  emit(world, 'objectiveWardHit', {
+    sourceId: enemy.id,
+    targetId: WARD_TARGET_ID,
+    damage,
+    hp: objective.hp,
+    maxHp: objective.maxHp,
+  });
+  if (objective.hp <= 0) failObjective(world);
+  return true;
+}
+
+function advanceObjective(world) {
+  const objective = world.objective;
+  if (!objective || objective.state !== 'active') return;
+  if (objective.type === 'hunt' && world.tick >= objective.endsTick) {
+    const target = world.entities.find((entity) => entity.id === objective.targetId);
+    if (target && !target.dead) {
+      failObjective(world);
+      return;
+    }
+  }
+  while (
+    objective.nextSpawnIndex < (objective.pendingSpawns?.length ?? 0)
+    && world.tick >= objective.pendingSpawns[objective.nextSpawnIndex].tick
+  ) {
+    const spawn = objective.pendingSpawns[objective.nextSpawnIndex];
+    for (let count = 0; count < spawn.count; count += 1) {
+      spawnStageEnemy(
+        world,
+        spawn.enemy,
+        objective.spawnIndex,
+        false,
+        null,
+        null,
+        { objectiveTarget: objective.type === 'defend' },
+      );
+      objective.spawnIndex += 1;
+    }
+    objective.nextSpawnIndex += 1;
+  }
+}
+
+function advanceChannelObjective(world, players) {
+  const objective = world.objective;
+  if (objective?.type !== 'channel' || objective.state !== 'active') return;
+  if (players.some((player) => Math.hypot(player.x - objective.x, player.z - objective.z) <= objective.radius)) {
+    objective.progress += 1;
+    if (objective.progress >= objective.required) completeObjective(world);
+  }
+}
+
+function updateObjectiveProgress(world) {
+  const objective = world.objective;
+  if (!objective || objective.state !== 'active') return;
+  const pendingSpawns = objective.nextSpawnIndex < (objective.pendingSpawns?.length ?? 0);
+  const living = stageActiveEnemies(world);
+  if (objective.type === 'defend') {
+    if (objective.hp <= 0) failObjective(world);
+    else if (!pendingSpawns && !living.length) completeObjective(world);
+  } else if (objective.type === 'channel') {
+    if (objective.progress >= objective.required) completeObjective(world);
+    else if (!pendingSpawns && !living.length) failObjective(world);
+  }
+}
+
 function resolvePendingHits(world, iFramesAtTickStart = new Map()) {
   const due = [];
   world.pendingHits = world.pendingHits.filter((hit) => {
@@ -754,6 +882,10 @@ function resolvePendingHits(world, iFramesAtTickStart = new Map()) {
   });
   for (const hit of due) {
     const enemy = world.entities.find((entity) => entity.id === hit.sourceId);
+    if (hit.targetId === WARD_TARGET_ID) {
+      damageWard(world, enemy, hit);
+      continue;
+    }
     const player = world.entities.find((entity) => entity.id === hit.targetId);
     if (
       !enemy ||
@@ -1067,6 +1199,7 @@ export function createStageWorld({
   world.partySize = members.length;
   world.inputDriven = Boolean(inputDriven || members.length > 1);
   world.roomIndex = 0;
+  world.objective = null;
   world.roomEnemyIds = [];
   world.roomCleared = false;
   world.openDoors = {};
@@ -1101,7 +1234,16 @@ function stagePoint(world, index) {
   return points[index % Math.max(1, points.length)] ?? world.arena.playerSpawn;
 }
 
-function spawnStageEnemy(world, enemyType, index, elite = false, position = null, summonedBy = null) {
+function stageEnemyAttackScale(world, elite = false) {
+  const tier = DIFFICULTIES[world.difficulty ?? 'normal'];
+  const scale = 1 + 0.12 * ((world.effectiveLevel ?? world.stageLevel) - 1);
+  return scale * tier.atkMult * (elite ? 1.3 : 1);
+}
+
+function spawnStageEnemy(world, enemyType, index, elite = false, position = null, summonedBy = null, {
+  objectiveTarget = false,
+  bounty = false,
+} = {}) {
   const rule = ENEMIES[enemyType];
   if (!rule) throw new TypeError(`Unknown enemy type: ${enemyType}`);
   const point = position ?? stagePoint(world, index);
@@ -1122,7 +1264,7 @@ function spawnStageEnemy(world, enemyType, index, elite = false, position = null
     radius: rule.radius,
     hp: maxHp,
     maxHp,
-    attack: Math.max(1, Math.round(rule.attack * scale * tier.atkMult * (elite ? 1.3 : 1))),
+    attack: Math.max(1, Math.round(rule.attack * stageEnemyAttackScale(world, elite))),
     speed: rule.speed,
     dead: false,
     deathTicks: 0,
@@ -1143,6 +1285,8 @@ function spawnStageEnemy(world, enemyType, index, elite = false, position = null
     stunnedTicks: 0,
     slowTicks: 0,
     elite,
+    ...(objectiveTarget ? { objectiveTarget: true } : {}),
+    ...(bounty ? { bounty: true } : {}),
     boss: ['commander', 'ashwarden', 'skeletonking'].includes(enemyType),
     summoned: Boolean(summonedBy),
     ...(summonedBy ? { summonedBy } : {}),
@@ -1180,6 +1324,56 @@ function spawnRoom(world) {
       index += 1;
     }
   }
+  if (!room.objective) return;
+  const startTick = world.tick;
+  const objective = {
+    type: room.objective.type,
+    roomIndex: world.roomIndex,
+    state: 'active',
+    startTick,
+  };
+  if (room.objective.type === 'hunt') {
+    objective.endsTick = startTick + room.objective.timeSec * TICK_HZ;
+    const target = spawnStageEnemy(world, room.objective.target, index, false, null, null, { bounty: true });
+    objective.targetId = target.id;
+  } else if (room.objective.type === 'defend') {
+    const maxHp = Math.round(
+      room.objective.hp
+      * stageEnemyAttackScale(world)
+      * (1 + 0.5 * ((world.partySize ?? 1) - 1)),
+    );
+    Object.assign(objective, {
+      x: 0,
+      z: room.centerZ,
+      radius: 0.8,
+      hp: maxHp,
+      maxHp,
+      pendingSpawns: room.objective.spawns.map((spawn) => ({
+        tick: startTick + spawn.atSec * TICK_HZ,
+        enemy: spawn.enemy,
+        count: spawn.count,
+      })),
+      nextSpawnIndex: 0,
+      spawnIndex: index,
+    });
+  } else if (room.objective.type === 'channel') {
+    Object.assign(objective, {
+      x: 0,
+      z: room.centerZ,
+      radius: room.objective.radius,
+      progress: 0,
+      required: room.objective.channelSec * TICK_HZ,
+      pendingSpawns: room.objective.spawns.map((spawn) => ({
+        tick: startTick + spawn.atSec * TICK_HZ,
+        enemy: spawn.enemy,
+        count: spawn.count,
+      })),
+      nextSpawnIndex: 0,
+      spawnIndex: index,
+    });
+  }
+  world.objective = objective;
+  emit(world, 'objectiveStart', { type: objective.type, roomIndex: objective.roomIndex });
 }
 
 function stageActiveEnemies(world) {
@@ -1424,6 +1618,11 @@ function killStageEnemy(
   enemy.attackPhase = null;
   emit(world, 'death', { entityId: enemy.id, killerId: source.id, castId });
   dropRewards(world, enemy);
+  if (
+    world.objective?.type === 'hunt'
+    && world.objective.targetId === enemy.id
+    && world.tick < world.objective.endsTick
+  ) completeObjective(world, enemy);
   if (enemy.boss) emit(world, 'bossDefeated', { entityId: enemy.id });
 }
 
@@ -2507,7 +2706,10 @@ function activeEnemyAttack(world, enemy, target) {
     const hitPlayers = stagePlayers(world).filter((player) => (
       !player.dead && !player.downed && attackShapeHit(enemy.attackShape, player, player.radius)
     ));
-    if (!hitPlayers.length) return;
+    const wardHit = enemy.objectiveTarget
+      ? damageWard(world, enemy, { shape: enemy.attackShape })
+      : false;
+    if (!hitPlayers.length && !wardHit) return;
     enemy.attackHit = true;
     for (const player of hitPlayers) queueEnemyHit(world, enemy, player, enemy.attackShape);
     return;
@@ -2516,7 +2718,10 @@ function activeEnemyAttack(world, enemy, target) {
     const hitPlayers = stagePlayers(world).filter((player) => (
       !player.dead && !player.downed && attackShapeHit(enemy.attackShape, player, player.radius)
     ));
-    if (!hitPlayers.length) return;
+    const wardHit = enemy.objectiveTarget
+      ? damageWard(world, enemy, { shape: enemy.attackShape })
+      : false;
+    if (!hitPlayers.length && !wardHit) return;
     enemy.attackHit = true;
     for (const player of hitPlayers) queueEnemyHit(world, enemy, player, enemy.attackShape);
     return;
@@ -2559,7 +2764,11 @@ function stepStageEnemy(world, enemy, players) {
     enemy.attackCooldownTicks -= 1;
     if (enemy.enemyKind !== 'shieldbearer') return;
   }
-  const target = nearestPlayer(enemy, players);
+  const ward = enemy.objectiveTarget ? currentWard(world) : null;
+  const nearbyPlayer = ward && players.some((player) => (
+    Math.hypot(player.x - enemy.x, player.z - enemy.z) <= 3
+  ));
+  const target = ward && !nearbyPlayer ? ward : nearestPlayer(enemy, players);
   if (!target) return;
   if (enemy.enemyKind === 'shieldbearer') {
     const targetAngle = Math.atan2(target.z - enemy.z, target.x - enemy.x);
@@ -2762,6 +2971,9 @@ function settlementResult(world, player, outcome) {
     perfectDodges: reward.perfectDodges,
     potionsUsed: reward.potionsUsed,
     skillUses: { ...reward.skillUses },
+    objective: world.objective
+      ? { type: world.objective.type, success: world.objective.state === 'success' }
+      : null,
   };
 }
 
@@ -2842,7 +3054,12 @@ function updateStageProgress(world) {
     return;
   }
   const living = stageActiveEnemies(world);
-  if (!living.length && !world.roomCleared) {
+  const roomObjective = world.arena.rooms[world.roomIndex]?.objective
+    ? world.objective?.roomIndex === world.roomIndex ? world.objective : null
+    : null;
+  const objectiveActive = roomObjective?.state === 'active';
+  const pendingObjectiveSpawns = (roomObjective?.nextSpawnIndex ?? 0) < (roomObjective?.pendingSpawns?.length ?? 0);
+  if (!living.length && (!pendingObjectiveSpawns || !objectiveActive) && !world.roomCleared) {
     world.roomCleared = true;
     const door = world.arena.doors.find((entry) => entry.fromRoom === world.arena.rooms[world.roomIndex]?.id);
     if (door) {
@@ -2904,6 +3121,7 @@ function stageStep(world, inputsByPlayerId) {
   for (const entity of world.entities) {
     if (entity.kind === 'enemy' && entity.dead) entity.deathTicks = Math.max(0, entity.deathTicks - 1);
   }
+  advanceObjective(world);
   const players = activePlayers(world).sort((a, b) => a.id - b.id);
   const iFramesAtTickStart = new Map(players.map((player) => [player.id, player.iFrames]));
   for (const player of players) {
@@ -2911,6 +3129,7 @@ function stageStep(world, inputsByPlayerId) {
       advanceStagePlayer(world, player, inputsByPlayerId[player.playerId]);
     } else if (!world.inputDriven) advanceStagePlayer(world, player, null);
   }
+  advanceChannelObjective(world, players);
   for (const player of players) {
     pickupLoot(world, player);
   }
@@ -2925,6 +3144,7 @@ function stageStep(world, inputsByPlayerId) {
     }
   }
   cleanupEntities(world);
+  updateObjectiveProgress(world);
   updateStageProgress(world);
   recordEnemyHistory(world);
   return world;

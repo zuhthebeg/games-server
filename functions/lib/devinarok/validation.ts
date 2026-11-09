@@ -5,6 +5,10 @@ import {
   FAMILY_STARTER_WEAPONS, ITEMS, LEGENDARIES, RARITIES,
 } from './js/content/items.js';
 import { MASTERY_MAX_XP, MASTERY_MIN_COOLDOWN_TICKS } from './js/content/mastery.js';
+import {
+  objectiveBonusGold as calculateObjectiveBonusGold,
+  objectiveExtraSpawns,
+} from './js/content/objectives.js';
 import { SKILLS } from './js/content/skills.js';
 import {
   DIFFICULTIES, effectiveStageLevel, isStageUnlocked, stageClearKey, STAGE_LIST, STAGES,
@@ -99,38 +103,50 @@ export function settlementCaps(stageId, difficulty, partySize = 1) {
   let summonerBudget = 0;
   let maxSummonerAddXp = 0;
   let maxBossAddXp = 0;
+  let objectiveBonusGold = 0;
+  let objectiveRoomCount = 0;
   const enemySpawnCaps = {};
   const addSpawnCap = (enemyId, count) => {
     enemySpawnCaps[enemyId] = (enemySpawnCaps[enemyId] ?? 0) + count;
   };
+  const addEnemyCount = (enemyId, count) => {
+    const rule = ENEMIES[enemyId];
+    if (!rule || !integer(count, 1)) reject('invalid-stage-content');
+    enemyCount += count;
+    baseXp += rule.xp * count;
+    addSpawnCap(enemyId, count);
+    if (rule.behavior === 'summoner') {
+      summonerBudget += SUMMONER_BUDGET * count;
+      maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(rule));
+      addSpawnCap(rule.summon?.enemy ?? 'minion', SUMMONER_BUDGET * count);
+    }
+    if (rule.behavior === 'boss-patterns') {
+      bossCount += count;
+      const addEnemyIds = bossAddEnemyIds(rule);
+      maxBossAddXp = Math.max(maxBossAddXp, addXp(addEnemyIds));
+      for (const addEnemyId of addEnemyIds) addSpawnCap(addEnemyId, BOSS_ADD_BUDGET * count);
+      for (const addEnemyId of addEnemyIds) {
+        const addRule = ENEMIES[addEnemyId];
+        if (addRule.behavior === 'summoner') {
+          summonerBudget += SUMMONER_BUDGET * BOSS_ADD_BUDGET * count;
+          maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(addRule));
+          addSpawnCap(
+            addRule.summon?.enemy ?? 'minion',
+            SUMMONER_BUDGET * BOSS_ADD_BUDGET * count,
+          );
+        }
+      }
+    }
+  };
   for (const room of stage.rooms) {
     for (const wave of room.waves) {
-      const rule = ENEMIES[wave.enemy];
-      if (!rule || !integer(wave.count, 1)) reject('invalid-stage-content');
-      enemyCount += wave.count;
-      baseXp += rule.xp * wave.count;
-      addSpawnCap(wave.enemy, wave.count);
-      if (rule.behavior === 'summoner') {
-        summonerBudget += SUMMONER_BUDGET * wave.count;
-        maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(rule));
-        addSpawnCap(rule.summon?.enemy ?? 'minion', SUMMONER_BUDGET * wave.count);
-      }
-      if (rule.behavior === 'boss-patterns') {
-        bossCount += wave.count;
-        const addEnemyIds = bossAddEnemyIds(rule);
-        maxBossAddXp = Math.max(maxBossAddXp, addXp(addEnemyIds));
-        for (const enemyId of addEnemyIds) addSpawnCap(enemyId, BOSS_ADD_BUDGET * wave.count);
-        for (const enemyId of addEnemyIds) {
-          const addRule = ENEMIES[enemyId];
-          if (addRule.behavior === 'summoner') {
-            summonerBudget += SUMMONER_BUDGET * BOSS_ADD_BUDGET * wave.count;
-            maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(addRule));
-            addSpawnCap(
-              addRule.summon?.enemy ?? 'minion',
-              SUMMONER_BUDGET * BOSS_ADD_BUDGET * wave.count,
-            );
-          }
-        }
+      addEnemyCount(wave.enemy, wave.count);
+    }
+    if (room.objective) {
+      objectiveRoomCount += 1;
+      objectiveBonusGold += calculateObjectiveBonusGold(stage, difficulty);
+      for (const spawn of objectiveExtraSpawns(room.objective)) {
+        addEnemyCount(spawn.enemy, spawn.count);
       }
     }
   }
@@ -155,10 +171,12 @@ export function settlementCaps(stageId, difficulty, partySize = 1) {
       + 0.25 * maxSummonerAddXp * summonerBudget
       + maxBossAddXp * BOSS_ADD_BUDGET * bossCount
     ) * tier.xpMult * xpGainMultiplier * 1.25),
-    goldCap: Math.ceil(perEnemyGoldMax * goldGainMultiplier * (
-      enemyCount + 0.25 * summonerBudget + BOSS_ADD_BUDGET * bossCount
-    ) * 1.25),
-    itemCap: enemyCount + 2 * bossCount + 20 * bossCount,
+    goldCap: Math.ceil(
+      perEnemyGoldMax * goldGainMultiplier * (
+        enemyCount + 0.25 * summonerBudget + BOSS_ADD_BUDGET * bossCount
+      ) * 1.25,
+    ) + objectiveBonusGold,
+    itemCap: enemyCount + 2 * bossCount + 20 * bossCount + objectiveRoomCount,
     roomCount: stage.rooms.length,
   };
 }
