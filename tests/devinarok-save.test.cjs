@@ -543,6 +543,8 @@ test('contract progress is bounded and claims require generated contracts on a c
 
   const claim = contracts[0];
   const progressed = saveOps.applyOperations(character, {}, [{
+    type: 'contractDay', dateKey,
+  }, {
     type: 'contractProgress', dateKey, contractId: claim.id, amount: claim.target,
   }], character.id).character;
   assert.doesNotThrow(() => validators.validateOps({
@@ -599,6 +601,38 @@ test('materials are bounded on import and stored character reads', async () => {
   });
   assert.equal(invalidState.status, 422);
   assert.equal((await invalidState.json()).error, 'invalid-materials');
+});
+
+test('contract basis rejects cleared stages absent from the character', () => {
+  const now = Date.now() + 20_000;
+  const dateKey = contractContent.kstDateKey(now);
+  const character = {
+    id: 'invalid-contract-basis', name: '기사', kind: 'knight', level: 1, xp: 0, gold: 0,
+    potions: 3, rev: 1, debugUsed: false, equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    records: {}, clearedStages: [], materials: { essence: 0, soul: 0 },
+    contracts: { dateKey, progress: {}, claimed: [], basis: { clearedStages: ['C1'], level: 1 } },
+  };
+  assert.throws(() => validators.validateImport({ character, items: [] }), /invalid-contracts/);
+});
+
+test('settlement accepts contractDay before clear operations and snapshots pre-settlement state', () => {
+  const now = Date.now() + 20_000;
+  const dateKey = contractContent.kstDateKey(now);
+  const character = {
+    id: 'contract-day-settlement', level: 1, gold: 0, potions: 3, materials: { essence: 0, soul: 0 },
+    clearedStages: [], contracts: { dateKey: '2026-04-01', progress: { old: 2 }, claimed: ['old'], basis: null },
+  };
+  const key = stageContent.stageClearKey('C1', 'normal');
+  const ops = [
+    { type: 'contractDay', dateKey },
+    { type: 'clearStage', stageId: 'C1' },
+    { type: 'recordClear', key, ticks: 900 },
+  ];
+  const context = { kind: 'settlement', stageId: 'C1', difficulty: 'normal', partySize: 1, outcome: 'clear', ticks: 900, potionsUsed: 0 };
+  assert.doesNotThrow(() => validators.validateOps({ character, ops, context, now }));
+  const result = saveOps.applyOperations(character, {}, ops, character.id).character;
+  assert.deepEqual(result.contracts.basis, { clearedStages: [], level: 1 });
+  assert.ok(result.clearedStages.includes('C1'));
 });
 
 test('cloud enhancement uses a server-generated roll and persists cost, revision, and result', async () => {

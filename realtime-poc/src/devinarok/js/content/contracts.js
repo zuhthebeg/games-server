@@ -168,6 +168,17 @@ export function dailyContracts(characterId, dateKey, character = {}) {
   }));
 }
 
+export function contractsFor(character, dateKey) {
+  const basis = character?.contracts?.dateKey === dateKey ? character.contracts.basis : null;
+  return dailyContracts(character?.id, dateKey, basis ?? character);
+}
+
+export function contractDayFirst(character, dateKey, operations) {
+  return character?.contracts?.dateKey === dateKey
+    ? operations
+    : [{ type: 'contractDay', dateKey }, ...operations];
+}
+
 export function contractRewards(tier, level) {
   if (!TIERS.includes(tier)) throw new TypeError(`Unknown contract tier: ${tier}`);
   return rewardFor(tier, Math.max(1, Number(level) || 1));

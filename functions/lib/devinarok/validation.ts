@@ -1,5 +1,5 @@
 import { AFFIXES } from './js/content/affixes.js';
-import { dailyContracts, kstDateKey } from './js/content/contracts.js';
+import { contractsFor, kstDateKey } from './js/content/contracts.js';
 import { ENEMIES } from './js/content/enemies.js';
 import {
   FAMILY_STARTER_WEAPONS, ITEMS, LEGENDARIES, RARITIES,
@@ -11,10 +11,10 @@ import { normalizeCharacter } from './js/save/ops.js';
 
 const HUB_OPS = new Set([
   'createCharacter', 'equip', 'unequip', 'sellItem', 'buyPotion', 'spendGold', 'removeItem', 'updateTutorial',
-  'claimContract', 'salvageItem',
+  'claimContract', 'salvageItem', 'contractDay',
 ]);
 const SETTLEMENT_OPS = new Set([
-  'gainXp', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions', 'contractProgress',
+  'gainXp', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions', 'contractProgress', 'contractDay',
 ]);
 const VALID_DIFFICULTIES = ['normal', 'nightmare', 'hell'];
 const MAX_ITEMS = 40;
@@ -37,12 +37,25 @@ export function validateCharacterMaterials(character) {
   ) reject('invalid-materials');
 }
 
-function findContract(character, dateKey, contractId, now) {
+export function validateCharacterContracts(character) {
+  const basis = character?.contracts?.basis;
+  if (basis == null) return;
+  if (
+    !object(basis) || !Array.isArray(basis.clearedStages)
+    || !basis.clearedStages.every((stage) => typeof stage === 'string' && character.clearedStages?.includes(stage))
+    || !integer(basis.level, 1, character.level)
+  ) reject('invalid-contracts');
+}
+
+function validateContractDate(dateKey, now) {
   if (typeof dateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) reject('invalid-contract-date');
   const today = kstDateKey(now);
-  const yesterday = kstDateKey(now - DAY_MS);
-  if (dateKey !== today && dateKey !== yesterday) reject('stale-contract-date');
-  const contract = dailyContracts(character.id, dateKey, character).find(({ id }) => id === contractId);
+  if (dateKey !== today && dateKey !== kstDateKey(now - DAY_MS)) reject('stale-contract-date');
+}
+
+function findContract(character, dateKey, contractId, now) {
+  validateContractDate(dateKey, now);
+  const contract = contractsFor(character, dateKey).find(({ id }) => id === contractId);
   if (!contract) reject('invalid-contract');
   return contract;
 }
@@ -191,6 +204,7 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
   if (!Array.isArray(ops) || ops.length < 1 || ops.length > 128 || !object(context)) reject('invalid-ops');
   if (ops.some((op) => !object(op) || typeof op.type !== 'string')) reject('invalid-ops');
   if (ops.some((op) => op.type === 'reforgeAffix')) reject('online-reforge-required');
+  if (character) validateCharacterContracts(character);
 
   if (context.kind === 'debug') {
     if (ops.some((op) => ['claimContract', 'contractProgress'].includes(op.type))) reject('invalid-contract-context');
@@ -200,6 +214,7 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
 
   if (context.kind === 'hub') {
     if (ops.some((op) => !HUB_OPS.has(op.type) && op.type !== 'grantItem')) reject('hub-op-not-allowed');
+    for (const op of ops.filter(({ type }) => type === 'contractDay')) validateContractDate(op.dateKey, now);
     for (const op of ops.filter(({ type }) => type === 'claimContract')) {
       if (!character) reject('invalid-character');
       findContract(character, op.dateKey, op.contractId, now);
@@ -229,6 +244,7 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
   if (!character || !isStageUnlocked(stageId, character.clearedStages ?? [], difficulty)) reject('stage-locked');
   if (now - lastSettlementAt < 10000) reject('settlement-rate-limit');
   if (ops.some((op) => !SETTLEMENT_OPS.has(op.type))) reject('settlement-op-not-allowed');
+  for (const op of ops.filter(({ type }) => type === 'contractDay')) validateContractDate(op.dateKey, now);
 
   const caps = settlementCaps(stageId, difficulty, partySize);
   let xp = 0;
@@ -338,6 +354,7 @@ function validateClearChain(clearedStages) {
 export function validateImport(snapshot) {
   if (!object(snapshot) || !object(snapshot.character) || !Array.isArray(snapshot.items)) reject('invalid-snapshot');
   validateCharacterMaterials(snapshot.character);
+  validateCharacterContracts(snapshot.character);
   const character = normalizeCharacter(snapshot.character);
   delete character.cloudUserId;
   if (

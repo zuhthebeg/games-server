@@ -1,5 +1,5 @@
 import { extractBearerToken, verifyJWT } from '../../lib/auth';
-import { validateCharacterMaterials } from '../../lib/devinarok/validation';
+import { validateCharacterContracts, validateCharacterMaterials } from '../../lib/devinarok/validation';
 
 export interface Env { DB: D1Database; JWT_SECRET: string }
 
@@ -70,6 +70,7 @@ export async function loadCharacter(DB: D1Database, userId: string, charId: stri
     .bind(userId, charId).all<{ data_json: string }>();
   const character = JSON.parse(row.data_json);
   validateCharacterMaterials(character);
+  validateCharacterContracts(character);
   character.rev = row.rev;
   character.debugUsed = Number(row.debug_used) === 1 || character.debugUsed === true;
   return {
