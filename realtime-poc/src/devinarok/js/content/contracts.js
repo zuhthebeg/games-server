@@ -174,9 +174,12 @@ export function contractsFor(character, dateKey) {
 }
 
 export function contractDayFirst(character, dateKey, operations) {
-  return character?.contracts?.dateKey === dateKey
-    ? operations
-    : [{ type: 'contractDay', dateKey }, ...operations];
+  const storedDateKey = character?.contracts?.dateKey;
+  if (!storedDateKey || dateKey > storedDateKey) {
+    return [{ type: 'contractDay', dateKey }, ...operations];
+  }
+  if (dateKey === storedDateKey) return operations;
+  return operations.filter((operation) => operation.type !== 'contractProgress');
 }
 
 export function contractRewards(tier, level) {

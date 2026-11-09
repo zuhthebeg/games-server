@@ -4,6 +4,8 @@ import { ENEMIES } from './js/content/enemies.js';
 import {
   FAMILY_STARTER_WEAPONS, ITEMS, LEGENDARIES, RARITIES,
 } from './js/content/items.js';
+import { MASTERY_MAX_XP, MASTERY_MIN_COOLDOWN_TICKS } from './js/content/mastery.js';
+import { SKILLS } from './js/content/skills.js';
 import {
   DIFFICULTIES, effectiveStageLevel, isStageUnlocked, stageClearKey, STAGE_LIST, STAGES,
 } from './js/content/stages.js';
@@ -14,7 +16,7 @@ const HUB_OPS = new Set([
   'claimContract', 'salvageItem', 'contractDay',
 ]);
 const SETTLEMENT_OPS = new Set([
-  'gainXp', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions', 'contractProgress', 'contractDay',
+  'gainXp', 'gainMastery', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions', 'contractProgress', 'contractDay',
 ]);
 const VALID_DIFFICULTIES = ['normal', 'nightmare', 'hell'];
 const MAX_ITEMS = 40;
@@ -45,6 +47,15 @@ export function validateCharacterContracts(character) {
     || !basis.clearedStages.every((stage) => typeof stage === 'string' && character.clearedStages?.includes(stage))
     || !integer(basis.level, 1, character.level)
   ) reject('invalid-contracts');
+}
+
+export function validateCharacterMastery(character) {
+  const mastery = character?.mastery;
+  if (mastery === undefined) return;
+  if (
+    !object(mastery)
+    || Object.entries(mastery).some(([skill, xp]) => !Object.hasOwn(SKILLS, skill) || !integer(xp, 0, MASTERY_MAX_XP))
+  ) reject('invalid-mastery');
 }
 
 function validateContractDate(dateKey, now) {
@@ -206,7 +217,7 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
   if (ops.some((op) => op.type === 'reforgeAffix')) reject('online-reforge-required');
 
   if (context.kind === 'debug') {
-    if (ops.some((op) => ['claimContract', 'contractProgress'].includes(op.type))) reject('invalid-contract-context');
+    if (ops.some((op) => ['claimContract', 'contractProgress', 'gainMastery'].includes(op.type))) reject('invalid-contract-context');
     if (!ops.some((op) => op.type === 'markDebug')) reject('debug-requires-mark');
     return;
   }
@@ -253,6 +264,7 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
   let recordCount = 0;
   let potionCount = 0;
   const contractProgress = new Map();
+  const masteryGains = new Set();
   const expectedKey = stageClearKey(stageId, difficulty);
   const recordTicks = ops.find((op) => op.type === 'recordClear')?.ticks;
   const settlementTicks = integer(context.ticks) ? context.ticks : recordTicks;
@@ -286,6 +298,13 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
     } else if (op.type === 'setPotions') {
       potionCount += 1;
       if (!integer(op.count, 0, character.potions) || op.count > 5) reject('invalid-potions');
+    } else if (op.type === 'gainMastery') {
+      if (!Object.hasOwn(SKILLS, op.skill) || !integer(op.amount, 1)) reject('invalid-mastery');
+      if (masteryGains.has(op.skill)) reject('duplicate-mastery-gain');
+      masteryGains.add(op.skill);
+      const cooldownTicks = MASTERY_MIN_COOLDOWN_TICKS(op.skill);
+      const masteryCap = Math.min(60, Math.floor((settlementTicks ?? 0) / cooldownTicks) + 1);
+      if (op.amount > masteryCap) reject('mastery-cap-exceeded');
     } else if (op.type === 'contractProgress') {
       const contract = findContract(character, op.dateKey, op.contractId, now);
       if (!integer(op.amount, 1)) reject('invalid-contract-progress');
@@ -354,6 +373,7 @@ export function validateImport(snapshot) {
   if (!object(snapshot) || !object(snapshot.character) || !Array.isArray(snapshot.items)) reject('invalid-snapshot');
   validateCharacterMaterials(snapshot.character);
   validateCharacterContracts(snapshot.character);
+  validateCharacterMastery(snapshot.character);
   const character = normalizeCharacter(snapshot.character);
   delete character.cloudUserId;
   if (
