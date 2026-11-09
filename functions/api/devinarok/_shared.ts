@@ -1,4 +1,6 @@
 import { extractBearerToken, verifyJWT } from '../../lib/auth';
+import { normalizeCharacter } from '../../lib/devinarok/js/save/ops.js';
+import { validateCharacterMaterials } from '../../lib/devinarok/validation';
 
 export interface Env { DB: D1Database; JWT_SECRET: string }
 
@@ -67,7 +69,9 @@ export async function loadCharacter(DB: D1Database, userId: string, charId: stri
   if (!row) return null;
   const itemRows = await DB.prepare('SELECT data_json FROM devinarok_items WHERE user_id = ? AND char_id = ?')
     .bind(userId, charId).all<{ data_json: string }>();
-  const character = JSON.parse(row.data_json);
+  const storedCharacter = JSON.parse(row.data_json);
+  validateCharacterMaterials(storedCharacter);
+  const character = normalizeCharacter(storedCharacter);
   character.rev = row.rev;
   character.debugUsed = Number(row.debug_used) === 1 || character.debugUsed === true;
   return {

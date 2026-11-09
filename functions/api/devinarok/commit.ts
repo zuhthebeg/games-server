@@ -20,6 +20,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       || !body.idempotencyKey || body.idempotencyKey.length > 128
       || !Array.isArray(body.ops) || !body.context || typeof body.context !== 'object'
     ) throw new ApiError(400, 'invalid-commit');
+    if (body.ops.some((op: any) => op?.type === 'reforgeAffix')) {
+      throw new ApiError(400, 'online-reforge-required');
+    }
     const DB = env.DB;
     const previous = await DB.prepare(`SELECT rev FROM devinarok_ledger
       WHERE user_id = ? AND char_id = ? AND idem_key = ?`)

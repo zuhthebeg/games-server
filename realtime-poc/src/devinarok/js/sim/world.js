@@ -1,5 +1,6 @@
 import { ARENA } from './arena.js';
 import { AFFIXES } from '../content/affixes.js';
+import { rollAffixValue } from '../content/affix-value.js';
 import { ENEMIES } from '../content/enemies.js';
 import {
   equipmentLook,
@@ -432,7 +433,7 @@ export function addPlayer(world, {
   const stats = world.mode === 'stage' || world.mode === 'hub'
     ? calculatePlayerStats(level, equipment)
     : null;
-  const reward = { xp: 0, gold: 0, items: [] };
+  const reward = { xp: 0, gold: 0, items: [], kills: {}, perfectDodges: 0, potionsUsed: 0 };
   const player = {
     id: nextEntityId(world),
     kind: 'player',
@@ -770,6 +771,7 @@ function awardPerfectDodge(world, attacker, player) {
     world.tick - player.dodgeStartTick >= (world.partySize > 1 ? PARTY_PERFECT_DODGE_TICKS : PERFECT_DODGE_TICKS)
   ) return;
   player.perfectPaid = true;
+  world.rewards[player.playerId].perfectDodges += 1;
   player.counterReadyTicks = player.stats.counterReadyTicks ?? 60;
   player.counterAttackerId = attacker.id;
   player.pierceShotsRemaining = Math.max(
@@ -979,8 +981,7 @@ export function rarityForRoll(value, { elite = false, boss = false, difficulty =
 function rollAffix(world, ilvl) {
   const ids = Object.keys(AFFIXES);
   const id = ids[Math.floor(random(world) * ids.length)];
-  const range = AFFIXES[id];
-  const value = Math.round(range.min + random(world) * (range.max - range.min) + range.perIlvl * ilvl);
+  const value = rollAffixValue(id, ilvl, random(world));
   return { id, value };
 }
 
@@ -1331,6 +1332,7 @@ function dropRewards(world, enemy) {
   const stageLevel = world.effectiveLevel ?? world.stageLevel;
   for (const player of stagePlayers(world)) {
     const reward = world.rewards[player.playerId];
+    reward.kills[enemy.enemyKind] = (reward.kills[enemy.enemyKind] ?? 0) + 1;
     const xp = Math.round(rule.xp * rewardScale * difficulty.xpMult * (1 + (player.stats.xpGain ?? 0) / 100));
     reward.xp += xp;
     emit(world, 'xp', { amount: xp, entityId: enemy.id, playerId: player.playerId });
@@ -1641,6 +1643,7 @@ function applyPotion(world, player, seq) {
   player.potionTicks = POTION.durationTicks;
   player.potionHealTicks = POTION.durationTicks;
   player.potionHealRemaining = Math.round(player.maxHp * POTION.healFraction);
+  world.rewards[player.playerId].potionsUsed += 1;
   emit(world, 'potion', { entityId: player.id, playerId: player.playerId, seq });
 }
 
@@ -2730,6 +2733,9 @@ function settlementResult(world, player, outcome) {
     difficulty: world.difficulty ?? 'normal',
     ticks: world.tick,
     potions: player.potions,
+    kills: { ...reward.kills },
+    perfectDodges: reward.perfectDodges,
+    potionsUsed: reward.potionsUsed,
   };
 }
 

@@ -101,9 +101,11 @@ const charactersRoute = bundle('functions/api/devinarok/characters.ts');
 const deleteRoute = bundle('functions/api/auth/delete.ts');
 const enhanceRoute = bundle('functions/api/devinarok/enhance.ts');
 const importRoute = bundle('functions/api/devinarok/import.ts');
+const reforgeRoute = bundle('functions/api/devinarok/reforge.ts');
 const validators = bundle('functions/lib/devinarok/validation.ts');
 const saveOps = bundle('functions/lib/devinarok/js/save/ops.js');
 const shared = bundle('functions/api/devinarok/_shared.ts');
+const contractContent = bundle('functions/lib/devinarok/js/content/contracts.js');
 const itemContent = bundle('functions/lib/devinarok/js/content/items.js');
 const stageContent = bundle('functions/lib/devinarok/js/content/stages.js');
 const affixContent = bundle('functions/lib/devinarok/js/content/affixes.js');
@@ -506,6 +508,173 @@ test('imports enforce level-XP consistency and the six-character account cap', a
   assert.equal(invalid.status, 422);
 });
 
+test('contract progress is bounded and claims require generated contracts on a current date', () => {
+  const now = Date.now() + 20_000;
+  const dateKey = contractContent.kstDateKey(now);
+  const character = {
+    id: 'contract-validation',
+    level: 1,
+    gold: 0,
+    potions: 3,
+    materials: { essence: 0, soul: 0 },
+    clearedStages: [],
+    contracts: { dateKey: null, progress: {}, claimed: [] },
+  };
+  const contracts = contractContent.dailyContracts(character.id, dateKey, character);
+  const kills = contracts.find((contract) => contract.type === 'kills');
+  const spawnCap = validators.settlementCaps('C1', 'normal', 1).enemySpawnCaps[kills.enemyKind];
+  const context = {
+    kind: 'settlement', stageId: 'C1', difficulty: 'normal', partySize: 1,
+    outcome: 'death', ticks: 900, potionsUsed: 0,
+  };
+  const validateProgress = (contractId, amount, key = dateKey) => validators.validateOps({
+    character,
+    ops: [{ type: 'contractProgress', dateKey: key, contractId, amount }],
+    context,
+    now,
+  });
+
+  assert.ok(spawnCap > 0);
+  assert.doesNotThrow(() => validateProgress(kills.id, 1));
+  assert.throws(() => validateProgress(kills.id, spawnCap + 1), /contract-progress-cap-exceeded/);
+  assert.throws(() => validateProgress(`${dateKey}:foreign`, 1), /invalid-contract/);
+  const staleDate = contractContent.kstDateKey(now - 2 * 24 * 60 * 60 * 1000);
+  assert.throws(() => validateProgress(`${staleDate}:0`, 1, staleDate), /stale-contract-date/);
+
+  const claim = contracts[0];
+  const progressed = saveOps.applyOperations(character, {}, [{
+    type: 'contractDay', dateKey,
+  }, {
+    type: 'contractProgress', dateKey, contractId: claim.id, amount: claim.target,
+  }], character.id).character;
+  assert.doesNotThrow(() => validators.validateOps({
+    character: progressed,
+    ops: [{ type: 'claimContract', dateKey, contractId: claim.id }],
+    context: { kind: 'hub' },
+    now,
+  }));
+  const claimed = saveOps.applyOperations(progressed, {}, [{
+    type: 'claimContract', dateKey, contractId: claim.id,
+  }], character.id).character;
+  assert.equal(claimed.contracts.claimed.includes(claim.id), true);
+  assert.equal(claimed.materials.essence, claim.rewards.essence);
+  assert.equal(claimed.gold, claim.rewards.gold);
+});
+
+test('materials are bounded on import and stored character reads', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  const snapshot = {
+    character: {
+      id: 'invalid-materials',
+      name: '기사',
+      kind: 'knight',
+      level: 1,
+      xp: 0,
+      gold: 0,
+      potions: 3,
+      rev: 1,
+      debugUsed: false,
+      equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+      clearedStages: [],
+      records: {},
+      materials: { essence: 1.5, soul: 0 },
+    },
+    items: [],
+  };
+  const invalidImport = await importRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/import', snapshot, auth),
+    env,
+  });
+  assert.equal(invalidImport.status, 422);
+
+  await createCharacter(commits.onRequestPost, env, auth);
+  const row = env.DB.prepare('SELECT data_json FROM devinarok_characters WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').first();
+  const stored = JSON.parse(row.data_json);
+  stored.materials = { essence: 10000, soul: 0 };
+  env.DB.prepare('UPDATE devinarok_characters SET data_json = ? WHERE user_id = ? AND char_id = ?')
+    .bind(JSON.stringify(stored), 'user-1', 'char-1').run();
+  const invalidState = await charactersRoute.onRequestGet({
+    request: request('GET', '/api/devinarok/characters', undefined, auth),
+    env,
+  });
+  assert.equal(invalidState.status, 422);
+  assert.equal((await invalidState.json()).error, 'invalid-materials');
+});
+
+test('contract basis rejects cleared stages absent from the character', () => {
+  const now = Date.now() + 20_000;
+  const dateKey = contractContent.kstDateKey(now);
+  const character = {
+    id: 'invalid-contract-basis', name: '기사', kind: 'knight', level: 1, xp: 0, gold: 0,
+    potions: 3, rev: 1, debugUsed: false, equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    records: {}, clearedStages: [], materials: { essence: 0, soul: 0 },
+    contracts: { dateKey, progress: {}, claimed: [], basis: { clearedStages: ['C1'], level: 1 } },
+  };
+  assert.throws(() => validators.validateImport({ character, items: [] }), /invalid-contracts/);
+  const tooHigh = {
+    ...character,
+    contracts: { ...character.contracts, basis: { clearedStages: [], level: 2 } },
+  };
+  assert.throws(() => validators.validateImport({ character: tooHigh, items: [] }), /invalid-contracts/);
+});
+
+test('lowering level keeps contract basis loadable and commits after normalization', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  await createCharacter(commits.onRequestPost, env, auth);
+  const row = env.DB.prepare('SELECT rev, data_json FROM devinarok_characters WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').first();
+  const original = JSON.parse(row.data_json);
+  let state = saveOps.applyOperations(original, {}, [
+    { type: 'setLevel', level: 10 },
+    { type: 'contractDay', dateKey: contractContent.kstDateKey(Date.now()) },
+    { type: 'setLevel', level: 3 },
+  ], original.id);
+  assert.equal(state.character.contracts.basis.level, 3);
+
+  state.character.contracts.basis.level = 10;
+  env.DB.prepare('UPDATE devinarok_characters SET data_json = ? WHERE user_id = ? AND char_id = ?')
+    .bind(JSON.stringify(state.character), 'user-1', 'char-1').run();
+  const loaded = await shared.loadCharacter(env.DB, 'user-1', 'char-1');
+  assert.equal(loaded.character.level, 3);
+  assert.equal(loaded.character.contracts.basis.level, 3);
+
+  const committed = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: row.rev,
+      idempotencyKey: 'lowered-level-contract-basis',
+      context: { kind: 'hub' },
+      ops: [{ type: 'updateTutorial', state: { step: 'board', completed: false, skipped: false, combatComplete: false } }],
+    }, auth),
+    env,
+  });
+  assert.equal(committed.status, 200, JSON.stringify(await committed.clone().json()));
+  assert.equal((await committed.json()).character.contracts.basis.level, 3);
+});
+
+test('settlement accepts contractDay before clear operations and snapshots pre-settlement state', () => {
+  const now = Date.now() + 20_000;
+  const dateKey = contractContent.kstDateKey(now);
+  const character = {
+    id: 'contract-day-settlement', level: 1, gold: 0, potions: 3, materials: { essence: 0, soul: 0 },
+    clearedStages: [], contracts: { dateKey: '2026-04-01', progress: { old: 2 }, claimed: ['old'], basis: null },
+  };
+  const key = stageContent.stageClearKey('C1', 'normal');
+  const ops = [
+    { type: 'contractDay', dateKey },
+    { type: 'clearStage', stageId: 'C1' },
+    { type: 'recordClear', key, ticks: 900 },
+  ];
+  const context = { kind: 'settlement', stageId: 'C1', difficulty: 'normal', partySize: 1, outcome: 'clear', ticks: 900, potionsUsed: 0 };
+  assert.doesNotThrow(() => validators.validateOps({ character, ops, context, now }));
+  const result = saveOps.applyOperations(character, {}, ops, character.id).character;
+  assert.deepEqual(result.contracts.basis, { clearedStages: [], level: 1 });
+  assert.ok(result.clearedStages.includes('C1'));
+});
+
 test('cloud enhancement uses a server-generated roll and persists cost, revision, and result', async () => {
   const env = environment();
   const auth = token({ sub: 'user-1' });
@@ -538,4 +707,143 @@ test('cloud enhancement uses a server-generated roll and persists cost, revision
   assert.equal(saved.character.rev, 3);
   assert.equal(saved.character.gold, 40);
   assert.equal(saved.items[0].enhance, saved.success ? 2 : 1);
+});
+
+test('cloud reforge uses a server roll, revision guard, and rejects guests', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  await createCharacter(commits.onRequestPost, env, auth);
+  const affixId = Object.keys(affixContent.AFFIXES)[0];
+  const setup = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: 1,
+      idempotencyKey: 'reforge-fixture',
+      context: { kind: 'debug' },
+      ops: [
+        { type: 'grantGold', amount: 1000 },
+        {
+          type: 'grantItem',
+          uid: 'reforge-item',
+          itemId: 'rusted-sword',
+          rarity: 'rare',
+          ilvl: 1,
+          enhance: 0,
+          affixes: [{ id: affixId, value: 1 }],
+        },
+        { type: 'markDebug' },
+      ],
+    }, auth),
+    env,
+  });
+  assert.equal(setup.status, 200);
+  const row = env.DB.prepare('SELECT data_json FROM devinarok_characters WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').first();
+  const stored = JSON.parse(row.data_json);
+  stored.materials = { essence: 10, soul: 0 };
+  env.DB.prepare('UPDATE devinarok_characters SET data_json = ? WHERE user_id = ? AND char_id = ?')
+    .bind(JSON.stringify(stored), 'user-1', 'char-1').run();
+
+  const commitReforge = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: 2,
+      idempotencyKey: 'commit-reforge-denied',
+      context: { kind: 'hub' },
+      ops: [{ type: 'reforgeAffix', uid: 'reforge-item', index: 0, roll: 1 }],
+    }, auth),
+    env,
+  });
+  assert.equal(commitReforge.status, 400);
+  assert.equal((await commitReforge.json()).error, 'online-reforge-required');
+
+  const conflict = await reforgeRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/reforge', {
+      characterId: 'char-1', baseRev: 1, uid: 'reforge-item', index: 0,
+    }, auth),
+    env,
+  });
+  assert.equal(conflict.status, 409);
+
+  const result = await reforgeRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/reforge', {
+      characterId: 'char-1', baseRev: 2, uid: 'reforge-item', index: 0, roll: 1,
+    }, auth),
+    env,
+  });
+  assert.equal(result.status, 200);
+  const saved = await result.json();
+  assert.ok(Number.isInteger(saved.roll) && saved.roll >= 0 && saved.roll <= 0xffffffff);
+  assert.equal(saved.character.rev, 3);
+  assert.equal(saved.character.gold, 980);
+  assert.equal(saved.character.materials.essence, 6);
+  assert.notEqual(saved.items[0].affixes[0].id, affixId);
+
+  const guest = await reforgeRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/reforge', {
+      characterId: 'char-1', baseRev: 3, uid: 'reforge-item', index: 0,
+    }, token({ sub: 'guest', isAnonymous: true })),
+    env,
+  });
+  assert.equal(guest.status, 403);
+});
+
+test('legendary unique affixes cannot be reforged and other reforges pass item validation', () => {
+  const legendary = itemContent.LEGENDARIES.find(({ id }) => id === 'spinning-sigil');
+  const otherId = Object.keys(affixContent.AFFIXES).find((id) => id !== legendary.stat);
+  const rule = affixContent.AFFIXES[otherId];
+  const unique = { id: legendary.stat, value: legendary.value, unique: legendary.id };
+  const character = {
+    id: 'unique-reforge', name: '기사', kind: 'knight', level: 5, xp: 0, gold: 1000, potions: 3, rev: 1,
+    debugUsed: false, equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    clearedStages: [], records: {}, materials: { essence: 100, soul: 10 },
+  };
+  const item = {
+    uid: 'legendary-unique', itemId: 'rusted-sword', rarity: 'legendary', ilvl: 5, enhance: 0,
+    legendaryId: legendary.id,
+    affixes: [unique, { id: otherId, value: Math.round(rule.min + rule.perIlvl * 5) }],
+  };
+  const state = saveOps.applyOperations(character, {}, [{ type: 'grantItem', ...item }], character.id);
+  assert.throws(() => saveOps.applyOperations(state.character, state.items, [
+    { type: 'reforgeAffix', uid: item.uid, index: 0, roll: 1 },
+  ], character.id), { name: 'RangeError', message: 'Unique affixes cannot be reforged' });
+  const reforged = saveOps.applyOperations(state.character, state.items, [
+    { type: 'reforgeAffix', uid: item.uid, index: 1, roll: 1 },
+  ], character.id);
+  assert.deepEqual(reforged.items[item.uid].affixes[0], unique);
+  assert.equal(reforged.items[item.uid].legendaryId, legendary.id);
+  assert.doesNotThrow(() => validators.validateImport({
+    character: reforged.character,
+    items: Object.values(reforged.items),
+  }));
+});
+
+test('contractDay only moves forward and cannot restore a claimed contract reward', () => {
+  const now = Date.now() + 20_000;
+  const today = contractContent.kstDateKey(now);
+  const yesterday = contractContent.kstDateKey(now - 24 * 60 * 60 * 1000);
+  const character = {
+    id: 'contract-day-forward', level: 1, gold: 0, potions: 3, materials: { essence: 0, soul: 0 },
+    clearedStages: [], contracts: { dateKey: null, progress: {}, claimed: [], basis: null },
+  };
+  let state = saveOps.applyOperations(character, {}, [
+    { type: 'contractDay', dateKey: yesterday },
+  ], character.id);
+  const contract = contractContent.contractsFor(state.character, yesterday)[0];
+  state = saveOps.applyOperations(state.character, state.items, [
+    { type: 'contractProgress', dateKey: yesterday, contractId: contract.id, amount: contract.target },
+    { type: 'claimContract', dateKey: yesterday, contractId: contract.id },
+  ], character.id);
+  const goldAfterClaim = state.character.gold;
+  state = saveOps.applyOperations(state.character, state.items, [
+    { type: 'contractDay', dateKey: today },
+  ], character.id);
+  assert.equal(state.character.contracts.dateKey, today);
+  assert.throws(() => saveOps.applyOperations(state.character, state.items, [
+    { type: 'contractDay', dateKey: yesterday },
+  ], character.id), { name: 'RangeError', message: 'Contract day cannot go backwards' });
+  assert.throws(() => saveOps.applyOperations(state.character, state.items, [
+    { type: 'claimContract', dateKey: yesterday, contractId: contract.id },
+  ], character.id), /not active/);
+  assert.equal(state.character.gold, goldAfterClaim);
 });
