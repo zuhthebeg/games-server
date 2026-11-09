@@ -326,6 +326,7 @@ export function applyOperations(character, itemMap, operations, characterId) {
         const index = integer(operation.index, 'Affix index');
         if (!Array.isArray(item.affixes) || index >= item.affixes.length) throw new RangeError('Affix index is out of range');
         const currentAffix = item.affixes[index];
+        if (currentAffix?.unique != null) throw new RangeError('Unique affixes cannot be reforged');
         if (!currentAffix || !AFFIXES[currentAffix.id]) throw new RangeError('This affix cannot be reforged');
         const roll = operation.roll;
         if (!Number.isSafeInteger(roll) || roll < 0 || roll > 0xffffffff) {

@@ -747,3 +747,33 @@ test('cloud reforge uses a server roll, revision guard, and rejects guests', asy
   });
   assert.equal(guest.status, 403);
 });
+
+test('legendary unique affixes cannot be reforged and other reforges pass item validation', () => {
+  const legendary = itemContent.LEGENDARIES.find(({ id }) => id === 'spinning-sigil');
+  const otherId = Object.keys(affixContent.AFFIXES).find((id) => id !== legendary.stat);
+  const rule = affixContent.AFFIXES[otherId];
+  const unique = { id: legendary.stat, value: legendary.value, unique: legendary.id };
+  const character = {
+    id: 'unique-reforge', name: '기사', kind: 'knight', level: 5, xp: 0, gold: 1000, potions: 3, rev: 1,
+    debugUsed: false, equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    clearedStages: [], records: {}, materials: { essence: 100, soul: 10 },
+  };
+  const item = {
+    uid: 'legendary-unique', itemId: 'rusted-sword', rarity: 'legendary', ilvl: 5, enhance: 0,
+    legendaryId: legendary.id,
+    affixes: [unique, { id: otherId, value: Math.round(rule.min + rule.perIlvl * 5) }],
+  };
+  const state = saveOps.applyOperations(character, {}, [{ type: 'grantItem', ...item }], character.id);
+  assert.throws(() => saveOps.applyOperations(state.character, state.items, [
+    { type: 'reforgeAffix', uid: item.uid, index: 0, roll: 1 },
+  ], character.id), { name: 'RangeError', message: 'Unique affixes cannot be reforged' });
+  const reforged = saveOps.applyOperations(state.character, state.items, [
+    { type: 'reforgeAffix', uid: item.uid, index: 1, roll: 1 },
+  ], character.id);
+  assert.deepEqual(reforged.items[item.uid].affixes[0], unique);
+  assert.equal(reforged.items[item.uid].legendaryId, legendary.id);
+  assert.doesNotThrow(() => validators.validateImport({
+    character: reforged.character,
+    items: Object.values(reforged.items),
+  }));
+});
