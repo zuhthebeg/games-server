@@ -858,10 +858,9 @@ export const STAGE_LIST = [
         radius: 2.4,
         channelSec: 15,
         spawns: [
-          { atSec: 4, enemy: 'minion', count: 3 },
-          { atSec: 10, enemy: 'mage', count: 1 },
+          { atSec: 4, enemy: 'minion', count: 2 },
           { atSec: 10, enemy: 'minion', count: 2 },
-          { atSec: 16, enemy: 'shieldbearer', count: 1 },
+          { atSec: 16, enemy: 'bonearcher', count: 1 },
         ],
       },
     },
