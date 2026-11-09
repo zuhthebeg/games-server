@@ -1,4 +1,5 @@
 import { AFFIXES } from './js/content/affixes.js';
+import { dailyContracts, kstDateKey } from './js/content/contracts.js';
 import { ENEMIES } from './js/content/enemies.js';
 import {
   FAMILY_STARTER_WEAPONS, ITEMS, LEGENDARIES, RARITIES,
@@ -10,17 +11,41 @@ import { normalizeCharacter } from './js/save/ops.js';
 
 const HUB_OPS = new Set([
   'createCharacter', 'equip', 'unequip', 'sellItem', 'buyPotion', 'spendGold', 'removeItem', 'updateTutorial',
+  'claimContract', 'salvageItem',
 ]);
-const SETTLEMENT_OPS = new Set(['gainXp', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions']);
+const SETTLEMENT_OPS = new Set([
+  'gainXp', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions', 'contractProgress',
+]);
 const VALID_DIFFICULTIES = ['normal', 'nightmare', 'hell'];
 const MAX_ITEMS = 40;
 const SUMMONER_BUDGET = 60;
 const BOSS_ADD_BUDGET = 40;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const integer = (value, min = 0, max = Number.MAX_SAFE_INTEGER) => (
   Number.isSafeInteger(value) && value >= min && value <= max
 );
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const reject = (message) => { throw new TypeError(message); };
+
+export function validateCharacterMaterials(character) {
+  if (!object(character)) reject('invalid-character');
+  if (character.materials === undefined) return;
+  if (
+    !object(character.materials)
+    || !integer(character.materials.essence, 0, 9999)
+    || !integer(character.materials.soul, 0, 9999)
+  ) reject('invalid-materials');
+}
+
+function findContract(character, dateKey, contractId, now) {
+  if (typeof dateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) reject('invalid-contract-date');
+  const today = kstDateKey(now);
+  const yesterday = kstDateKey(now - DAY_MS);
+  if (dateKey !== today && dateKey !== yesterday) reject('stale-contract-date');
+  const contract = dailyContracts(character.id, dateKey, character).find(({ id }) => id === contractId);
+  if (!contract) reject('invalid-contract');
+  return contract;
+}
 
 function addXp(enemyIds) {
   let maxXp = 0;
@@ -50,25 +75,36 @@ export function settlementCaps(stageId, difficulty, partySize = 1) {
   let summonerBudget = 0;
   let maxSummonerAddXp = 0;
   let maxBossAddXp = 0;
+  const enemySpawnCaps = {};
+  const addSpawnCap = (enemyId, count) => {
+    enemySpawnCaps[enemyId] = (enemySpawnCaps[enemyId] ?? 0) + count;
+  };
   for (const room of stage.rooms) {
     for (const wave of room.waves) {
       const rule = ENEMIES[wave.enemy];
       if (!rule || !integer(wave.count, 1)) reject('invalid-stage-content');
       enemyCount += wave.count;
       baseXp += rule.xp * wave.count;
+      addSpawnCap(wave.enemy, wave.count);
       if (rule.behavior === 'summoner') {
         summonerBudget += SUMMONER_BUDGET * wave.count;
         maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(rule));
+        addSpawnCap(rule.summon?.enemy ?? 'minion', SUMMONER_BUDGET * wave.count);
       }
       if (rule.behavior === 'boss-patterns') {
         bossCount += wave.count;
         const addEnemyIds = bossAddEnemyIds(rule);
         maxBossAddXp = Math.max(maxBossAddXp, addXp(addEnemyIds));
+        for (const enemyId of addEnemyIds) addSpawnCap(enemyId, BOSS_ADD_BUDGET * wave.count);
         for (const enemyId of addEnemyIds) {
           const addRule = ENEMIES[enemyId];
           if (addRule.behavior === 'summoner') {
             summonerBudget += SUMMONER_BUDGET * BOSS_ADD_BUDGET * wave.count;
             maxSummonerAddXp = Math.max(maxSummonerAddXp, summonerAddXp(addRule));
+            addSpawnCap(
+              addRule.summon?.enemy ?? 'minion',
+              SUMMONER_BUDGET * BOSS_ADD_BUDGET * wave.count,
+            );
           }
         }
       }
@@ -86,6 +122,7 @@ export function settlementCaps(stageId, difficulty, partySize = 1) {
     baseXp,
     effectiveLevel,
     summonerBudget,
+    enemySpawnCaps,
     maxSummonerAddXp,
     bossAddBudget: BOSS_ADD_BUDGET,
     maxBossAddXp,
@@ -153,14 +190,20 @@ function validateGrantedItem(operation, { difficulty, bossStage, maxIlvl = 20 } 
 export function validateOps({ character, items = [], ops, context, lastSettlementAt = 0, now = Date.now() }) {
   if (!Array.isArray(ops) || ops.length < 1 || ops.length > 128 || !object(context)) reject('invalid-ops');
   if (ops.some((op) => !object(op) || typeof op.type !== 'string')) reject('invalid-ops');
+  if (ops.some((op) => op.type === 'reforgeAffix')) reject('online-reforge-required');
 
   if (context.kind === 'debug') {
+    if (ops.some((op) => ['claimContract', 'contractProgress'].includes(op.type))) reject('invalid-contract-context');
     if (!ops.some((op) => op.type === 'markDebug')) reject('debug-requires-mark');
     return;
   }
 
   if (context.kind === 'hub') {
     if (ops.some((op) => !HUB_OPS.has(op.type) && op.type !== 'grantItem')) reject('hub-op-not-allowed');
+    for (const op of ops.filter(({ type }) => type === 'claimContract')) {
+      if (!character) reject('invalid-character');
+      findContract(character, op.dateKey, op.contractId, now);
+    }
     if (ops.some((op) => op.type === 'grantItem')) {
       const grants = ops.filter((op) => op.type === 'grantItem');
       const costs = ops.filter((op) => op.type === 'spendGold');
@@ -194,7 +237,13 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
   let clearCount = 0;
   let recordCount = 0;
   let potionCount = 0;
+  const contractProgress = new Map();
   const expectedKey = stageClearKey(stageId, difficulty);
+  const recordTicks = ops.find((op) => op.type === 'recordClear')?.ticks;
+  const settlementTicks = integer(context.ticks) ? context.ticks : recordTicks;
+  const perfectCap = Number.isSafeInteger(settlementTicks)
+    ? Math.min(Math.floor(settlementTicks / 30), 60)
+    : 0;
   for (const op of ops) {
     if (op.type === 'gainXp') {
       if (!integer(op.amount)) reject('invalid-xp');
@@ -222,6 +271,27 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
     } else if (op.type === 'setPotions') {
       potionCount += 1;
       if (!integer(op.count, 0, character.potions) || op.count > 5) reject('invalid-potions');
+    } else if (op.type === 'contractProgress') {
+      const contract = findContract(character, op.dateKey, op.contractId, now);
+      if (!integer(op.amount, 1)) reject('invalid-contract-progress');
+      let cap = 0;
+      if (contract.type === 'kills') {
+        cap = caps.enemySpawnCaps[contract.enemyKind] ?? 0;
+      } else if (contract.type === 'perfect') {
+        cap = perfectCap;
+      } else if (
+        outcome === 'clear'
+        && contract.stageId === stageId
+        && contract.difficulty === difficulty
+        && (contract.type !== 'noPotion' || context.potionsUsed === 0)
+      ) {
+        cap = 1;
+      }
+      const stored = character.contracts?.dateKey === op.dateKey ? character.contracts.progress : {};
+      const remaining = Math.max(0, contract.target - (stored?.[contract.id] ?? 0));
+      const total = (contractProgress.get(contract.id) ?? 0) + op.amount;
+      if (total > Math.min(cap, remaining)) reject('contract-progress-cap-exceeded');
+      contractProgress.set(contract.id, total);
     }
   }
   if (
@@ -267,6 +337,7 @@ function validateClearChain(clearedStages) {
 
 export function validateImport(snapshot) {
   if (!object(snapshot) || !object(snapshot.character) || !Array.isArray(snapshot.items)) reject('invalid-snapshot');
+  validateCharacterMaterials(snapshot.character);
   const character = normalizeCharacter(snapshot.character);
   delete character.cloudUserId;
   if (

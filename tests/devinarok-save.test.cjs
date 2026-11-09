@@ -101,9 +101,11 @@ const charactersRoute = bundle('functions/api/devinarok/characters.ts');
 const deleteRoute = bundle('functions/api/auth/delete.ts');
 const enhanceRoute = bundle('functions/api/devinarok/enhance.ts');
 const importRoute = bundle('functions/api/devinarok/import.ts');
+const reforgeRoute = bundle('functions/api/devinarok/reforge.ts');
 const validators = bundle('functions/lib/devinarok/validation.ts');
 const saveOps = bundle('functions/lib/devinarok/js/save/ops.js');
 const shared = bundle('functions/api/devinarok/_shared.ts');
+const contractContent = bundle('functions/lib/devinarok/js/content/contracts.js');
 const itemContent = bundle('functions/lib/devinarok/js/content/items.js');
 const stageContent = bundle('functions/lib/devinarok/js/content/stages.js');
 const affixContent = bundle('functions/lib/devinarok/js/content/affixes.js');
@@ -506,6 +508,99 @@ test('imports enforce level-XP consistency and the six-character account cap', a
   assert.equal(invalid.status, 422);
 });
 
+test('contract progress is bounded and claims require generated contracts on a current date', () => {
+  const now = Date.now() + 20_000;
+  const dateKey = contractContent.kstDateKey(now);
+  const character = {
+    id: 'contract-validation',
+    level: 1,
+    gold: 0,
+    potions: 3,
+    materials: { essence: 0, soul: 0 },
+    clearedStages: [],
+    contracts: { dateKey: null, progress: {}, claimed: [] },
+  };
+  const contracts = contractContent.dailyContracts(character.id, dateKey, character);
+  const kills = contracts.find((contract) => contract.type === 'kills');
+  const spawnCap = validators.settlementCaps('C1', 'normal', 1).enemySpawnCaps[kills.enemyKind];
+  const context = {
+    kind: 'settlement', stageId: 'C1', difficulty: 'normal', partySize: 1,
+    outcome: 'death', ticks: 900, potionsUsed: 0,
+  };
+  const validateProgress = (contractId, amount, key = dateKey) => validators.validateOps({
+    character,
+    ops: [{ type: 'contractProgress', dateKey: key, contractId, amount }],
+    context,
+    now,
+  });
+
+  assert.ok(spawnCap > 0);
+  assert.doesNotThrow(() => validateProgress(kills.id, 1));
+  assert.throws(() => validateProgress(kills.id, spawnCap + 1), /contract-progress-cap-exceeded/);
+  assert.throws(() => validateProgress(`${dateKey}:foreign`, 1), /invalid-contract/);
+  const staleDate = contractContent.kstDateKey(now - 2 * 24 * 60 * 60 * 1000);
+  assert.throws(() => validateProgress(`${staleDate}:0`, 1, staleDate), /stale-contract-date/);
+
+  const claim = contracts[0];
+  const progressed = saveOps.applyOperations(character, {}, [{
+    type: 'contractProgress', dateKey, contractId: claim.id, amount: claim.target,
+  }], character.id).character;
+  assert.doesNotThrow(() => validators.validateOps({
+    character: progressed,
+    ops: [{ type: 'claimContract', dateKey, contractId: claim.id }],
+    context: { kind: 'hub' },
+    now,
+  }));
+  const claimed = saveOps.applyOperations(progressed, {}, [{
+    type: 'claimContract', dateKey, contractId: claim.id,
+  }], character.id).character;
+  assert.equal(claimed.contracts.claimed.includes(claim.id), true);
+  assert.equal(claimed.materials.essence, claim.rewards.essence);
+  assert.equal(claimed.gold, claim.rewards.gold);
+});
+
+test('materials are bounded on import and stored character reads', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  const snapshot = {
+    character: {
+      id: 'invalid-materials',
+      name: '기사',
+      kind: 'knight',
+      level: 1,
+      xp: 0,
+      gold: 0,
+      potions: 3,
+      rev: 1,
+      debugUsed: false,
+      equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+      clearedStages: [],
+      records: {},
+      materials: { essence: 1.5, soul: 0 },
+    },
+    items: [],
+  };
+  const invalidImport = await importRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/import', snapshot, auth),
+    env,
+  });
+  assert.equal(invalidImport.status, 422);
+
+  await createCharacter(commits.onRequestPost, env, auth);
+  const row = env.DB.prepare('SELECT data_json FROM devinarok_characters WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').first();
+  const stored = JSON.parse(row.data_json);
+  stored.materials = { essence: 10000, soul: 0 };
+  env.DB.prepare('UPDATE devinarok_characters SET data_json = ? WHERE user_id = ? AND char_id = ?')
+    .bind(JSON.stringify(stored), 'user-1', 'char-1').run();
+  const invalidState = await charactersRoute.onRequestGet({
+    request: request('GET', '/api/devinarok/characters', undefined, auth),
+    env,
+  });
+  assert.equal(invalidState.status, 422);
+  assert.equal((await invalidState.json()).error, 'invalid-materials');
+});
+
 test('cloud enhancement uses a server-generated roll and persists cost, revision, and result', async () => {
   const env = environment();
   const auth = token({ sub: 'user-1' });
@@ -538,4 +633,83 @@ test('cloud enhancement uses a server-generated roll and persists cost, revision
   assert.equal(saved.character.rev, 3);
   assert.equal(saved.character.gold, 40);
   assert.equal(saved.items[0].enhance, saved.success ? 2 : 1);
+});
+
+test('cloud reforge uses a server roll, revision guard, and rejects guests', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  await createCharacter(commits.onRequestPost, env, auth);
+  const affixId = Object.keys(affixContent.AFFIXES)[0];
+  const setup = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: 1,
+      idempotencyKey: 'reforge-fixture',
+      context: { kind: 'debug' },
+      ops: [
+        { type: 'grantGold', amount: 1000 },
+        {
+          type: 'grantItem',
+          uid: 'reforge-item',
+          itemId: 'rusted-sword',
+          rarity: 'rare',
+          ilvl: 1,
+          enhance: 0,
+          affixes: [{ id: affixId, value: 1 }],
+        },
+        { type: 'markDebug' },
+      ],
+    }, auth),
+    env,
+  });
+  assert.equal(setup.status, 200);
+  const row = env.DB.prepare('SELECT data_json FROM devinarok_characters WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').first();
+  const stored = JSON.parse(row.data_json);
+  stored.materials = { essence: 10, soul: 0 };
+  env.DB.prepare('UPDATE devinarok_characters SET data_json = ? WHERE user_id = ? AND char_id = ?')
+    .bind(JSON.stringify(stored), 'user-1', 'char-1').run();
+
+  const commitReforge = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: 2,
+      idempotencyKey: 'commit-reforge-denied',
+      context: { kind: 'hub' },
+      ops: [{ type: 'reforgeAffix', uid: 'reforge-item', index: 0, roll: 1 }],
+    }, auth),
+    env,
+  });
+  assert.equal(commitReforge.status, 400);
+  assert.equal((await commitReforge.json()).error, 'online-reforge-required');
+
+  const conflict = await reforgeRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/reforge', {
+      characterId: 'char-1', baseRev: 1, uid: 'reforge-item', index: 0,
+    }, auth),
+    env,
+  });
+  assert.equal(conflict.status, 409);
+
+  const result = await reforgeRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/reforge', {
+      characterId: 'char-1', baseRev: 2, uid: 'reforge-item', index: 0, roll: 1,
+    }, auth),
+    env,
+  });
+  assert.equal(result.status, 200);
+  const saved = await result.json();
+  assert.ok(Number.isInteger(saved.roll) && saved.roll >= 0 && saved.roll <= 0xffffffff);
+  assert.equal(saved.character.rev, 3);
+  assert.equal(saved.character.gold, 980);
+  assert.equal(saved.character.materials.essence, 6);
+  assert.notEqual(saved.items[0].affixes[0].id, affixId);
+
+  const guest = await reforgeRoute.onRequestPost({
+    request: request('POST', '/api/devinarok/reforge', {
+      characterId: 'char-1', baseRev: 3, uid: 'reforge-item', index: 0,
+    }, token({ sub: 'guest', isAnonymous: true })),
+    env,
+  });
+  assert.equal(guest.status, 403);
 });
