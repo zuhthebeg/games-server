@@ -359,6 +359,17 @@ test('mastery-max boss bot settlements pass validateOps for every tier and famil
   console.log(`M5d max-affix boss settlements: ${JSON.stringify(summaries)}`);
 });
 
+test('seeded Nightmare CB crossbow drop never exceeds its set base required level', () => {
+  const world = runBossBot({ seed: 4023, stageId: 'CB', difficulty: 'nightmare', family: 'crossbow' });
+  const bases = new Map(ITEM_BASES.map((base) => [base.id, base]));
+  const invalidSetDrops = world.result.items.filter((item) => (
+    item.setId && bases.get(item.itemId)?.requiredLevel > item.ilvl
+  ));
+
+  assert.equal(world.outcome, 'clear');
+  assert.deepEqual(invalidSetDrops, []);
+});
+
 test('200 real item rolls at ilvl 1–20 pass import and settlement validation', () => {
   const stageId = 'KB';
   const difficulty = 'hell';

@@ -986,6 +986,10 @@ export function rarityForRoll(value, { elite = false, boss = false, difficulty =
   return table.at(-1).rarity;
 }
 
+function eligibleSetBases(setId, itemLevel) {
+  return ITEM_BASES.filter((item) => item.setId === setId && item.requiredLevel <= itemLevel);
+}
+
 function rollAffix(world, ilvl) {
   const ids = Object.keys(AFFIXES);
   const id = ids[Math.floor(random(world) * ids.length)];
@@ -1010,11 +1014,9 @@ export function rollStageItem(world, options = {}) {
       ? Object.entries(ITEM_SETS).find(([, set]) => set.family === playerFamily)?.[0]
       : null
   );
-  const bases = ITEM_BASES.filter((item) => (
-    rarity === 'set'
-      ? item.setId === setId && item.requiredLevel <= itemLevel
-      : !item.setId && item.requiredLevel <= stageLevel
-  ));
+  const bases = rarity === 'set'
+    ? eligibleSetBases(setId, itemLevel)
+    : ITEM_BASES.filter((item) => !item.setId && item.requiredLevel <= stageLevel);
   if (!bases.length) throw new TypeError('No eligible item base for this drop');
   const base = bases[Math.floor(random(world) * bases.length)];
   const ilvl = itemLevel;
@@ -1358,9 +1360,7 @@ function dropRewards(world, enemy) {
           ? Object.entries(ITEM_SETS).find(([, set]) => set.family === player.family)?.[0]
           : null;
         const setDropRoll = Boolean(setId && random(world) < 0.25);
-        const setAvailable = ITEM_BASES.some((item) => (
-          item.setId === setId && item.requiredLevel <= Math.min(20, stageLevel + 2)
-        ));
+        const setAvailable = eligibleSetBases(setId, Math.min(20, stageLevel + 2)).length > 0;
         const setDrop = Boolean(setDropRoll && setAvailable);
         const item = rollStageItem(world, setDrop
           ? { stageLevel, boss: true, forcedRarity: 'set', setId }
