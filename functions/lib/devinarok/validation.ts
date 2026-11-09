@@ -204,7 +204,6 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
   if (!Array.isArray(ops) || ops.length < 1 || ops.length > 128 || !object(context)) reject('invalid-ops');
   if (ops.some((op) => !object(op) || typeof op.type !== 'string')) reject('invalid-ops');
   if (ops.some((op) => op.type === 'reforgeAffix')) reject('online-reforge-required');
-  if (character) validateCharacterContracts(character);
 
   if (context.kind === 'debug') {
     if (ops.some((op) => ['claimContract', 'contractProgress'].includes(op.type))) reject('invalid-contract-context');

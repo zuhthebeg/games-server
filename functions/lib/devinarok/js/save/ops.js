@@ -25,19 +25,28 @@ function normalizedMaterial(value) {
   return Number.isSafeInteger(value) ? Math.max(0, Math.min(MATERIAL_CAP, value)) : 0;
 }
 
-function normalizedContracts(contracts) {
+function normalizedContracts(contracts, character) {
   const progress = contracts?.progress && typeof contracts.progress === 'object' && !Array.isArray(contracts.progress)
     ? Object.fromEntries(Object.entries(contracts.progress).filter(([, amount]) => Number.isSafeInteger(amount) && amount >= 0))
     : {};
   const claimed = Array.isArray(contracts?.claimed)
     ? [...new Set(contracts.claimed.filter((id) => typeof id === 'string'))]
     : [];
+  const clearedStages = new Set(
+    Array.isArray(character?.clearedStages)
+      ? character.clearedStages.filter((stage) => typeof stage === 'string' && stage.length > 0)
+      : [],
+  );
+  const maxLevel = Number.isInteger(character?.level) ? Math.max(1, character.level) : 1;
   const rawBasis = contracts?.basis;
   const basis = rawBasis && typeof rawBasis === 'object' && !Array.isArray(rawBasis)
     && Array.isArray(rawBasis.clearedStages)
     && rawBasis.clearedStages.every((stage) => typeof stage === 'string' && stage.length > 0)
     && Number.isInteger(rawBasis.level) && rawBasis.level >= 1
-    ? { clearedStages: [...new Set(rawBasis.clearedStages)].sort(), level: rawBasis.level }
+    ? {
+      clearedStages: [...new Set(rawBasis.clearedStages.filter((stage) => clearedStages.has(stage)))].sort(),
+      level: Math.min(rawBasis.level, maxLevel),
+    }
     : null;
   return {
     dateKey: /^\d{4}-\d{2}-\d{2}$/.test(contracts?.dateKey ?? '') ? contracts.dateKey : null,
@@ -65,7 +74,7 @@ export function normalizeCharacter(character) {
     essence: normalizedMaterial(character.materials?.essence),
     soul: normalizedMaterial(character.materials?.soul),
   };
-  normalized.contracts = normalizedContracts(character.contracts);
+  normalized.contracts = normalizedContracts(character.contracts, character);
   return normalized;
 }
 
@@ -127,6 +136,9 @@ export function applyOperations(character, itemMap, operations, characterId) {
         if (!Number.isInteger(operation.level)) throw new TypeError('Level must be an integer');
         nextCharacter.level = Math.max(1, Math.min(20, operation.level));
         nextCharacter.xp = 0;
+        if (nextCharacter.contracts.basis) {
+          nextCharacter.contracts.basis.level = Math.min(nextCharacter.contracts.basis.level, nextCharacter.level);
+        }
         break;
       }
       case 'grantGold':

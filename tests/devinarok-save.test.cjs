@@ -613,6 +613,46 @@ test('contract basis rejects cleared stages absent from the character', () => {
     contracts: { dateKey, progress: {}, claimed: [], basis: { clearedStages: ['C1'], level: 1 } },
   };
   assert.throws(() => validators.validateImport({ character, items: [] }), /invalid-contracts/);
+  const tooHigh = {
+    ...character,
+    contracts: { ...character.contracts, basis: { clearedStages: [], level: 2 } },
+  };
+  assert.throws(() => validators.validateImport({ character: tooHigh, items: [] }), /invalid-contracts/);
+});
+
+test('lowering level keeps contract basis loadable and commits after normalization', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  await createCharacter(commits.onRequestPost, env, auth);
+  const row = env.DB.prepare('SELECT rev, data_json FROM devinarok_characters WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').first();
+  const original = JSON.parse(row.data_json);
+  let state = saveOps.applyOperations(original, {}, [
+    { type: 'setLevel', level: 10 },
+    { type: 'contractDay', dateKey: contractContent.kstDateKey(Date.now()) },
+    { type: 'setLevel', level: 3 },
+  ], original.id);
+  assert.equal(state.character.contracts.basis.level, 3);
+
+  state.character.contracts.basis.level = 10;
+  env.DB.prepare('UPDATE devinarok_characters SET data_json = ? WHERE user_id = ? AND char_id = ?')
+    .bind(JSON.stringify(state.character), 'user-1', 'char-1').run();
+  const loaded = await shared.loadCharacter(env.DB, 'user-1', 'char-1');
+  assert.equal(loaded.character.level, 3);
+  assert.equal(loaded.character.contracts.basis.level, 3);
+
+  const committed = await commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev: row.rev,
+      idempotencyKey: 'lowered-level-contract-basis',
+      context: { kind: 'hub' },
+      ops: [{ type: 'updateTutorial', state: { step: 'board', completed: false, skipped: false, combatComplete: false } }],
+    }, auth),
+    env,
+  });
+  assert.equal(committed.status, 200, JSON.stringify(await committed.clone().json()));
+  assert.equal((await committed.json()).character.contracts.basis.level, 3);
 });
 
 test('settlement accepts contractDay before clear operations and snapshots pre-settlement state', () => {
