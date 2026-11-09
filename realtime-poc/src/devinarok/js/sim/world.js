@@ -1334,7 +1334,7 @@ function spawnRoom(world) {
   };
   if (room.objective.type === 'hunt') {
     objective.endsTick = startTick + room.objective.timeSec * TICK_HZ;
-    const target = spawnStageEnemy(world, room.objective.target, index, true, null, null, { bounty: true });
+    const target = spawnStageEnemy(world, room.objective.target, index, false, null, null, { bounty: true });
     objective.targetId = target.id;
   } else if (room.objective.type === 'defend') {
     const maxHp = Math.round(
