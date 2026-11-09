@@ -1389,7 +1389,7 @@ function killStageEnemy(
   damage,
   castId,
   critical = false,
-  skillId = source.skillCast?.id ?? 0,
+  skillId = 0,
   viewLag = source.viewLag ?? 0,
   viewTick = source.lastInput?.viewTick,
   guarded = false,
@@ -1427,7 +1427,7 @@ function killStageEnemy(
   if (enemy.boss) emit(world, 'bossDefeated', { entityId: enemy.id });
 }
 
-function playerStrike(world, player, shape, motionMult, castId, hitTargets, skillId = undefined, {
+export function playerStrike(world, player, shape, motionMult, castId, hitTargets, skillId = undefined, {
   rewind = true,
   maxTargets = Infinity,
   slowTicks = 0,
@@ -1470,8 +1470,7 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
     if (enemy.dead) continue;
     hitTargets.push(enemy.id);
     const critical = forceCritical || random(world) * 100 < player.stats.critChance;
-    const masterySkillId = Number.isInteger(skillId) ? skillId : player.skillCast?.id;
-    const skillRank = Number.isInteger(masterySkillId) ? player.masteryRanks?.[masterySkillId] ?? 0 : 0;
+    const skillRank = Number.isInteger(skillId) ? player.masteryRanks?.[skillId] ?? 0 : 0;
     const skillDamageMult = motionMult * (1 + masteryBonus(skillRank).damagePct / 100);
     const rawDamage = calculateDamage(player.stats.attack, skillDamageMult, critical, player.stats.critDamage, enemy.defense ?? 0);
     const sourceX = Number.isFinite(shape.originX) ? shape.originX : player.x;
@@ -1489,7 +1488,7 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
       damage,
       castId,
       critical,
-      skillId ?? player.skillCast?.id ?? 0,
+      skillId ?? 0,
       viewLag,
       viewTick,
       guarded,
@@ -1824,6 +1823,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
           hitTargets: [],
           maxTargets: 1,
           viewTick: input.viewTick,
+          skillId: cast.id,
         };
         shots.push({ ownerId: player.playerId, x: player.x, z: player.z, angle: cast.angle, length: 9, castSeq: cast.seq });
       }
@@ -1980,7 +1980,6 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         viewTick: input.viewTick,
         hitEvery: flame.hitEvery,
         endsTick: ctx.tick + 1 + 2 * TICK_HZ,
-        skillId: flame.id,
         sourceX: player.x,
         sourceZ: player.z,
       });
@@ -2209,7 +2208,7 @@ function advanceStagePlayer(world, player, rawInput) {
     }
     if (motion.attackStrike) {
       const strike = motion.attackStrike;
-      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, undefined, {
+      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
         maxTargets: strike.maxTargets,
         viewLag: player.viewLag,
         viewTick: strike.viewTick ?? motion.input.viewTick,
