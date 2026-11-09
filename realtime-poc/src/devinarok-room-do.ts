@@ -6,6 +6,7 @@ import {
   step,
 } from './devinarok/js/sim/world.js';
 import { equipmentLook } from './devinarok/js/content/items.js';
+import { SKILLS } from './devinarok/js/content/skills.js';
 import { isStageUnlocked } from './devinarok/js/content/stages.js';
 import { decodeMessage, encodeMessage, PROTOCOL_VERSION } from './devinarok/js/net/protocol.js';
 import { SIM_HASH } from './devinarok/js/net/sim-version.js';
@@ -41,6 +42,7 @@ type Character = {
   level?: number;
   equipment?: unknown;
   potions?: number;
+  mastery?: Record<string, number>;
   clearedStages?: string[];
   [key: string]: unknown;
 };
@@ -108,7 +110,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function normalizeCharacter(value: unknown): Character {
+export function normalizeCharacter(value: unknown): Character {
   const character = value && typeof value === 'object' ? value as Character : {};
   const equipment = Array.isArray(character.equipment) ? character.equipment : [];
   return {
@@ -118,6 +120,10 @@ function normalizeCharacter(value: unknown): Character {
     clearedStages: Array.isArray(character.clearedStages)
       ? character.clearedStages.filter((stage): stage is string => typeof stage === 'string')
       : [],
+    mastery: Object.fromEntries(Object.keys(SKILLS).map((skill) => {
+      const xp = character.mastery?.[skill];
+      return [skill, Number.isInteger(xp) ? clamp(xp, 0, 300) : 0];
+    })),
   };
 }
 
@@ -943,6 +949,7 @@ export class DevinarokRoomDO {
           characterKind: entity.characterKind,
           family: entity.family,
           look: entity.look,
+          mastery: [1, 2, 3, 4].map((slot) => entity.masteryRanks?.[slot] ?? 0),
         } : {}),
       } : {}),
       ...(entity.kind === 'player' && entity.playerId === playerId ? {

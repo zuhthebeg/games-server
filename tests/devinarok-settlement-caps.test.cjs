@@ -25,6 +25,7 @@ const { ENEMIES } = bundle('functions/lib/devinarok/js/content/enemies.js');
 const { ITEM_BASES } = bundle('functions/lib/devinarok/js/content/items.js');
 const { DIFFICULTIES, STAGE_LIST, STAGES, effectiveStageLevel, stageClearKey } = bundle('functions/lib/devinarok/js/content/stages.js');
 const validators = bundle('functions/lib/devinarok/validation.ts');
+const { SKILLS } = bundle('functions/lib/devinarok/js/content/skills.js');
 const {
   BUTTONS, COMBO_TIMELINES, createStageWorld, rollStageItem, step,
 } = bundle('realtime-poc/src/devinarok/js/sim/world.js');
@@ -211,7 +212,12 @@ function runBossBot({ seed, stageId, difficulty, family }) {
     stageId,
     difficulty,
     playerId,
-    character: { level: 20, potions: 5, equipment },
+    character: {
+      level: 20,
+      potions: 5,
+      equipment,
+      mastery: Object.fromEntries(Object.keys(SKILLS).map((skill) => [skill, 300])),
+    },
   });
   const player = world.entities.find((entity) => entity.kind === 'player');
   assert.equal(player.stats.goldGain, 125);
@@ -270,7 +276,7 @@ test('settlement caps cover every stage and tier including maximum summon reward
   }
 });
 
-test('max-affix boss bot settlements pass validateOps for every tier and family', { timeout: 600000 }, () => {
+test('mastery-max boss bot settlements pass validateOps for every tier and family', { timeout: 600000 }, () => {
   const clearedStages = Object.keys(DIFFICULTIES).flatMap((difficulty) => (
     STAGE_LIST.map((stage) => stageClearKey(stage.id, difficulty))
   ));
@@ -298,6 +304,9 @@ test('max-affix boss bot settlements pass validateOps for every tier and family'
             legendaryId: item.legendaryId,
             setId: item.setId,
           })),
+          ...Object.entries(result.skillUses ?? {})
+            .filter(([, amount]) => amount > 0)
+            .map(([skill, amount]) => ({ type: 'gainMastery', skill, amount })),
           { type: 'clearStage', stageId: stageKey },
           { type: 'recordClear', key: stageKey, ticks: result.ticks },
         ];
@@ -309,10 +318,15 @@ test('max-affix boss bot settlements pass validateOps for every tier and family'
         };
         const caps = validators.settlementCaps(stageId, difficulty);
         assert.doesNotThrow(() => validators.validateOps({
-          character,
+          character: {
+            ...character,
+            mastery: Object.fromEntries(Object.keys(SKILLS).map((skill) => [skill, 300])),
+          },
           items: [],
           ops,
-          context: { kind: 'settlement', stageId, difficulty, partySize: 1, outcome: 'clear' },
+          context: {
+            kind: 'settlement', stageId, difficulty, partySize: 1, outcome: 'clear', ticks: result.ticks,
+          },
           lastSettlementAt: 0,
           now: 100000,
         }), `${difficulty}:${stageId}:${family} settlement ${JSON.stringify({
@@ -343,6 +357,17 @@ test('max-affix boss bot settlements pass validateOps for every tier and family'
     }
   }
   console.log(`M5d max-affix boss settlements: ${JSON.stringify(summaries)}`);
+});
+
+test('seeded Nightmare CB crossbow drop never exceeds its set base required level', () => {
+  const world = runBossBot({ seed: 4023, stageId: 'CB', difficulty: 'nightmare', family: 'crossbow' });
+  const bases = new Map(ITEM_BASES.map((base) => [base.id, base]));
+  const invalidSetDrops = world.result.items.filter((item) => (
+    item.setId && bases.get(item.itemId)?.requiredLevel > item.ilvl
+  ));
+
+  assert.equal(world.outcome, 'clear');
+  assert.deepEqual(invalidSetDrops, []);
 });
 
 test('200 real item rolls at ilvl 1–20 pass import and settlement validation', () => {

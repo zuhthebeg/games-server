@@ -15,6 +15,7 @@ import {
   ELITE_RARITIES,
 } from '../content/items.js';
 import { FAMILY_SKILLS, POTION, SKILLS } from '../content/skills.js';
+import { masteryBonus, masteryRank } from '../content/mastery.js';
 import { DIFFICULTIES, effectiveStageLevel, STAGES } from '../content/stages.js';
 import { HUB_ARENA } from '../content/stages.js';
 
@@ -433,7 +434,13 @@ export function addPlayer(world, {
   const stats = world.mode === 'stage' || world.mode === 'hub'
     ? calculatePlayerStats(level, equipment)
     : null;
-  const reward = { xp: 0, gold: 0, items: [], kills: {}, perfectDodges: 0, potionsUsed: 0 };
+  const familySkills = FAMILY_SKILLS[look.family] ?? FAMILY_SKILLS.sword;
+  const masteryRanks = Object.fromEntries(familySkills.map((skillKey, index) => (
+    [index + 1, masteryRank(character.mastery?.[skillKey])]
+  )));
+  const reward = {
+    xp: 0, gold: 0, items: [], kills: {}, perfectDodges: 0, potionsUsed: 0, skillUses: {},
+  };
   const player = {
     id: nextEntityId(world),
     kind: 'player',
@@ -441,6 +448,7 @@ export function addPlayer(world, {
     name: String(name ?? id).slice(0, 32),
     characterKind: look.characterKind,
     family: look.family,
+    masteryRanks,
     equipment,
     look,
     x: spawn.x,
@@ -978,6 +986,10 @@ export function rarityForRoll(value, { elite = false, boss = false, difficulty =
   return table.at(-1).rarity;
 }
 
+function eligibleSetBases(setId, itemLevel) {
+  return ITEM_BASES.filter((item) => item.setId === setId && item.requiredLevel <= itemLevel);
+}
+
 function rollAffix(world, ilvl) {
   const ids = Object.keys(AFFIXES);
   const id = ids[Math.floor(random(world) * ids.length)];
@@ -993,6 +1005,7 @@ export function rollStageItem(world, options = {}) {
   } = options;
   const difficulty = options.difficulty ?? world.difficulty ?? 'normal';
   const stageLevel = Math.min(20, options.stageLevel ?? world.effectiveLevel ?? world.stageLevel ?? 1);
+  const itemLevel = Math.min(20, stageLevel + (boss ? 2 : 0));
   const rarity = forcedRarity ?? rarityForRoll(random(world), { elite, boss, difficulty });
   if (!RARITIES[rarity]) throw new TypeError(`Unknown item rarity: ${rarity}`);
   const playerFamily = world.entities?.find((entity) => entity.kind === 'player')?.family;
@@ -1001,14 +1014,12 @@ export function rollStageItem(world, options = {}) {
       ? Object.entries(ITEM_SETS).find(([, set]) => set.family === playerFamily)?.[0]
       : null
   );
-  const ilvl = Math.min(20, stageLevel + (boss ? 2 : 0));
-  const bases = ITEM_BASES.filter((item) => (
-    rarity === 'set'
-      ? item.setId === setId
-      : !item.setId && item.requiredLevel <= stageLevel
-  ));
+  const bases = rarity === 'set'
+    ? eligibleSetBases(setId, itemLevel)
+    : ITEM_BASES.filter((item) => !item.setId && item.requiredLevel <= stageLevel);
   if (!bases.length) throw new TypeError('No eligible item base for this drop');
   const base = bases[Math.floor(random(world) * bases.length)];
+  const ilvl = itemLevel;
   const affixCount = RARITIES[rarity].affixes;
   const affixes = [];
   while (affixes.length < affixCount) {
@@ -1348,7 +1359,9 @@ function dropRewards(world, enemy) {
         const setId = enemy.boss && world.difficulty !== 'normal'
           ? Object.entries(ITEM_SETS).find(([, set]) => set.family === player.family)?.[0]
           : null;
-        const setDrop = Boolean(setId && random(world) < 0.25);
+        const setDropRoll = Boolean(setId && random(world) < 0.25);
+        const setAvailable = eligibleSetBases(setId, Math.min(20, stageLevel + 2)).length > 0;
+        const setDrop = Boolean(setDropRoll && setAvailable);
         const item = rollStageItem(world, setDrop
           ? { stageLevel, boss: true, forcedRarity: 'set', setId }
           : { stageLevel, elite: enemy.elite, boss: enemy.boss });
@@ -1376,7 +1389,7 @@ function killStageEnemy(
   damage,
   castId,
   critical = false,
-  skillId = source.skillCast?.id ?? 0,
+  skillId = 0,
   viewLag = source.viewLag ?? 0,
   viewTick = source.lastInput?.viewTick,
   guarded = false,
@@ -1414,7 +1427,7 @@ function killStageEnemy(
   if (enemy.boss) emit(world, 'bossDefeated', { entityId: enemy.id });
 }
 
-function playerStrike(world, player, shape, motionMult, castId, hitTargets, skillId = undefined, {
+export function playerStrike(world, player, shape, motionMult, castId, hitTargets, skillId = undefined, {
   rewind = true,
   maxTargets = Infinity,
   slowTicks = 0,
@@ -1457,7 +1470,9 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
     if (enemy.dead) continue;
     hitTargets.push(enemy.id);
     const critical = forceCritical || random(world) * 100 < player.stats.critChance;
-    const rawDamage = calculateDamage(player.stats.attack, motionMult, critical, player.stats.critDamage, enemy.defense ?? 0);
+    const skillRank = Number.isInteger(skillId) ? player.masteryRanks?.[skillId] ?? 0 : 0;
+    const skillDamageMult = motionMult * (1 + masteryBonus(skillRank).damagePct / 100);
+    const rawDamage = calculateDamage(player.stats.attack, skillDamageMult, critical, player.stats.critDamage, enemy.defense ?? 0);
     const sourceX = Number.isFinite(shape.originX) ? shape.originX : player.x;
     const sourceZ = Number.isFinite(shape.originZ) ? shape.originZ : player.z;
     const incomingAngle = Math.atan2(sourceZ - target.z, sourceX - target.x);
@@ -1473,7 +1488,7 @@ function playerStrike(world, player, shape, motionMult, castId, hitTargets, skil
       damage,
       castId,
       critical,
-      skillId ?? player.skillCast?.id ?? 0,
+      skillId ?? 0,
       viewLag,
       viewTick,
       guarded,
@@ -1704,9 +1719,19 @@ export function stepPlayerMotion(ctx, player, rawInput) {
   if (skillId && !(skillId === 4 && player.level < 7) && !player.skillCast && player.skillCooldowns[skillId] === 0) {
     const payload = startSkillMotion(ctx, player, skillId, input.seq, input);
     if (payload) {
-      const skill = SKILLS[familySkillName(player, skillId)];
+      const skillKey = familySkillName(player, skillId);
+      const skill = SKILLS[skillKey];
+      if (stageActiveEnemies(ctx).some((enemy) => (
+        Math.hypot(enemy.x - player.x, enemy.z - player.z) <= 8
+      ))) {
+        const reward = ctx.rewards[player.playerId];
+        reward.skillUses[skillKey] = (reward.skillUses[skillKey] ?? 0) + 1;
+      }
+      const cooldownBonus = masteryBonus(player.masteryRanks?.[skillId] ?? 0).cooldownPct;
       const cooldownTicks = Math.max(1, Math.round(skill.cooldownTicks * (
         1 - Math.min(60, player.stats.skillCooldownReduction) / 100
+      ) * (
+        1 - cooldownBonus / 100
       )));
       player.skillCooldowns[skillId] = cooldownTicks;
       events.push({ type: 'skill', payload, cooldownTicks });
@@ -1798,6 +1823,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
           hitTargets: [],
           maxTargets: 1,
           viewTick: input.viewTick,
+          skillId: cast.id,
         };
         shots.push({ ownerId: player.playerId, x: player.x, z: player.z, angle: cast.angle, length: 9, castSeq: cast.seq });
       }
@@ -1954,7 +1980,6 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         viewTick: input.viewTick,
         hitEvery: flame.hitEvery,
         endsTick: ctx.tick + 1 + 2 * TICK_HZ,
-        skillId: flame.id,
         sourceX: player.x,
         sourceZ: player.z,
       });
@@ -2183,7 +2208,7 @@ function advanceStagePlayer(world, player, rawInput) {
     }
     if (motion.attackStrike) {
       const strike = motion.attackStrike;
-      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, undefined, {
+      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
         maxTargets: strike.maxTargets,
         viewLag: player.viewLag,
         viewTick: strike.viewTick ?? motion.input.viewTick,
@@ -2736,6 +2761,7 @@ function settlementResult(world, player, outcome) {
     kills: { ...reward.kills },
     perfectDodges: reward.perfectDodges,
     potionsUsed: reward.potionsUsed,
+    skillUses: { ...reward.skillUses },
   };
 }
 

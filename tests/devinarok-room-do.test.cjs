@@ -46,12 +46,16 @@ function testNewPlayerStaticFieldsInDelta() {
     characterKind: 'rogue',
     family: 'crossbow',
     look,
+    masteryRanks: { 1: 1, 2: 2, 3: 3, 4: 5 },
   };
   const firstDelta = room.renderEntity(player, 'viewer', false);
   assert.equal(firstDelta.characterKind, 'rogue');
   assert.equal(firstDelta.family, 'crossbow');
   assert.deepEqual(firstDelta.look, look);
-  assert.equal(room.renderEntity(player, 'viewer', false).look, undefined);
+  assert.deepEqual(firstDelta.mastery, [1, 2, 3, 5]);
+  const laterDelta = room.renderEntity(player, 'viewer', false);
+  assert.equal(laterDelta.look, undefined);
+  assert.equal(laterDelta.mastery, undefined);
   const localSnapshot = room.renderEntity({
     ...player,
     counterReadyTicks: 42,
@@ -72,6 +76,13 @@ function testNewPlayerStaticFieldsInDelta() {
     localSnapshot.motion.dodgeStartTick,
   ], [42, 7, true, 18]);
   assert.equal(room.renderEntity({ id: 43, kind: 'enemy', boss: true, attackPattern: 'bone-spear' }, 'viewer', true).attackPattern, 'bone-spear');
+  assert.deepEqual(compiled.exports.normalizeCharacter({
+    level: 4,
+    mastery: { spin: 500, dash: -1, guard: 2.5, unknown: 100 },
+  }).mastery, {
+    spin: 300, dash: 0, guard: 0, quake: 0, pierce: 0, vault: 0,
+    volley: 0, rain: 0, flame: 0, frost: 0, blink: 0, meteor: 0,
+  });
 }
 
 async function testInputPlayoutBuffer() {

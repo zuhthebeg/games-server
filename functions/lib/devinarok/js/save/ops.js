@@ -3,6 +3,8 @@ import { AFFIXES } from '../content/affixes.js';
 import { rollAffixValue } from '../content/affix-value.js';
 import { contractsFor } from '../content/contracts.js';
 import { ITEMS } from '../content/items.js';
+import { MASTERY_MAX_XP } from '../content/mastery.js';
+import { SKILLS } from '../content/skills.js';
 
 const SLOTS = new Set(['weapon', 'head', 'body', 'hands', 'feet']);
 const ENHANCE_RATES = [100, 100, 95, 90, 80, 70, 60, 50, 40, 30];
@@ -23,6 +25,13 @@ function clone(value) {
 
 function normalizedMaterial(value) {
   return Number.isSafeInteger(value) ? Math.max(0, Math.min(MATERIAL_CAP, value)) : 0;
+}
+
+function normalizedMastery(mastery) {
+  return Object.fromEntries(Object.keys(SKILLS).map((skill) => {
+    const xp = mastery?.[skill];
+    return [skill, Number.isInteger(xp) ? Math.max(0, Math.min(MASTERY_MAX_XP, xp)) : 0];
+  }));
 }
 
 function normalizedContracts(contracts, character) {
@@ -74,6 +83,7 @@ export function normalizeCharacter(character) {
     essence: normalizedMaterial(character.materials?.essence),
     soul: normalizedMaterial(character.materials?.soul),
   };
+  normalized.mastery = normalizedMastery(character.mastery);
   normalized.contracts = normalizedContracts(character.contracts, character);
   return normalized;
 }
@@ -116,6 +126,7 @@ export function applyOperations(character, itemMap, operations, characterId) {
         clearedStages: [],
         records: {},
         materials: { essence: 0, soul: 0 },
+        mastery: normalizedMastery(),
         contracts: { dateKey: null, progress: {}, claimed: [], basis: null },
         tutorial: { step: 'board', completed: false, skipped: false, combatComplete: false },
       };
@@ -130,6 +141,18 @@ export function applyOperations(character, itemMap, operations, characterId) {
           nextCharacter.level += 1;
         }
         if (nextCharacter.level >= 20) nextCharacter.xp = 0;
+        break;
+      }
+      case 'gainMastery': {
+        if (!Object.hasOwn(SKILLS, operation.skill)) throw new TypeError('Invalid mastery skill');
+        if (!Number.isSafeInteger(operation.amount) || operation.amount < 1) {
+          throw new TypeError('Mastery XP must be an integer >= 1');
+        }
+        const amount = operation.amount;
+        nextCharacter.mastery[operation.skill] = Math.min(
+          MASTERY_MAX_XP,
+          nextCharacter.mastery[operation.skill] + amount,
+        );
         break;
       }
       case 'setLevel': {
@@ -226,6 +249,11 @@ export function applyOperations(character, itemMap, operations, characterId) {
       case 'markDebug':
         nextCharacter.debugUsed = true;
         break;
+      case 'setMastery':
+        if (!Object.hasOwn(SKILLS, operation.skill)) throw new TypeError('Invalid mastery skill');
+        nextCharacter.mastery[operation.skill] = integer(operation.xp, 'Mastery XP');
+        if (operation.xp > MASTERY_MAX_XP) throw new RangeError('Mastery XP exceeds the cap');
+        break;
       case 'resetCharacter':
         for (const [uid, item] of Object.entries(nextItems)) {
           if (item.characterId === characterId) delete nextItems[uid];
@@ -238,6 +266,7 @@ export function applyOperations(character, itemMap, operations, characterId) {
         nextCharacter.clearedStages = [];
         nextCharacter.records = {};
         nextCharacter.materials = { essence: 0, soul: 0 };
+        nextCharacter.mastery = normalizedMastery();
         nextCharacter.contracts = { dateKey: null, progress: {}, claimed: [], basis: null };
         nextCharacter.tutorial = { step: 'board', completed: false, skipped: false, combatComplete: false };
         break;
