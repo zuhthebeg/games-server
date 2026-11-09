@@ -791,8 +791,8 @@ function completeObjective(world, position = null) {
     const item = rollStageItem(world, {
       stageLevel: world.effectiveLevel ?? world.stageLevel,
       elite: true,
+      forcedRarity: 'rare',
     });
-    if (item.rarity === 'common' || item.rarity === 'magic') item.rarity = 'rare';
     spawnLoot(world, x, z, { ownerId: player.playerId, lootType: 'item', item });
   }
 }
