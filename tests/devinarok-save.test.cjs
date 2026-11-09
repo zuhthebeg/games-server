@@ -777,3 +777,33 @@ test('legendary unique affixes cannot be reforged and other reforges pass item v
     items: Object.values(reforged.items),
   }));
 });
+
+test('contractDay only moves forward and cannot restore a claimed contract reward', () => {
+  const now = Date.now() + 20_000;
+  const today = contractContent.kstDateKey(now);
+  const yesterday = contractContent.kstDateKey(now - 24 * 60 * 60 * 1000);
+  const character = {
+    id: 'contract-day-forward', level: 1, gold: 0, potions: 3, materials: { essence: 0, soul: 0 },
+    clearedStages: [], contracts: { dateKey: null, progress: {}, claimed: [], basis: null },
+  };
+  let state = saveOps.applyOperations(character, {}, [
+    { type: 'contractDay', dateKey: yesterday },
+  ], character.id);
+  const contract = contractContent.contractsFor(state.character, yesterday)[0];
+  state = saveOps.applyOperations(state.character, state.items, [
+    { type: 'contractProgress', dateKey: yesterday, contractId: contract.id, amount: contract.target },
+    { type: 'claimContract', dateKey: yesterday, contractId: contract.id },
+  ], character.id);
+  const goldAfterClaim = state.character.gold;
+  state = saveOps.applyOperations(state.character, state.items, [
+    { type: 'contractDay', dateKey: today },
+  ], character.id);
+  assert.equal(state.character.contracts.dateKey, today);
+  assert.throws(() => saveOps.applyOperations(state.character, state.items, [
+    { type: 'contractDay', dateKey: yesterday },
+  ], character.id), { name: 'RangeError', message: 'Contract day cannot go backwards' });
+  assert.throws(() => saveOps.applyOperations(state.character, state.items, [
+    { type: 'claimContract', dateKey: yesterday, contractId: contract.id },
+  ], character.id), /not active/);
+  assert.equal(state.character.gold, goldAfterClaim);
+});

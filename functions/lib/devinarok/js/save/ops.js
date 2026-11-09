@@ -259,6 +259,9 @@ export function applyOperations(character, itemMap, operations, characterId) {
       }
       case 'contractDay': {
         const dateKey = validDateKey(operation.dateKey);
+        if (nextCharacter.contracts.dateKey && dateKey < nextCharacter.contracts.dateKey) {
+          throw new RangeError('Contract day cannot go backwards');
+        }
         if (nextCharacter.contracts.dateKey !== dateKey) {
           nextCharacter.contracts = {
             dateKey,
