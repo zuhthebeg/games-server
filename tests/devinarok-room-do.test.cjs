@@ -85,6 +85,55 @@ function testNewPlayerStaticFieldsInDelta() {
   });
 }
 
+function testObjectiveSnapshotMetadataDelta() {
+  const bundled = esbuild.buildSync({
+    entryPoints: [path.join(ROOT, 'realtime-poc/src/devinarok-room-do.ts')],
+    bundle: true,
+    format: 'cjs',
+    target: 'node22',
+    platform: 'node',
+    write: false,
+    logLevel: 'silent',
+  }).outputFiles[0].text;
+  const compiled = { exports: {} };
+  new Function('module', 'exports', 'require', bundled)(compiled, compiled.exports, require);
+  const room = new compiled.exports.DevinarokRoomDO({ storage: {} }, {});
+  const player = { id: 1, kind: 'player', playerId: 'hero', x: 0, z: 0, hp: 100, maxHp: 100 };
+  room.world = {
+    tick: 0,
+    stageId: 'C3',
+    difficulty: 'normal',
+    roomIndex: 2,
+    roomCleared: false,
+    doorCountdown: null,
+    objective: { type: 'defend', state: 'active', roomIndex: 2, hp: 300, maxHp: 300 },
+    openDoors: {},
+    roomEnemyIds: [],
+    entities: [player],
+  };
+
+  const full = room.snapshotFor('hero', true, false);
+  assert.deepEqual(full.objective, {
+    type: 'defend',
+    state: 'active',
+    roomIndex: 2,
+    hp: 300,
+    maxHp: 300,
+  });
+  room.inputs.get('hero').snapshotAck = full.tick;
+  room.world.tick += 1;
+  room.world.objective.hp = 270;
+  const delta = room.snapshotFor('hero', false, false);
+  assert.equal(delta.full, false);
+  assert.deepEqual(delta.objective, {
+    type: 'defend',
+    state: 'active',
+    roomIndex: 2,
+    hp: 270,
+    maxHp: 300,
+  });
+}
+
 async function testInputPlayoutBuffer() {
   const bundled = esbuild.buildSync({
     entryPoints: [path.join(ROOT, 'realtime-poc/src/devinarok-room-do.ts')],
@@ -450,6 +499,7 @@ async function run() {
   await testInputPlayoutBuffer();
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
   testNewPlayerStaticFieldsInDelta();
+  testObjectiveSnapshotMetadataDelta();
   await testMixedFamilyStageSnapshot();
   await testGuestCanJoinHostUnlockedCastleStage();
   const mf = new Miniflare({

@@ -770,12 +770,28 @@ export const STAGE_LIST = [
   makeStage('C2', '무너진 회랑', 3, 3, [
     { theme: 'corridor', waves: [{ enemy: 'minion', count: 5 }, { enemy: 'rogue', count: 2 }] },
     { theme: 'collapsed', waves: [{ enemy: 'minion', count: 4 }, { enemy: 'rogue', count: 3 }] },
-    { theme: 'corridor', waves: [{ enemy: 'minion', count: 4 }, { enemy: 'mage', count: 2 }] },
+    {
+      theme: 'corridor',
+      waves: [{ enemy: 'minion', count: 4 }, { enemy: 'mage', count: 2 }],
+      objective: { type: 'hunt', target: 'warrior', timeSec: 40 },
+    },
   ]),
   makeStage('C3', '납골당', 5, 5, [
     { theme: 'ossuary', waves: [{ enemy: 'minion', count: 4 }, { enemy: 'rogue', count: 2 }] },
     { theme: 'collapsed', waves: [{ enemy: 'warrior', count: 3 }, { enemy: 'mage', count: 2 }] },
-    { theme: 'ossuary', waves: [{ enemy: 'minion', count: 3 }, { enemy: 'rogue', count: 2 }, { enemy: 'warrior', count: 1 }, { enemy: 'mage', count: 1 }] },
+    {
+      theme: 'ossuary',
+      waves: [{ enemy: 'minion', count: 3 }, { enemy: 'rogue', count: 2 }, { enemy: 'warrior', count: 1 }, { enemy: 'mage', count: 1 }],
+      objective: {
+        type: 'defend',
+        hp: 300,
+        spawns: [
+          { atSec: 8, enemy: 'minion', count: 3 },
+          { atSec: 16, enemy: 'rogue', count: 2 },
+          { atSec: 24, enemy: 'minion', count: 3 },
+        ],
+      },
+    },
   ]),
   makeStage('CB', '기사단장의 전당', 7, 7, [
     { theme: 'hall', waves: [{ enemy: 'commander', count: 1 }] },
@@ -786,11 +802,28 @@ export const STAGE_LIST = [
   ], { region: 2 }),
   makeStage('F2', '검은 늪지', 8, 8, [
     { theme: 'forest-bog', waves: [{ enemy: 'bonearcher', count: 2 }, { enemy: 'ashcaller', count: 1 }] },
-    { theme: 'forest-bog', waves: [{ enemy: 'brute', count: 1 }, { enemy: 'minion', count: 4 }] },
+    {
+      theme: 'forest-bog',
+      waves: [{ enemy: 'brute', count: 1 }, { enemy: 'minion', count: 4 }],
+      objective: {
+        type: 'channel',
+        radius: 2.4,
+        channelSec: 12,
+        spawns: [
+          { atSec: 4, enemy: 'minion', count: 2 },
+          { atSec: 9, enemy: 'bonearcher', count: 1 },
+          { atSec: 14, enemy: 'minion', count: 3 },
+        ],
+      },
+    },
   ], { region: 2 }),
   makeStage('F3', '불탄 사냥터', 9, 9, [
     { theme: 'forest-clearing', waves: [{ enemy: 'brute', count: 1 }, { enemy: 'bonearcher', count: 2 }] },
-    { theme: 'forest-clearing', waves: [{ enemy: 'ashcaller', count: 1 }, { enemy: 'brute', count: 2 }] },
+    {
+      theme: 'forest-clearing',
+      waves: [{ enemy: 'ashcaller', count: 1 }, { enemy: 'brute', count: 2 }],
+      objective: { type: 'hunt', target: 'brute', timeSec: 45 },
+    },
   ], { region: 2 }),
   makeStage('FB', '잿빛 숲의 사령술사', 10, 10, [
     { theme: 'forest-boss', waves: [{ enemy: 'ashwarden', count: 1 }] },
@@ -800,11 +833,38 @@ export const STAGE_LIST = [
   ], { region: 3 }),
   makeStage('K2', '뼈의 회랑', 12, 12, [
     { theme: 'castle-corridor', waves: [{ enemy: 'bonearcher', count: 2 }, { enemy: 'shieldbearer', count: 2 }] },
-    { theme: 'castle-corridor', waves: [{ enemy: 'minion', count: 3 }, { enemy: 'shieldbearer', count: 2 }] },
+    {
+      theme: 'castle-corridor',
+      waves: [{ enemy: 'minion', count: 3 }, { enemy: 'shieldbearer', count: 2 }],
+      objective: {
+        type: 'defend',
+        hp: 500,
+        spawns: [
+          { atSec: 8, enemy: 'minion', count: 3 },
+          { atSec: 16, enemy: 'bonearcher', count: 2 },
+          { atSec: 24, enemy: 'shieldbearer', count: 1 },
+          { atSec: 24, enemy: 'minion', count: 2 },
+        ],
+      },
+    },
   ], { region: 3 }),
   makeStage('K3', '왕의 납골소', 13, 13, [
     { theme: 'castle-crypt', waves: [{ enemy: 'warrior', count: 2 }, { enemy: 'shieldbearer', count: 2 }] },
-    { theme: 'castle-crypt', waves: [{ enemy: 'mage', count: 1 }, { enemy: 'minion', count: 3 }, { enemy: 'shieldbearer', count: 1 }] },
+    {
+      theme: 'castle-crypt',
+      waves: [{ enemy: 'mage', count: 1 }, { enemy: 'minion', count: 3 }, { enemy: 'shieldbearer', count: 1 }],
+      objective: {
+        type: 'channel',
+        radius: 2.4,
+        channelSec: 15,
+        spawns: [
+          { atSec: 4, enemy: 'minion', count: 3 },
+          { atSec: 10, enemy: 'mage', count: 1 },
+          { atSec: 10, enemy: 'minion', count: 2 },
+          { atSec: 16, enemy: 'shieldbearer', count: 1 },
+        ],
+      },
+    },
   ], { region: 3 }),
   makeStage('KB', '해골 왕의 옥좌', 14, 14, [
     { theme: 'castle-throne', waves: [{ enemy: 'skeletonking', count: 1 }] },
