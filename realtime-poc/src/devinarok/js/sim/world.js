@@ -14,7 +14,7 @@ import {
   BOSS_RARITIES_NIGHTMARE,
   ELITE_RARITIES,
 } from '../content/items.js';
-import { FAMILY_SKILLS, POTION, SKILLS } from '../content/skills.js';
+import { FAMILY_SKILLS, POTION, POTION_DROP, SKILLS } from '../content/skills.js';
 import { masteryBonus, masteryRank } from '../content/mastery.js';
 import { objectiveBonusGold } from '../content/objectives.js';
 import { DIFFICULTIES, effectiveStageLevel, STAGES } from '../content/stages.js';
@@ -108,9 +108,9 @@ function copyArena(arena) {
   };
 }
 
-function random(world) {
-  world.rngState = (world.rngState + 0x6d2b79f5) >>> 0;
-  let value = world.rngState;
+function random(world, stateKey = 'rngState') {
+  world[stateKey] = ((world[stateKey] ?? world.rngState) + 0x6d2b79f5) >>> 0;
+  let value = world[stateKey];
   value = Math.imul(value ^ (value >>> 15), value | 1);
   value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
   return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
@@ -787,7 +787,7 @@ function completeObjective(world, position = null) {
   const z = position?.z ?? objective.z ?? world.arena.rooms[objective.roomIndex]?.centerZ ?? 0;
   const bonusGold = objectiveBonusGold(STAGES[world.stageId], world.difficulty);
   for (const player of stagePlayers(world)) {
-    spawnLoot(world, x, z, { ownerId: player.playerId, lootType: 'gold', gold: bonusGold });
+    autoCollectGold(world, player, bonusGold, x, z);
     const item = rollStageItem(world, {
       stageLevel: world.effectiveLevel ?? world.stageLevel,
       elite: true,
@@ -1524,6 +1524,20 @@ function spawnLoot(world, x, z, loot) {
   return entity;
 }
 
+function autoCollectGold(world, player, gold, x, z) {
+  world.rewards[player.playerId].gold += gold;
+  emit(world, 'pickup', {
+    entityId: player.id,
+    playerId: player.playerId,
+    lootId: null,
+    lootType: 'gold',
+    gold,
+    auto: true,
+    x,
+    z,
+  });
+}
+
 export function createLootUid(seed, stageId, eventId) {
   return `${seed}:${stageId}:${eventId}`;
 }
@@ -1541,11 +1555,8 @@ function dropRewards(world, enemy) {
     const xp = Math.round(rule.xp * rewardScale * difficulty.xpMult * (1 + (player.stats.xpGain ?? 0) / 100));
     reward.xp += xp;
     emit(world, 'xp', { amount: xp, entityId: enemy.id, playerId: player.playerId });
-    spawnLoot(world, enemy.x, enemy.z, {
-      ownerId: player.playerId,
-      lootType: 'gold',
-      gold: Math.max(1, Math.round(randomGold(world, stageLevel, player) * rewardScale)),
-    });
+    const gold = Math.max(1, Math.round(randomGold(world, stageLevel, player) * rewardScale));
+    autoCollectGold(world, player, gold, enemy.x, enemy.z);
 
     if (enemy.summoned) continue;
     if (guaranteedCount) {
@@ -1571,6 +1582,13 @@ function dropRewards(world, enemy) {
         ownerId: player.playerId,
         lootType: 'item',
         item,
+      });
+    }
+    const potionChance = enemy.boss ? POTION_DROP.boss : enemy.elite ? POTION_DROP.elite : POTION_DROP.normal;
+    if (random(world, 'potionRngState') < potionChance) {
+      spawnLoot(world, enemy.x + (random(world, 'potionRngState') - 0.5) * 0.5, enemy.z + (random(world, 'potionRngState') - 0.5) * 0.5, {
+        ownerId: player.playerId,
+        lootType: 'potion',
       });
     }
   }
@@ -3102,9 +3120,11 @@ function pickupLoot(world, player, collectAll = false) {
       loot.ownerId !== player.playerId ||
       (!collectAll && Math.hypot(player.x - loot.x, player.z - loot.z) > 1)
     ) continue;
+    if (loot.lootType === 'potion' && player.potions >= POTION.maxCarry) continue;
     world.entities = world.entities.filter((entity) => entity.id !== loot.id);
     const reward = world.rewards[player.playerId];
     if (loot.lootType === 'gold') reward.gold += loot.gold;
+    else if (loot.lootType === 'potion') player.potions += 1;
     else reward.items.push({ ...loot.item, lootId: loot.id });
     emit(world, 'pickup', {
       entityId: player.id,

@@ -211,7 +211,7 @@ test('settlement caps use the specified XP and gold formulas and reject excess r
   }), /settlement-cap-exceeded/);
 });
 
-test('settlement rejects excess gold, items, item level, potions, and too-fast records', () => {
+test('settlement enforces gold, item, potion, and record caps', () => {
   const stageId = 'C1';
   const difficulty = 'normal';
   const caps = validators.settlementCaps(stageId, difficulty, 1);
@@ -247,8 +247,12 @@ test('settlement rejects excess gold, items, item level, potions, and too-fast r
     ...baseOps.slice(3),
   ];
   assert.throws(() => validate(tooHigh), /invalid-item/);
+  assert.doesNotThrow(() => validate(baseOps.map((op) => op.type === 'setPotions'
+    ? { ...op, count: 5 } : op)));
   assert.throws(() => validate(baseOps.map((op) => op.type === 'setPotions'
-    ? { ...op, count: 1 } : op)), /invalid-potions/);
+    ? { ...op, count: 6 } : op)), /invalid-potions/);
+  assert.throws(() => validate(baseOps.map((op) => op.type === 'setPotions'
+    ? { ...op, count: -1 } : op)), /invalid-potions/);
   assert.throws(() => validate(baseOps.map((op) => op.type === 'recordClear'
     ? { ...op, ticks: floor - 1 } : op)), /invalid-stage-record/);
   assert.throws(() => validate(baseOps, { now: 20_000, lastSettlementAt: 10_001 }), /settlement-rate-limit/);

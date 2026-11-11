@@ -315,7 +315,7 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
       ) reject('invalid-stage-record');
     } else if (op.type === 'setPotions') {
       potionCount += 1;
-      if (!integer(op.count, 0, character.potions) || op.count > 5) reject('invalid-potions');
+      if (!integer(op.count, 0, 5)) reject('invalid-potions');
     } else if (op.type === 'gainMastery') {
       if (!Object.hasOwn(SKILLS, op.skill) || !integer(op.amount, 1)) reject('invalid-mastery');
       if (masteryGains.has(op.skill)) reject('duplicate-mastery-gain');
