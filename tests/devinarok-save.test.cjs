@@ -258,6 +258,50 @@ test('settlement enforces gold, item, potion, and record caps', () => {
   assert.throws(() => validate(baseOps, { now: 20_000, lastSettlementAt: 10_001 }), /settlement-rate-limit/);
 });
 
+test('logged-in first R5 settlement awards derived materials once', async () => {
+  const env = environment();
+  const auth = token({ sub: 'user-1' });
+  const created = await createCharacter(commits.onRequestPost, env, auth);
+  const row = env.DB.prepare('SELECT data_json FROM devinarok_characters WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').first();
+  const character = JSON.parse(row.data_json);
+  character.clearedStages = ['KB', 'R1', 'R2', 'R3', 'R4'];
+  env.DB.prepare('UPDATE devinarok_characters SET data_json = ? WHERE user_id = ? AND char_id = ?')
+    .bind(JSON.stringify(character), 'user-1', 'char-1').run();
+
+  const settleR5 = (baseRev, idempotencyKey) => commits.onRequestPost({
+    request: request('POST', '/api/devinarok/commit', {
+      characterId: 'char-1',
+      baseRev,
+      idempotencyKey,
+      context: {
+        kind: 'settlement', stageId: 'R5', difficulty: 'normal', partySize: 1,
+        outcome: 'clear', ticks: 900, potionsUsed: 0,
+      },
+      ops: [
+        { type: 'gainXp', amount: 0 },
+        { type: 'grantGold', amount: 0 },
+        { type: 'setPotions', count: 0 },
+        { type: 'clearStage', stageId: 'R5' },
+        { type: 'recordClear', key: 'R5', ticks: 900 },
+      ],
+    }, auth),
+    env,
+  });
+
+  const firstResponse = await settleR5(created.character.rev, 'rift-r5-first-clear');
+  assert.equal(firstResponse.status, 200, JSON.stringify(await firstResponse.clone().json()));
+  const first = await firstResponse.json();
+  assert.deepEqual(first.character.materials, { essence: 4, soul: 1 });
+
+  env.DB.prepare('UPDATE devinarok_characters SET last_settlement_at = 0 WHERE user_id = ? AND char_id = ?')
+    .bind('user-1', 'char-1').run();
+  const repeatResponse = await settleR5(first.character.rev, 'rift-r5-repeat-clear');
+  assert.equal(repeatResponse.status, 200, JSON.stringify(await repeatResponse.clone().json()));
+  const repeated = await repeatResponse.json();
+  assert.deepEqual(repeated.character.materials, first.character.materials);
+});
+
 test('import and settlement share strict affix validation for dropped items', () => {
   const stageId = 'C1';
   const difficulty = 'normal';
