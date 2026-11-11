@@ -736,6 +736,38 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
   }
   const xMin = -width / 2;
   const xMax = width / 2;
+  for (const room of arranged) {
+    if (!room.nextRoomId) continue;
+    const door = doors.find((entry) => (
+      entry.fromRoom === room.id && entry.toRoom === room.nextRoomId
+    ));
+    const gate = obstacles.find((obstacle) => obstacle.doorId === door?.id);
+    if (!door || !gate) continue;
+    const gateHalfWidth = gate.width / 2;
+    const wallZ = room.centerZ - depth / 2 - 0.5;
+    const leftWallEnd = door.x - gateHalfWidth;
+    const rightWallStart = door.x + gateHalfWidth;
+    obstacles.push(
+      {
+        id: `${room.id}-front-wall-l`,
+        type: 'rect',
+        x: (xMin + leftWallEnd) / 2,
+        z: wallZ,
+        width: leftWallEnd - xMin,
+        depth: 0.6,
+        roomId: room.id,
+      },
+      {
+        id: `${room.id}-front-wall-r`,
+        type: 'rect',
+        x: (rightWallStart + xMax) / 2,
+        z: wallZ,
+        width: xMax - rightWallStart,
+        depth: 0.6,
+        roomId: room.id,
+      },
+    );
+  }
   const minZ = arranged.at(-1).centerZ - depth / 2;
   const maxZ = depth / 2;
   const spawnPoints = arranged.map((room) => (

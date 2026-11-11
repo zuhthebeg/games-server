@@ -20,3 +20,4 @@ export const FAMILY_SKILLS = {
 };
 
 export const POTION = { healFraction: 0.4, durationTicks: 30, cooldownTicks: 30, maxCarry: 5 };
+export const POTION_DROP = { normal: 0.06, elite: 0.25, boss: 1 };
