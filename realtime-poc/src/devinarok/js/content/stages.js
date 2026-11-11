@@ -926,6 +926,13 @@ export function riftFloorOf(stageId) {
   return match ? Number(match[1]) : null;
 }
 
+export function riftFirstClearReward(floor) {
+  return {
+    essence: 2 + Math.ceil(floor / 3),
+    soul: floor % 5 === 0 ? (floor >= 20 ? 2 : 1) : 0,
+  };
+}
+
 function riftRandom(floor) {
   let state = Math.imul(floor, 7919) >>> 0;
   return () => {

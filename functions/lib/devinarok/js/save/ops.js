@@ -5,6 +5,7 @@ import { contractsFor } from '../content/contracts.js';
 import { ITEMS } from '../content/items.js';
 import { MASTERY_MAX_XP } from '../content/mastery.js';
 import { SKILLS } from '../content/skills.js';
+import { riftFirstClearReward, riftFloorOf } from '../content/stages.js';
 
 const SLOTS = new Set(['weapon', 'head', 'body', 'hands', 'feet']);
 const ENHANCE_RATES = [100, 100, 95, 90, 80, 70, 60, 50, 40, 30];
@@ -227,6 +228,12 @@ export function applyOperations(character, itemMap, operations, characterId) {
       case 'clearStage': {
         const stageId = String(operation.stageId ?? '');
         if (!stageId) throw new TypeError('stageId is required');
+        const riftFloor = riftFloorOf(stageId);
+        if (riftFloor !== null && !nextCharacter.clearedStages.includes(stageId)) {
+          const reward = riftFirstClearReward(riftFloor);
+          nextCharacter.materials.essence = Math.min(MATERIAL_CAP, nextCharacter.materials.essence + reward.essence);
+          nextCharacter.materials.soul = Math.min(MATERIAL_CAP, nextCharacter.materials.soul + reward.soul);
+        }
         if (!nextCharacter.clearedStages.includes(stageId)) nextCharacter.clearedStages.push(stageId);
         break;
       }
