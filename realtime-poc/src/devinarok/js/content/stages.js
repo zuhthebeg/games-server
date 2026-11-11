@@ -710,7 +710,13 @@ function buildCastleRoomArt(room, { width, depth, lastRoom, stageId }) {
   return art;
 }
 
-function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false, region = 1 } = {}) {
+function makeStage(id, name, stageLevel, recommendedLevel, rooms, {
+  boss = false,
+  region = 1,
+  rift = false,
+  powerMult = 1,
+  rewardMult = 1,
+} = {}) {
   const width = boss ? 20 : 16;
   const depth = 20;
   const roomGap = depth;
@@ -736,6 +742,11 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
   }
   const xMin = -width / 2;
   const xMax = width / 2;
+  const singleSkullKingBoss = boss
+    && arranged.length === 1
+    && arranged[0].waves.length === 1
+    && arranged[0].waves[0].enemy === 'skeletonking'
+    && arranged[0].waves[0].count === 1;
   for (const room of arranged) {
     if (!room.nextRoomId) continue;
     const door = doors.find((entry) => (
@@ -771,7 +782,7 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
   const minZ = arranged.at(-1).centerZ - depth / 2;
   const maxZ = depth / 2;
   const spawnPoints = arranged.map((room) => (
-    id === 'KB' ? [{ x: 0, z: room.centerZ - 2 }] : roomSpawnPoints(width, room.centerZ)
+    singleSkullKingBoss ? [{ x: 0, z: room.centerZ - 2 }] : roomSpawnPoints(width, room.centerZ)
   ));
   return {
     id,
@@ -782,6 +793,7 @@ function makeStage(id, name, stageLevel, recommendedLevel, rooms, { boss = false
     ...(region === 2 ? { theme: 'forest' } : {}),
     ...(region === 3 ? { theme: 'castle' } : {}),
     boss,
+    ...(rift ? { rift: true, powerMult, rewardMult } : {}),
     width,
     depth: arranged.length * depth,
     bounds: { minX: xMin, maxX: xMax, minZ, maxZ },
@@ -902,6 +914,109 @@ export const STAGE_LIST = [
   ], { boss: true, region: 3 }),
 ];
 
+export const RIFT_MAX_FLOOR = 30;
+
+export function riftStageId(floor) {
+  return `R${floor}`;
+}
+
+export function riftFloorOf(stageId) {
+  if (typeof stageId !== 'string') return null;
+  const match = /^R([1-9]|[12]\d|30)$/.exec(stageId);
+  return match ? Number(match[1]) : null;
+}
+
+function riftRandom(floor) {
+  let state = Math.imul(floor, 7919) >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const RIFT_REGIONS = {
+  1: {
+    themes: ['entrance', 'collapsed', 'corridor', 'ossuary'],
+    enemies: ['minion', 'warrior', 'rogue', 'mage'],
+  },
+  2: {
+    themes: ['forest-path', 'forest-clearing', 'forest-bog'],
+    enemies: ['minion', 'bonearcher', 'ashcaller', 'rogue'],
+  },
+  3: {
+    themes: ['castle-corridor', 'castle-courtyard', 'castle-crypt'],
+    enemies: ['warrior', 'shieldbearer', 'mage', 'bonearcher', 'brute'],
+  },
+};
+
+const RIFT_BOSSES = [
+  { enemy: 'commander', theme: 'hall', region: 1 },
+  { enemy: 'ashwarden', theme: 'forest-boss', region: 2 },
+  { enemy: 'skeletonking', theme: 'castle-throne', region: 3 },
+];
+
+function createRiftStage(floor) {
+  const stageId = riftStageId(floor);
+  const stageLevel = Math.min(20, 14 + floor);
+  const powerMult = Math.round((1 + 0.08 * Math.max(0, floor - 6)) * 100) / 100;
+  const rewardMult = powerMult;
+  if (floor % 5 === 0) {
+    const boss = RIFT_BOSSES[(floor / 5 - 1) % RIFT_BOSSES.length];
+    return makeStage(stageId, `심연 균열 ${floor}층`, stageLevel, stageLevel, [
+      { theme: boss.theme, waves: [{ enemy: boss.enemy, count: 1 }] },
+    ], {
+      boss: true,
+      region: boss.region,
+      rift: true,
+      powerMult,
+      rewardMult,
+    });
+  }
+
+  const region = ((floor - 1) % 3) + 1;
+  const { themes, enemies } = RIFT_REGIONS[region];
+  const random = riftRandom(floor);
+  const enemyCount = Math.min(9, 5 + Math.floor(floor / 4));
+  const rooms = Array.from({ length: 3 }, (_, roomIndex) => {
+    const kindCount = 2 + Math.floor(random() * 2);
+    const availableEnemies = [...enemies];
+    const selectedEnemies = [];
+    while (selectedEnemies.length < kindCount) {
+      const index = Math.floor(random() * availableEnemies.length);
+      selectedEnemies.push(availableEnemies.splice(index, 1)[0]);
+    }
+    let remaining = enemyCount;
+    const waves = selectedEnemies.map((enemy, index) => {
+      const remainingKinds = selectedEnemies.length - index - 1;
+      const count = remainingKinds === 0
+        ? remaining
+        : 1 + Math.floor(random() * (remaining - remainingKinds));
+      remaining -= count;
+      return { enemy, count };
+    });
+    if (roomIndex === 2) waves.push({ enemy: 'brute', count: 1 });
+    return {
+      theme: themes[Math.floor(random() * themes.length)],
+      waves,
+    };
+  });
+  return makeStage(stageId, `심연 균열 ${floor}층`, stageLevel, stageLevel, rooms, {
+    region,
+    rift: true,
+    powerMult,
+    rewardMult,
+  });
+}
+
+export const RIFT_STAGE_LIST = Array.from(
+  { length: RIFT_MAX_FLOOR },
+  (_, index) => createRiftStage(index + 1),
+);
+export const ALL_STAGE_LIST = [...STAGE_LIST, ...RIFT_STAGE_LIST];
+
 export const DIFFICULTIES = {
   normal: {
     label: '보통',
@@ -954,6 +1069,13 @@ export function isDifficultyUnlocked(difficulty, clearedStages = []) {
 
 export function isStageUnlocked(stageId, clearedStages = [], difficulty = 'normal') {
   if (!isDifficultyUnlocked(difficulty, clearedStages)) return false;
+  const riftFloor = riftFloorOf(stageId);
+  if (riftFloor !== null) {
+    if (difficulty !== 'normal') return false;
+    return riftFloor === 1
+      ? clearedStages.includes('KB')
+      : clearedStages.includes(riftStageId(riftFloor - 1));
+  }
   const index = STAGE_LIST.findIndex((stage) => stage.id === stageId);
   if (index < 0) return false;
   if (index === 0) return true;
@@ -971,7 +1093,7 @@ export function latestStage(difficulty = 'normal', clearedStages = []) {
   return (uncleared.at(-1) ?? unlocked.at(-1)).id;
 }
 
-export const STAGES = Object.fromEntries(STAGE_LIST.map((stage) => [stage.id, stage]));
+export const STAGES = Object.fromEntries(ALL_STAGE_LIST.map((stage) => [stage.id, stage]));
 
 const hubProps = [];
 for (let x = -8; x <= 8; x += 4) {

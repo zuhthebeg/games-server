@@ -1196,6 +1196,8 @@ export function createStageWorld({
   world.stageLevel = stage.stageLevel;
   world.difficulty = difficulty;
   world.effectiveLevel = effectiveStageLevel(stage, difficulty);
+  world.powerMult = stage.powerMult ?? 1;
+  world.rewardMult = stage.rewardMult ?? 1;
   world.partySize = members.length;
   world.inputDriven = Boolean(inputDriven || members.length > 1);
   world.roomIndex = 0;
@@ -1237,7 +1239,7 @@ function stagePoint(world, index) {
 function stageEnemyAttackScale(world, elite = false) {
   const tier = DIFFICULTIES[world.difficulty ?? 'normal'];
   const scale = 1 + 0.12 * ((world.effectiveLevel ?? world.stageLevel) - 1);
-  return scale * tier.atkMult * (elite ? 1.3 : 1);
+  return scale * tier.atkMult * (world.powerMult ?? 1) * (elite ? 1.3 : 1);
 }
 
 function spawnStageEnemy(world, enemyType, index, elite = false, position = null, summonedBy = null, {
@@ -1250,7 +1252,9 @@ function spawnStageEnemy(world, enemyType, index, elite = false, position = null
   const tier = DIFFICULTIES[world.difficulty ?? 'normal'];
   const scale = 1 + 0.12 * ((world.effectiveLevel ?? world.stageLevel) - 1);
   const partyScale = 1 + 0.75 * ((world.partySize ?? 1) - 1);
-  const soloMaxHp = Math.max(1, Math.round(rule.hp * scale * tier.hpMult * (elite ? 2.5 : 1)));
+  const soloMaxHp = Math.max(1, Math.round(
+    rule.hp * scale * tier.hpMult * (world.powerMult ?? 1) * (elite ? 2.5 : 1),
+  ));
   const maxHp = Math.max(1, Math.round(soloMaxHp * partyScale));
   const enemy = {
     id: nextEntityId(world),
@@ -1498,7 +1502,9 @@ function randomGold(world, stageLevel, player) {
   const rule = { min: 2, max: 5 };
   const amount = (rule.min + Math.floor(random(world) * (rule.max - rule.min + 1))) * stageLevel;
   const goldMult = DIFFICULTIES[world.difficulty ?? 'normal'].goldMult;
-  return Math.max(1, Math.round(amount * goldMult * (1 + (player?.stats.goldGain ?? 0) / 100)));
+  return Math.max(1, Math.round(
+    amount * goldMult * (1 + (player?.stats.goldGain ?? 0) / 100) * (world.rewardMult ?? 1),
+  ));
 }
 
 function spawnLoot(world, x, z, loot) {
