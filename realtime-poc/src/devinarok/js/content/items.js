@@ -89,12 +89,19 @@ export const FAMILY_STARTER_WEAPONS = [
 export function equipmentLook(equipment = []) {
   const slotOf = (item) => item.slot ?? ITEMS[item.itemId]?.slot;
   const weapon = equipment.find((item) => slotOf(item) === 'weapon');
+  const head = equipment.find((item) => slotOf(item) === 'head');
+  const body = equipment.find((item) => slotOf(item) === 'body');
   const family = ITEMS[weapon?.itemId]?.family ?? 'sword';
   const weaponModels = {
     sword: ['grave-greatsword', 'necromancer-sword', 'royal-sword', 'king-sword'].includes(weapon?.itemId) ? '2H_Sword' : '1H_Sword',
     crossbow: (ITEMS[weapon?.itemId]?.requiredLevel ?? 1) >= 5 ? '2H_Crossbow' : '1H_Crossbow',
     staff: (ITEMS[weapon?.itemId]?.requiredLevel ?? 1) === 1 ? '1H_Wand' : '2H_Staff',
   };
+  const setCounts = new Map();
+  for (const item of equipment) {
+    const setId = ITEMS[item.itemId]?.setId;
+    if (setId) setCounts.set(setId, (setCounts.get(setId) ?? 0) + 1);
+  }
   return {
     family,
     characterKind: { sword: 'knight', crossbow: 'rogue', staff: 'mage' }[family],
@@ -103,6 +110,12 @@ export function equipmentLook(equipment = []) {
     helmet: equipment.some((item) => slotOf(item) === 'head'),
     cape: equipment.some((item) => slotOf(item) === 'body'),
     weaponRarity: RARITY_IDS.has(weapon?.rarity) ? weapon.rarity : null,
+    weaponItem: weapon?.itemId ?? null,
+    head: head?.itemId ?? null,
+    body: body?.itemId ?? null,
+    headRarity: RARITY_IDS.has(head?.rarity) ? head.rarity : null,
+    bodyRarity: RARITY_IDS.has(body?.rarity) ? body.rarity : null,
+    setId: [...setCounts].find(([, count]) => count >= 4)?.[0] ?? null,
   };
 }
 

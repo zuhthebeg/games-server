@@ -616,6 +616,12 @@ async function run() {
         helmet: false,
         cape: false,
         weaponRarity: null,
+        weaponItem: null,
+        head: null,
+        body: null,
+        headRarity: null,
+        bodyRarity: null,
+        setId: null,
       });
     }
 
