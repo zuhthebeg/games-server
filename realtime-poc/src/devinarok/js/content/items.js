@@ -115,7 +115,9 @@ export function equipmentLook(equipment = []) {
     body: body?.itemId ?? null,
     headRarity: RARITY_IDS.has(head?.rarity) ? head.rarity : null,
     bodyRarity: RARITY_IDS.has(body?.rarity) ? body.rarity : null,
-    setId: [...setCounts].find(([, count]) => count >= 4)?.[0] ?? null,
+    setId: [...setCounts].find(([setId, count]) => (
+      count >= 4 && ITEM_SETS[setId]?.family === family
+    ))?.[0] ?? null,
   };
 }
 
