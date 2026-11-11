@@ -468,6 +468,12 @@ async function testGuestCanJoinHostUnlockedCastleStage() {
       host.send({ t: 'lobby.stage', stageId });
       await host.waitFor((message) => message.t === 'lobby' && message.stageId === stageId, `host selected unlocked ${stageId}`);
     }
+    host.send({ t: 'lobby.stage', stageId: 'R1', difficulty: 'nightmare' });
+    assert.equal((await host.waitFor((message) => message.t === 'error', 'locked rift nightmare')).code, 'stage-locked');
+    host.send({ t: 'lobby.stage', stageId: 'R1', difficulty: 'normal' });
+    await host.waitFor((message) => message.t === 'lobby' && message.stageId === 'R1', 'host selected unlocked R1');
+    host.send({ t: 'lobby.stage', stageId: 'KB', difficulty: 'normal' });
+    await host.waitFor((message) => message.t === 'lobby' && message.stageId === 'KB', 'host restored KB');
     guest.send({ t: 'lobby.ready', ready: true });
     await host.waitFor(
       (message) => message.t === 'lobby' && message.players.some((player) => player.playerId !== message.hostId && player.ready),
@@ -557,6 +563,8 @@ async function run() {
 
     p0.send({ t: 'lobby.stage', stageId: 'C2' });
     assert.equal((await p0.waitFor((message) => message.t === 'error', 'locked stage error')).code, 'stage-locked');
+    p0.send({ t: 'lobby.stage', stageId: 'R1' });
+    assert.equal((await p0.waitFor((message) => message.t === 'error', 'locked rift stage error')).code, 'stage-locked');
     p0.send({ t: 'lobby.stage', stageId: 'C1', difficulty: 'nightmare' });
     assert.equal((await p0.waitFor((message) => message.t === 'error', 'locked nightmare error')).code, 'stage-locked');
     p0.send({ t: 'lobby.stage', stageId: 'C1' });

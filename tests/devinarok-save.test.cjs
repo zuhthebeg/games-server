@@ -357,6 +357,40 @@ test('settlements cannot bypass progression unlock chains', () => {
   }), /stage-locked/);
 });
 
+test('rift clear chains and imported records require sequential normal-only keys', () => {
+  const base = saveOps.normalizeCharacter({
+    id: 'rift-import',
+    name: '기사',
+    kind: 'knight',
+    level: 20,
+    xp: 0,
+    gold: 0,
+    potions: 0,
+    rev: 1,
+    debugUsed: false,
+    equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    clearedStages: [],
+    records: {},
+  });
+  const normalClears = stageContent.STAGE_LIST.map((stage) => stage.id);
+  const recordTicks = 150 * stageContent.STAGES.R1.rooms.length;
+  const validate = (clearedStages, records) => validators.validateImport({
+    character: { ...base, clearedStages, records },
+    items: [],
+  });
+
+  assert.doesNotThrow(() => validate(
+    [...normalClears, 'R1', 'R2'],
+    { R1: recordTicks, R2: recordTicks },
+  ));
+  assert.throws(() => validate(
+    [...normalClears, 'R1', 'R3'],
+    { R1: recordTicks, R3: recordTicks },
+  ), /invalid-clear-chain/);
+  assert.throws(() => validate([...normalClears, 'N:R1'], {}), /invalid-clears/);
+  assert.throws(() => validate(normalClears, { R1: recordTicks }), /invalid-records/);
+});
+
 test('set rarity is accepted only on a non-normal boss settlement with a set base', () => {
   const stages = stageContent;
   const normalClears = stages.STAGE_LIST.map((stage) => stages.stageClearKey(stage.id, 'normal'));

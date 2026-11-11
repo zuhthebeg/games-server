@@ -11,7 +11,7 @@ import {
 } from './js/content/objectives.js';
 import { SKILLS } from './js/content/skills.js';
 import {
-  DIFFICULTIES, effectiveStageLevel, isStageUnlocked, stageClearKey, STAGE_LIST, STAGES,
+  ALL_STAGE_LIST, DIFFICULTIES, effectiveStageLevel, isStageUnlocked, stageClearKey, STAGES,
 } from './js/content/stages.js';
 import { normalizeCharacter } from './js/save/ops.js';
 
@@ -155,7 +155,7 @@ export function settlementCaps(stageId, difficulty, partySize = 1) {
   const maxXpGain = 5 * (AFFIXES.xpGain.max + AFFIXES.xpGain.perIlvl * 20);
   const goldGainMultiplier = 1 + maxGoldGain / 100;
   const xpGainMultiplier = 1 + maxXpGain / 100;
-  const perEnemyGoldMax = 5 * effectiveLevel * tier.goldMult;
+  const perEnemyGoldMax = 5 * effectiveLevel * tier.goldMult * (stage.rewardMult ?? 1);
   return {
     enemyCount,
     bossCount,
@@ -372,13 +372,16 @@ function validateClearChain(clearedStages) {
   if (!Array.isArray(clearedStages) || clearedStages.some((key) => typeof key !== 'string')) reject('invalid-clears');
   const clearSet = new Set(clearedStages);
   if (clearSet.size !== clearedStages.length) reject('invalid-clears');
-  const validKeys = new Set(VALID_DIFFICULTIES.flatMap((difficulty) => (
-    STAGE_LIST.map((stage) => stageClearKey(stage.id, difficulty))
+  const validKeys = new Set(ALL_STAGE_LIST.flatMap((stage) => (
+    VALID_DIFFICULTIES
+      .filter((difficulty) => !stage.rift || difficulty === 'normal')
+      .map((difficulty) => stageClearKey(stage.id, difficulty))
   )));
   if ([...clearSet].some((key) => !validKeys.has(key))) reject('invalid-clears');
   const unlocked = [];
   for (const difficulty of VALID_DIFFICULTIES) {
-    for (const stage of STAGE_LIST) {
+    for (const stage of ALL_STAGE_LIST) {
+      if (stage.rift && difficulty !== 'normal') continue;
       const key = stageClearKey(stage.id, difficulty);
       if (!clearSet.has(key)) continue;
       if (!isStageUnlocked(stage.id, unlocked, difficulty)) reject('invalid-clear-chain');
@@ -426,8 +429,10 @@ export function validateImport(snapshot) {
   })) reject('invalid-equipment');
   if (items.some((item) => item.slot && character.equipment[item.slot] !== item.uid)) reject('invalid-equipment');
   for (const [key, ticks] of Object.entries(character.records)) {
-    const match = VALID_DIFFICULTIES.flatMap((difficulty) => (
-      STAGE_LIST.map((stage) => ({ key: stageClearKey(stage.id, difficulty), stage }))
+    const match = ALL_STAGE_LIST.flatMap((stage) => (
+      VALID_DIFFICULTIES
+        .filter((difficulty) => !stage.rift || difficulty === 'normal')
+        .map((difficulty) => ({ key: stageClearKey(stage.id, difficulty), stage }))
     )).find((record) => record.key === key);
     if (!match || !character.clearedStages.includes(key) || !integer(ticks, 150 * match.stage.rooms.length)) {
       reject('invalid-records');
