@@ -18,6 +18,7 @@ import { ppingpaePlugin } from './ppingpae';
 import { mahjongPlugin } from './mahjong';
 import { gostopPlugin } from './gostop';
 import { spudsquadPlugin } from './spudsquad';
+import { beasthuntPlugin } from './beasthunt';
 import { arpgPlugin } from './arpg';
 
 const registry = new Map<string, GameRegistryEntry>();
@@ -83,6 +84,7 @@ registerGame(ppingpaePlugin, { timeLimit: 60, initialHandSize: 14, initialMeldSc
 registerGame(mahjongPlugin, { timeLimit: 20, bet: 100000 });
 registerGame(gostopPlugin, { timeLimit: 30, bet: 1 });
 registerGame(spudsquadPlugin, {});
+registerGame(beasthuntPlugin, {});
 registerGame(arpgPlugin, {});
 // Separate opt-in hostile room namespace; never match ordinary cooperative rooms.
 registerGame({ ...arpgPlugin, id: 'arpg-invasion', name: 'ARPG 침입 동의방' }, { invasion: true });
