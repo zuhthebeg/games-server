@@ -967,7 +967,7 @@ export class DevinarokRoomDO {
       } : {}),
       ...(entity.kind === 'player' ? {
         boneRevivalReady: Boolean(entity.boneRevivalReady),
-        lastLichCooldownCastId: entity.lastLichCooldownCastId ?? null,
+        lichRefundedCastIds: [...(entity.lichRefundedCastIds ?? [])],
       } : {}),
       ...(entity.kind === 'player' && entity.playerId === playerId ? {
         motion: structuredClone(entity),

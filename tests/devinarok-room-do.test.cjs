@@ -45,12 +45,14 @@ function testNewPlayerStaticFieldsInDelta() {
     playerId: 'new-player',
     characterKind: 'rogue',
     family: 'crossbow',
+    lichRefundedCastIds: ['cast-1'],
     look,
     masteryRanks: { 1: 1, 2: 2, 3: 3, 4: 5 },
   };
   const firstDelta = room.renderEntity(player, 'viewer', false);
   assert.equal(firstDelta.characterKind, 'rogue');
   assert.equal(firstDelta.family, 'crossbow');
+  assert.deepEqual(firstDelta.lichRefundedCastIds, ['cast-1']);
   assert.deepEqual(firstDelta.look, look);
   assert.deepEqual(firstDelta.mastery, [1, 2, 3, 5]);
   const laterDelta = room.renderEntity(player, 'viewer', false);
@@ -215,6 +217,7 @@ function testObjectiveSnapshotMetadataDelta() {
   const player = {
     id: 1, kind: 'player', playerId: 'hero', x: 0, z: 0, hp: 100, maxHp: 100,
     lineage: 'skeleton_archer', evolved: true, boneRevivalReady: true,
+    lichRefundedCastIds: ['cast-1'],
   };
   room.world = {
     tick: 0,
@@ -246,6 +249,7 @@ function testObjectiveSnapshotMetadataDelta() {
   assert.equal(fullPlayer.lineage, 'skeleton_archer');
   assert.equal(fullPlayer.evolved, true);
   assert.equal(fullPlayer.boneRevivalReady, true);
+  assert.deepEqual(fullPlayer.lichRefundedCastIds, ['cast-1']);
   assert.deepEqual(full.objective, {
     type: 'defend',
     state: 'active',
@@ -257,9 +261,11 @@ function testObjectiveSnapshotMetadataDelta() {
   room.world.tick += 1;
   room.world.objective.hp = 270;
   room.world.entities[0].boneRevivalReady = false;
+  room.world.entities[0].lichRefundedCastIds = ['cast-1', 'cast-2'];
   const delta = room.snapshotFor('hero', false, false);
   const deltaPlayer = expandEntity(compactEntity(delta.ents[0], delta.full));
   assert.equal(deltaPlayer.boneRevivalReady, false);
+  assert.deepEqual(deltaPlayer.lichRefundedCastIds, ['cast-1', 'cast-2']);
   assert.equal(delta.full, false);
   assert.deepEqual(delta.objective, {
     type: 'defend',

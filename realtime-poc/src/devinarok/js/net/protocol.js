@@ -62,7 +62,7 @@ const ENTITY_DEFAULTS = {
   lineage: 'human',
   evolved: false,
   boneRevivalReady: false,
-  lastLichCooldownCastId: null,
+  lichRefundedCastIds: [],
 };
 
 export function roundToHundredth(value) {

@@ -511,7 +511,7 @@ export function addPlayer(world, {
     potionHealRemaining: 0,
     potionHealTicks: 0,
     attackSeq: 0,
-    lastLichCooldownCastId: null,
+    lichRefundedCastIds: [],
   };
   moveEntity(world, player, 0, 0);
   world.entities.push(player);
@@ -1765,9 +1765,13 @@ export function playerStrike(world, player, shape, motionMult, castId, hitTarget
       && Number.isInteger(skillId)
       && skillId > 0
       && enemy.dead
-      && player.lastLichCooldownCastId !== castId
+      && !(player.lichRefundedCastIds ?? []).includes(castId)
     ) {
-      player.lastLichCooldownCastId = castId;
+      const refundedCastIds = player.lichRefundedCastIds ??= [];
+      refundedCastIds.push(castId);
+      if (refundedCastIds.length > 8) {
+        refundedCastIds.splice(0, refundedCastIds.length - 8);
+      }
       for (const [id, cooldown] of Object.entries(player.skillCooldowns)) {
         if (Number(id) !== skillId) player.skillCooldowns[id] = Math.max(0, cooldown - 30);
       }
