@@ -276,9 +276,14 @@ export function applyOperations(character, itemMap, operations, characterId) {
           throw new TypeError('Invalid lineage');
         }
         if (lineage === nextCharacter.lineage) throw new RangeError('Same lineage');
-        const weapon = nextItems[nextCharacter.equipment?.weapon];
-        const family = weapon ? equipmentLook([{ ...weapon, slot: 'weapon' }]).family : null;
-        if (!lineageAllowsFamily(lineage, family)) throw new RangeError('weapon-family');
+        const weaponUid = nextCharacter.equipment?.weapon;
+        if (weaponUid != null) {
+          const weapon = nextItems[weaponUid];
+          if (!weapon || !lineageAllowsFamily(
+            lineage,
+            equipmentLook([{ ...weapon, slot: 'weapon' }]).family,
+          )) throw new RangeError('weapon-family');
+        }
         const cost = lineageChangeCost(nextCharacter);
         if (nextCharacter.gold < cost) throw new RangeError('Not enough gold');
         nextCharacter.gold -= cost;
