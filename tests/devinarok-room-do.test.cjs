@@ -83,6 +83,79 @@ function testNewPlayerStaticFieldsInDelta() {
     spin: 300, dash: 0, guard: 0, quake: 0, pierce: 0, vault: 0,
     volley: 0, rain: 0, flame: 0, frost: 0, blink: 0, meteor: 0,
   });
+  assert.deepEqual(compiled.exports.normalizeCharacter({ level: 1 }).talents, {
+    sword: {}, crossbow: {}, staff: {},
+  });
+  assert.deepEqual(compiled.exports.normalizeCharacter({
+    level: 6,
+    talents: {
+      sword: { 'sw-vigor': 5, 'sw-edge': 1 },
+      crossbow: { 'cb-eye': 1 },
+      staff: {},
+    },
+  }).talents, {
+    sword: {}, crossbow: {}, staff: {},
+  });
+}
+
+async function testPartyTalentHpUsesNormalizedAllocation() {
+  const bundled = esbuild.buildSync({
+    entryPoints: [path.join(ROOT, 'realtime-poc/src/devinarok-room-do.ts')],
+    bundle: true,
+    format: 'cjs',
+    target: 'node22',
+    platform: 'node',
+    write: false,
+    logLevel: 'silent',
+  }).outputFiles[0].text;
+  const compiled = { exports: {} };
+  new Function('module', 'exports', 'require', bundled)(compiled, compiled.exports, require);
+  const { DevinarokRoomDO, normalizeCharacter } = compiled.exports;
+  const players = [
+    {
+      playerId: 'talented',
+      name: 'Talented',
+      character: normalizeCharacter({
+        level: 20,
+        talents: { sword: { 'sw-vigor': 5 }, crossbow: {}, staff: {} },
+      }),
+      connected: true,
+      ready: false,
+      joinedAt: 0,
+      order: 0,
+    },
+    {
+      playerId: 'plain',
+      name: 'Plain',
+      character: normalizeCharacter({ level: 20 }),
+      connected: true,
+      ready: true,
+      joinedAt: 1,
+      order: 1,
+    },
+  ];
+  const sockets = players.map(({ playerId }) => ({
+    deserializeAttachment: () => ({ playerId }),
+  }));
+  const room = new DevinarokRoomDO({ storage: { put: async () => {} } }, {});
+  room.fixedSeed = 4242;
+  room.connectedSockets = (playerId) => (
+    playerId ? sockets.filter((socket) => socket.deserializeAttachment().playerId === playerId) : sockets
+  );
+  room.send = () => true;
+  room.sendSnapshot = () => {};
+  room.captureEvents = () => {};
+  room.reportToCoord = async () => {};
+  room.startLoop = () => {};
+  await room.startRun({
+    players,
+    hostId: 'talented',
+    stageId: 'C1',
+    difficulty: 'normal',
+  });
+  const talented = room.world.entities.find((entity) => entity.kind === 'player' && entity.playerId === 'talented');
+  const plain = room.world.entities.find((entity) => entity.kind === 'player' && entity.playerId === 'plain');
+  assert.equal(talented.maxHp, Math.round(plain.maxHp * 1.15));
 }
 
 function testObjectiveSnapshotMetadataDelta() {
@@ -505,6 +578,7 @@ async function run() {
   await testInputPlayoutBuffer();
   assert(SIM_HASH, 'vendored SIM_HASH must be present');
   testNewPlayerStaticFieldsInDelta();
+  await testPartyTalentHpUsesNormalizedAllocation();
   testObjectiveSnapshotMetadataDelta();
   await testMixedFamilyStageSnapshot();
   await testGuestCanJoinHostUnlockedCastleStage();

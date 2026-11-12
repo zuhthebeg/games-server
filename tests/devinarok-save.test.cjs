@@ -369,6 +369,72 @@ test('server save operations reject equipping an item outside its base slot', ()
   ], 'hero'), TypeError);
 });
 
+test('server validates normalized talent families, ranks, and point budgets on import', () => {
+  assert.doesNotThrow(() => validators.validateCharacterTalents({ level: 1 }));
+  const character = {
+    id: 'talent-import',
+    name: '기사',
+    kind: 'knight',
+    level: 6,
+    xp: 0,
+    gold: 0,
+    potions: 0,
+    rev: 1,
+    debugUsed: false,
+    equipment: { weapon: null, head: null, body: null, hands: null, feet: null },
+    clearedStages: [],
+    records: {},
+    talents: { sword: { 'sw-vigor': 5 }, crossbow: {}, staff: {} },
+  };
+  assert.doesNotThrow(() => validators.validateCharacterTalents(character));
+  assert.doesNotThrow(() => validators.validateImport({ character, items: [] }));
+  const invalidTalents = [
+    { sword: { unknown: 1 }, crossbow: {}, staff: {} },
+    { sword: {}, crossbow: {} },
+    { sword: { 'sw-vigor': 0 }, crossbow: {}, staff: {} },
+    { sword: { 'sw-vigor': 6 }, crossbow: {}, staff: {} },
+    { sword: { 'sw-vigor': 1.5 }, crossbow: {}, staff: {} },
+    { sword: { 'cb-eye': 1 }, crossbow: {}, staff: {} },
+  ];
+  for (const talents of invalidTalents) {
+    assert.throws(() => validators.validateCharacterTalents({ ...character, talents }), /invalid-talents/);
+  }
+  assert.throws(() => validators.validateCharacterTalents({
+    ...character,
+    level: 5,
+    talents: { sword: { 'sw-vigor': 5 }, crossbow: {}, staff: {} },
+  }), /talent-budget-exceeded/);
+  assert.throws(() => validators.validateImport({
+    character: { ...character, talents: invalidTalents[0] },
+    items: [],
+  }), /invalid-talents/);
+});
+
+test('hub talent allocation and reset operations round-trip through server save logic', () => {
+  const created = saveOps.applyOperations(null, {}, [
+    { type: 'createCharacter', name: '기사', kind: 'knight' },
+  ], 'talent-hero').character;
+  let character = { ...created, level: 20, gold: 1000 };
+  const allocate = [{ type: 'allocateTalent', family: 'sword', talentId: 'sw-edge' }];
+  assert.doesNotThrow(() => validators.validateOps({
+    character,
+    ops: allocate,
+    context: { kind: 'hub' },
+  }));
+  character = saveOps.applyOperations(character, {}, allocate, character.id).character;
+  assert.equal(character.talents.sword['sw-edge'], 1);
+
+  const reset = [{ type: 'resetTalents', family: 'sword' }];
+  assert.doesNotThrow(() => validators.validateOps({
+    character,
+    ops: reset,
+    context: { kind: 'hub' },
+  }));
+  character = saveOps.applyOperations(character, {}, reset, character.id).character;
+  assert.deepEqual(character.talents, { sword: {}, crossbow: {}, staff: {} });
+  assert.equal(character.gold, 0);
+});
+
 test('hub grants only the exact paired family starter-weapon purchase', () => {
   const starter = itemContent.FAMILY_STARTER_WEAPONS[0];
   const valid = [
