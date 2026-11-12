@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1;
 
-const ENTITY_FIELDS = [
+export const ENTITY_FIELDS = [
   'id',
   'kind',
   'x',
@@ -25,8 +25,6 @@ const ENTITY_FIELDS = [
   'motion',
   'characterKind',
   'family',
-  'lineage',
-  'evolved',
   'look',
   'slowTicks',
   'counterReadyTicks',

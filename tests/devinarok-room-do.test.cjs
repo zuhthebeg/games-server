@@ -529,7 +529,7 @@ async function testMixedFamilyStageSnapshot() {
     const fields = [
       'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase', 'attackPattern', 'attackShape',
       'attackRemaining', 'skill', 'dodge', 'downed', 'ownerId', 'model', 'maxHp', 'name', 'item',
-      'radius', 'motion', 'characterKind', 'family', 'lineage', 'evolved', 'look', 'slowTicks', 'counterReadyTicks',
+      'radius', 'motion', 'characterKind', 'family', 'look', 'slowTicks', 'counterReadyTicks',
       'counterAttackerId', 'perfectPaid', 'dodgeStartTick',
     ];
     const expand = (compact) => {
@@ -736,7 +736,7 @@ async function run() {
     const fields = [
       'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase', 'attackPattern',
       'attackShape', 'attackRemaining', 'skill', 'dodge', 'downed', 'ownerId', 'model',
-      'maxHp', 'name', 'item', 'radius', 'motion', 'characterKind', 'family', 'lineage', 'evolved',
+      'maxHp', 'name', 'item', 'radius', 'motion', 'characterKind', 'family',
       'look', 'slowTicks',
     ];
     const expandEntity = (compact) => {
