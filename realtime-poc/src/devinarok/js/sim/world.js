@@ -16,6 +16,7 @@ import {
 } from '../content/items.js';
 import { FAMILY_SKILLS, POTION, POTION_DROP, SKILLS } from '../content/skills.js';
 import { masteryBonus, masteryRank } from '../content/mastery.js';
+import { normalizedTalents, TALENTS } from '../content/talents.js';
 import { objectiveBonusGold } from '../content/objectives.js';
 import { DIFFICULTIES, effectiveStageLevel, STAGES } from '../content/stages.js';
 import { HUB_ARENA } from '../content/stages.js';
@@ -443,7 +444,7 @@ export function addPlayer(world, {
   }));
   const look = equipmentLook(equipment);
   const stats = world.mode === 'stage' || world.mode === 'hub'
-    ? calculatePlayerStats(level, equipment)
+    ? calculatePlayerStats(level, equipment, character.talents)
     : null;
   const familySkills = FAMILY_SKILLS[look.family] ?? FAMILY_SKILLS.sword;
   const masteryRanks = Object.fromEntries(familySkills.map((skillKey, index) => (
@@ -1020,7 +1021,7 @@ export function calculateDamage(atk, motionMult, crit, critDmg, defense) {
   return Math.max(1, Math.round(atk * motionMult * (crit ? critDmg : 1) * 100 / (100 + defense)));
 }
 
-export function calculatePlayerStats(level = 1, equipment = []) {
+export function calculatePlayerStats(level = 1, equipment = [], talents = null) {
   let maxHp = 100 + 12 * (level - 1);
   let attack = 10 + 2 * (level - 1);
   let defense = 0;
@@ -1069,6 +1070,22 @@ export function calculatePlayerStats(level = 1, equipment = []) {
     }
   }
   const family = equipmentLook(equipment).family;
+  const ranks = normalizedTalents(talents)[family];
+  const talentBonuses = {};
+  for (const { id, stat, perRank } of TALENTS[family]) {
+    talentBonuses[stat] = (talentBonuses[stat] ?? 0) + (ranks[id] ?? 0) * perRank;
+  }
+  const talentBonus = (stat) => talentBonuses[stat] ?? 0;
+  maxHp = Math.round(maxHp * (1 + talentBonus('maxHpPct') / 100));
+  attack = Math.round(attack * (1 + talentBonus('attackPct') / 100));
+  defense += talentBonus('defense');
+  critChance += talentBonus('critChance');
+  critDamage += talentBonus('critDamage');
+  attackSpeed += talentBonus('attackSpeed');
+  moveSpeed *= 1 + talentBonus('moveSpeedPct') / 100;
+  dodgeCooldownReduction += talentBonus('dodgeCooldownReduction');
+  skillCooldownReduction += talentBonus('skillCooldownReduction');
+  lifesteal += talentBonus('lifesteal');
   const familySetCount = (setId) => (
     ITEM_SETS[setId].family === family ? setCounts[setId] ?? 0 : 0
   );
@@ -1081,6 +1098,7 @@ export function calculatePlayerStats(level = 1, equipment = []) {
   if (familySetCount('shadow-hunter') >= 4) pierceShots = 3;
   if (familySetCount('ember-sage') >= 2) skillCooldownReduction += 15;
   if (familySetCount('ember-sage') >= 4) counterFireField = true;
+  counterDamagePct += talentBonus('counterDamagePct');
   return {
     maxHp: Math.max(1, maxHp),
     attack: Math.max(1, attack),
@@ -1089,7 +1107,7 @@ export function calculatePlayerStats(level = 1, equipment = []) {
     critDamage: Math.max(100, critDamage) / 100,
     attackSpeed,
     moveSpeed,
-    dodgeCooldownReduction,
+    dodgeCooldownReduction: Math.min(60, dodgeCooldownReduction),
     skillCooldownReduction,
     lifesteal,
     goldGain,
@@ -1224,10 +1242,10 @@ export function createStageWorld({
   return world;
 }
 
-export function createHubWorld({ seed = 1, playerId = 'hero', level = 1, equipment = [] } = {}) {
+export function createHubWorld({ seed = 1, playerId = 'hero', level = 1, equipment = [], talents = null } = {}) {
   const world = createWorld({ seed, arena: HUB_ARENA });
   world.mode = 'hub';
-  addPlayer(world, { playerId, characterKind: 'knight', character: { level, equipment } });
+  addPlayer(world, { playerId, characterKind: 'knight', character: { level, equipment, talents } });
   return world;
 }
 

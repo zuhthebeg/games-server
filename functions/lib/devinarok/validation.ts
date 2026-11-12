@@ -5,6 +5,7 @@ import {
   FAMILY_STARTER_WEAPONS, ITEMS, LEGENDARIES, RARITIES,
 } from './js/content/items.js';
 import { MASTERY_MAX_XP, MASTERY_MIN_COOLDOWN_TICKS } from './js/content/mastery.js';
+import { TALENT_MAX_RANK, TALENTS, talentsWithinBudget } from './js/content/talents.js';
 import {
   objectiveBonusGold as calculateObjectiveBonusGold,
   objectiveExtraSpawns,
@@ -17,7 +18,7 @@ import { normalizeCharacter } from './js/save/ops.js';
 
 const HUB_OPS = new Set([
   'createCharacter', 'equip', 'unequip', 'sellItem', 'buyPotion', 'spendGold', 'removeItem', 'updateTutorial',
-  'claimContract', 'salvageItem', 'contractDay',
+  'claimContract', 'salvageItem', 'contractDay', 'allocateTalent', 'resetTalents',
 ]);
 const SETTLEMENT_OPS = new Set([
   'gainXp', 'gainMastery', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions', 'contractProgress', 'contractDay',
@@ -60,6 +61,24 @@ export function validateCharacterMastery(character) {
     !object(mastery)
     || Object.entries(mastery).some(([skill, xp]) => !Object.hasOwn(SKILLS, skill) || !integer(xp, 0, MASTERY_MAX_XP))
   ) reject('invalid-mastery');
+}
+
+export function validateCharacterTalents(character) {
+  const talents = character?.talents;
+  if (talents === undefined) return;
+  const families = Object.keys(TALENTS);
+  if (
+    !object(talents)
+    || Object.keys(talents).length !== families.length
+    || families.some((family) => !Object.hasOwn(talents, family) || !object(talents[family]))
+  ) reject('invalid-talents');
+  for (const family of families) {
+    const knownIds = new Set(TALENTS[family].map(({ id }) => id));
+    if (Object.entries(talents[family]).some(([id, rank]) => (
+      !knownIds.has(id) || !integer(rank, 1, TALENT_MAX_RANK)
+    ))) reject('invalid-talents');
+  }
+  if (!talentsWithinBudget(character)) reject('talent-budget-exceeded');
 }
 
 function validateContractDate(dateKey, now) {
@@ -395,6 +414,7 @@ export function validateImport(snapshot) {
   validateCharacterMaterials(snapshot.character);
   validateCharacterContracts(snapshot.character);
   validateCharacterMastery(snapshot.character);
+  validateCharacterTalents(snapshot.character);
   const character = normalizeCharacter(snapshot.character);
   delete character.cloudUserId;
   if (

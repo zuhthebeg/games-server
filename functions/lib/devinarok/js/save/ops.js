@@ -6,6 +6,9 @@ import { ITEMS } from '../content/items.js';
 import { MASTERY_MAX_XP } from '../content/mastery.js';
 import { SKILLS } from '../content/skills.js';
 import { riftFirstClearReward, riftFloorOf } from '../content/stages.js';
+import {
+  TALENT_MAX_RANK, TALENTS, normalizedTalents, talentPoints, talentResetCost, talentSpent, talentsWithinBudget,
+} from '../content/talents.js';
 
 const SLOTS = new Set(['weapon', 'head', 'body', 'hands', 'feet']);
 const ENHANCE_RATES = [100, 100, 95, 90, 80, 70, 60, 50, 40, 30];
@@ -33,6 +36,10 @@ function normalizedMastery(mastery) {
     const xp = mastery?.[skill];
     return [skill, Number.isInteger(xp) ? Math.max(0, Math.min(MASTERY_MAX_XP, xp)) : 0];
   }));
+}
+
+function clearTalentsIfOverBudget(character) {
+  if (!talentsWithinBudget(character)) character.talents = normalizedTalents();
 }
 
 function normalizedContracts(contracts, character) {
@@ -85,6 +92,7 @@ export function normalizeCharacter(character) {
     soul: normalizedMaterial(character.materials?.soul),
   };
   normalized.mastery = normalizedMastery(character.mastery);
+  normalized.talents = normalizedTalents(character.talents);
   normalized.contracts = normalizedContracts(character.contracts, character);
   return normalized;
 }
@@ -128,6 +136,7 @@ export function applyOperations(character, itemMap, operations, characterId) {
         records: {},
         materials: { essence: 0, soul: 0 },
         mastery: normalizedMastery(),
+        talents: normalizedTalents(),
         contracts: { dateKey: null, progress: {}, claimed: [], basis: null },
         tutorial: { step: 'board', completed: false, skipped: false, combatComplete: false },
       };
@@ -163,6 +172,32 @@ export function applyOperations(character, itemMap, operations, characterId) {
         if (nextCharacter.contracts.basis) {
           nextCharacter.contracts.basis.level = Math.min(nextCharacter.contracts.basis.level, nextCharacter.level);
         }
+        clearTalentsIfOverBudget(nextCharacter);
+        break;
+      }
+      case 'allocateTalent': {
+        const family = operation.family;
+        const talentId = operation.talentId;
+        if (!Object.hasOwn(TALENTS, family) || !TALENTS[family].some((talent) => talent.id === talentId)) {
+          throw new TypeError('Invalid talent');
+        }
+        const rank = nextCharacter.talents[family][talentId] ?? 0;
+        if (rank >= TALENT_MAX_RANK) throw new RangeError('Talent rank cap reached');
+        if (talentSpent(nextCharacter.talents, family) + 1 > talentPoints(nextCharacter)) {
+          throw new RangeError('Talent point budget exceeded');
+        }
+        nextCharacter.talents[family][talentId] = rank + 1;
+        break;
+      }
+      case 'resetTalents': {
+        const family = operation.family;
+        if (!Object.hasOwn(TALENTS, family)) throw new TypeError('Invalid talent family');
+        const spent = talentSpent(nextCharacter.talents, family);
+        if (spent === 0) throw new RangeError('No talent points to reset');
+        const cost = talentResetCost(nextCharacter.level);
+        if (nextCharacter.gold < cost) throw new RangeError('Not enough gold to reset talents');
+        nextCharacter.gold -= cost;
+        nextCharacter.talents[family] = {};
         break;
       }
       case 'grantGold':
@@ -252,6 +287,7 @@ export function applyOperations(character, itemMap, operations, characterId) {
         nextCharacter.clearedStages = [];
         nextCharacter.records = {};
         nextCharacter.contracts = { dateKey: null, progress: {}, claimed: [], basis: null };
+        clearTalentsIfOverBudget(nextCharacter);
         break;
       case 'markDebug':
         nextCharacter.debugUsed = true;
@@ -276,6 +312,7 @@ export function applyOperations(character, itemMap, operations, characterId) {
         nextCharacter.mastery = normalizedMastery();
         nextCharacter.contracts = { dateKey: null, progress: {}, claimed: [], basis: null };
         nextCharacter.tutorial = { step: 'board', completed: false, skipped: false, combatComplete: false };
+        clearTalentsIfOverBudget(nextCharacter);
         break;
       case 'updateTutorial': {
         if (!operation.state || typeof operation.state !== 'object' || Array.isArray(operation.state)) {
