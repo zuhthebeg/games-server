@@ -282,13 +282,6 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
     for (const op of ops.filter(({ type }) => type === 'changeLineage')) {
       if (typeof op.lineage !== 'string' || !Object.hasOwn(LINEAGES, op.lineage)) reject('invalid-lineage');
       if (character && !integer(character.lineageChanges ?? 0, 0, 9998)) reject('invalid-lineage');
-      const weaponUid = character?.equipment?.weapon;
-      if (weaponUid == null) continue;
-      const weapon = items.find((item) => item?.uid === weaponUid);
-      if (!weapon || !lineageAllowsFamily(
-        op.lineage,
-        equipmentLook([{ ...weapon, slot: 'weapon' }]).family,
-      )) reject('invalid-lineage');
     }
     for (const op of ops.filter(({ type }) => type === 'contractDay')) validateContractDate(op.dateKey, now);
     for (const op of ops.filter(({ type }) => type === 'claimContract')) {

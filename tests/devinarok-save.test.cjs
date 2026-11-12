@@ -448,7 +448,6 @@ test('changeLineage is an allowed hub operation and saves the free and paid chan
   const change = [{ type: 'changeLineage', lineage: 'skeleton_knight' }];
   for (const invalid of [
     [{ type: 'changeLineage', lineage: 'unknown' }],
-    [{ type: 'changeLineage', lineage: 'skeleton_archer' }],
   ]) {
     assert.throws(() => validators.validateOps({
       character: state.character,
@@ -479,6 +478,28 @@ test('changeLineage is an allowed hub operation and saves the free and paid chan
   assert.equal(state.character.lineage, 'human');
   assert.equal(state.character.lineageChanges, 2);
   assert.equal(state.character.gold, 0);
+});
+
+test('changeLineage accepts an earlier unequip in the same hub operation batch', () => {
+  const state = saveOps.applyOperations(null, {}, [
+    { type: 'createCharacter', name: '계보 시험', kind: 'knight' },
+    { type: 'grantItem', uid: 'sword', itemId: 'rusted-sword' },
+    { type: 'equip', uid: 'sword', slot: 'weapon' },
+  ], 'lineage-unequip-test');
+  const ops = [
+    { type: 'unequip', slot: 'weapon' },
+    { type: 'changeLineage', lineage: 'skeleton_archer' },
+  ];
+  assert.doesNotThrow(() => validators.validateOps({
+    character: state.character,
+    items: Object.values(state.items),
+    ops,
+    context: { kind: 'hub' },
+  }));
+  const result = saveOps.applyOperations(state.character, state.items, ops, 'lineage-unequip-test');
+  assert.equal(result.character.lineage, 'skeleton_archer');
+  assert.equal(result.character.equipment.weapon, null);
+  assert.equal(result.items.sword.slot, null);
 });
 
 test('hub talent allocation and reset operations round-trip through server save logic', () => {
