@@ -25,6 +25,8 @@ const ENTITY_FIELDS = [
   'motion',
   'characterKind',
   'family',
+  'lineage',
+  'evolved',
   'look',
   'slowTicks',
   'counterReadyTicks',
@@ -59,6 +61,10 @@ const ENTITY_DEFAULTS = {
   counterAttackerId: null,
   perfectPaid: false,
   dodgeStartTick: null,
+  lineage: 'human',
+  evolved: false,
+  boneRevivalReady: false,
+  lastLichCooldownCastId: null,
 };
 
 export function roundToHundredth(value) {

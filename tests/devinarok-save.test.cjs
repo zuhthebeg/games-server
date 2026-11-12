@@ -410,6 +410,77 @@ test('server validates normalized talent families, ranks, and point budgets on i
   }), /invalid-talents/);
 });
 
+test('server validates lineage ids, change counters, and equipped weapon families', () => {
+  assert.doesNotThrow(() => validators.validateCharacterLineage({}));
+  const character = {
+    lineage: 'skeleton_knight',
+    lineageChanges: 1,
+    equipment: { weapon: 'sword' },
+  };
+  assert.doesNotThrow(() => validators.validateCharacterLineage(character, [
+    { uid: 'sword', itemId: 'rusted-sword', slot: 'weapon' },
+  ]));
+  for (const invalid of [
+    { lineage: 'unknown' },
+    { lineage: null },
+    { lineageChanges: -1 },
+    { lineageChanges: 1.5 },
+    { lineageChanges: 10000 },
+  ]) {
+    assert.throws(() => validators.validateCharacterLineage({ ...character, ...invalid }, [
+      { uid: 'sword', itemId: 'rusted-sword', slot: 'weapon' },
+    ]), /invalid-lineage/);
+  }
+  assert.throws(() => validators.validateCharacterLineage({
+    ...character,
+    lineage: 'skeleton_archer',
+    equipment: { weapon: 'sword' },
+  }, [{ uid: 'sword', itemId: 'rusted-sword', slot: 'weapon' }]), /invalid-lineage/);
+});
+
+test('changeLineage is an allowed hub operation and saves the free and paid changes', () => {
+  let state = saveOps.applyOperations(null, {}, [
+    { type: 'createCharacter', name: '계보 시험', kind: 'knight', lineage: 'human' },
+    { type: 'grantItem', uid: 'sword', itemId: 'rusted-sword' },
+    { type: 'equip', uid: 'sword', slot: 'weapon' },
+    { type: 'grantGold', amount: 1000 },
+  ], 'lineage-test');
+  const change = [{ type: 'changeLineage', lineage: 'skeleton_knight' }];
+  for (const invalid of [
+    [{ type: 'changeLineage', lineage: 'unknown' }],
+    [{ type: 'changeLineage', lineage: 'skeleton_archer' }],
+  ]) {
+    assert.throws(() => validators.validateOps({
+      character: state.character,
+      items: Object.values(state.items),
+      ops: invalid,
+      context: { kind: 'hub' },
+    }), /invalid-lineage/);
+  }
+  assert.throws(() => validators.validateOps({
+    character: { ...state.character, lineageChanges: 9999 },
+    items: Object.values(state.items),
+    ops: change,
+    context: { kind: 'hub' },
+  }), /invalid-lineage/);
+  assert.doesNotThrow(() => validators.validateOps({
+    character: state.character,
+    items: Object.values(state.items),
+    ops: change,
+    context: { kind: 'hub' },
+  }));
+  state = saveOps.applyOperations(state.character, state.items, change, 'lineage-test');
+  assert.equal(state.character.lineage, 'skeleton_knight');
+  assert.equal(state.character.lineageChanges, 1);
+  assert.equal(state.character.gold, 1000);
+  state = saveOps.applyOperations(state.character, state.items, [
+    { type: 'changeLineage', lineage: 'human' },
+  ], 'lineage-test');
+  assert.equal(state.character.lineage, 'human');
+  assert.equal(state.character.lineageChanges, 2);
+  assert.equal(state.character.gold, 0);
+});
+
 test('hub talent allocation and reset operations round-trip through server save logic', () => {
   const created = saveOps.applyOperations(null, {}, [
     { type: 'createCharacter', name: '기사', kind: 'knight' },

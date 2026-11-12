@@ -16,6 +16,9 @@ import {
 } from '../content/items.js';
 import { FAMILY_SKILLS, POTION, POTION_DROP, SKILLS } from '../content/skills.js';
 import { masteryBonus, masteryRank } from '../content/mastery.js';
+import {
+  isEvolved, isSkeletonLineage, LINEAGES, lineageOf,
+} from '../content/lineages.js';
 import { normalizedTalents, TALENTS } from '../content/talents.js';
 import { objectiveBonusGold } from '../content/objectives.js';
 import { DIFFICULTIES, effectiveStageLevel, STAGES } from '../content/stages.js';
@@ -443,10 +446,12 @@ export function addPlayer(world, {
     affixes: [...(item.affixes ?? [])],
   }));
   const look = equipmentLook(equipment);
+  const lineage = lineageOf(character);
+  const lineageFamily = isSkeletonLineage(lineage) ? LINEAGES[lineage].family : look.family;
   const stats = world.mode === 'stage' || world.mode === 'hub'
-    ? calculatePlayerStats(level, equipment, character.talents)
+    ? calculatePlayerStats(level, equipment, character.talents, lineageFamily)
     : null;
-  const familySkills = FAMILY_SKILLS[look.family] ?? FAMILY_SKILLS.sword;
+  const familySkills = FAMILY_SKILLS[lineageFamily] ?? FAMILY_SKILLS.sword;
   const masteryRanks = Object.fromEntries(familySkills.map((skillKey, index) => (
     [index + 1, masteryRank(character.mastery?.[skillKey])]
   )));
@@ -459,7 +464,10 @@ export function addPlayer(world, {
     playerId: id,
     name: String(name ?? id).slice(0, 32),
     characterKind: look.characterKind,
-    family: look.family,
+    lineage,
+    evolved: isEvolved(character),
+    boneRevivalReady: world.mode === 'stage' && isSkeletonLineage(lineage),
+    family: lineageFamily,
     masteryRanks,
     equipment,
     look,
@@ -503,6 +511,7 @@ export function addPlayer(world, {
     potionHealRemaining: 0,
     potionHealTicks: 0,
     attackSeq: 0,
+    lastLichCooldownCastId: null,
   };
   moveEntity(world, player, 0, 0);
   world.entities.push(player);
@@ -915,10 +924,9 @@ function awardPerfectDodge(world, attacker, player) {
   world.rewards[player.playerId].perfectDodges += 1;
   player.counterReadyTicks = player.stats.counterReadyTicks ?? 60;
   player.counterAttackerId = attacker.id;
-  player.pierceShotsRemaining = Math.max(
-    player.pierceShotsRemaining ?? 0,
-    player.stats.pierceShots ?? 0,
-  );
+  const pierceGrant = (player.stats.pierceShots ?? 0)
+    + (player.evolved && player.lineage === 'skeleton_archer' ? 2 : 0);
+  player.pierceShotsRemaining = Math.max(player.pierceShotsRemaining ?? 0, pierceGrant);
   player.dodgeCooldownTicks = Math.max(0, player.dodgeCooldownTicks - player.dodgeCooldownRefundTicks);
   emit(world, 'perfectDodge', {
     entityId: player.id,
@@ -1021,7 +1029,7 @@ export function calculateDamage(atk, motionMult, crit, critDmg, defense) {
   return Math.max(1, Math.round(atk * motionMult * (crit ? critDmg : 1) * 100 / (100 + defense)));
 }
 
-export function calculatePlayerStats(level = 1, equipment = [], talents = null) {
+export function calculatePlayerStats(level = 1, equipment = [], talents = null, familyOverride = null) {
   let maxHp = 100 + 12 * (level - 1);
   let attack = 10 + 2 * (level - 1);
   let defense = 0;
@@ -1069,7 +1077,7 @@ export function calculatePlayerStats(level = 1, equipment = [], talents = null) 
       if (key === 'spinCooldownSeconds') spinCooldownSeconds += value;
     }
   }
-  const family = equipmentLook(equipment).family;
+  const family = familyOverride ?? equipmentLook(equipment).family;
   const ranks = normalizedTalents(talents)[family];
   const talentBonuses = {};
   for (const { id, stat, perRank } of TALENTS[family]) {
@@ -1242,10 +1250,16 @@ export function createStageWorld({
   return world;
 }
 
-export function createHubWorld({ seed = 1, playerId = 'hero', level = 1, equipment = [], talents = null } = {}) {
+export function createHubWorld({
+  seed = 1, playerId = 'hero', level = 1, equipment = [], talents = null, lineage = 'human', clearedStages = [],
+} = {}) {
   const world = createWorld({ seed, arena: HUB_ARENA });
   world.mode = 'hub';
-  addPlayer(world, { playerId, characterKind: 'knight', character: { level, equipment, talents } });
+  addPlayer(world, {
+    playerId,
+    characterKind: 'knight',
+    character: { level, equipment, talents, lineage, clearedStages },
+  });
   return world;
 }
 
@@ -1706,6 +1720,7 @@ export function playerStrike(world, player, shape, motionMult, castId, hitTarget
     });
   }
   let hitCount = 0;
+  let counterHealApplied = false;
   for (const { enemy, target } of candidates) {
     if (hitTargets.includes(enemy.id) || enemy.invulnerable || enemy.spawnTicksLeft > 0) continue;
     if (enemy.dead) continue;
@@ -1735,6 +1750,28 @@ export function playerStrike(world, player, shape, motionMult, castId, hitTarget
       guarded,
       shape,
     );
+    if (
+      player.evolved
+      && player.lineage === 'skeleton_knight'
+      && skillId === 'counter'
+      && !counterHealApplied
+    ) {
+      player.hp = Math.min(player.maxHp, player.hp + Math.round(player.maxHp * 0.08));
+      counterHealApplied = true;
+    }
+    if (
+      player.evolved
+      && player.lineage === 'skeleton_mage'
+      && Number.isInteger(skillId)
+      && skillId > 0
+      && enemy.dead
+      && player.lastLichCooldownCastId !== castId
+    ) {
+      player.lastLichCooldownCastId = castId;
+      for (const [id, cooldown] of Object.entries(player.skillCooldowns)) {
+        if (Number(id) !== skillId) player.skillCooldowns[id] = Math.max(0, cooldown - 30);
+      }
+    }
     if (!enemy.dead && stunTicks > 0 && !enemy.boss) {
       enemy.stunnedTicks = Math.max(enemy.stunnedTicks ?? 0, stunTicks);
       enemy.attackPhase = null;
@@ -2486,6 +2523,15 @@ function damagePlayerM1(world, enemy, player, shape, motionMult = 1, knockback =
   }
   emit(world, 'hit', { sourceId: enemy.id, targetId: player.id, damage, blocked: guarding, shape });
   if (player.hp === 0) {
+    if (player.boneRevivalReady) {
+      player.boneRevivalReady = false;
+      player.hp = Math.round(player.maxHp * 0.3);
+      player.iFrames = Math.max(player.iFrames ?? 0, 45);
+      player.attack = null;
+      player.skillCast = null;
+      emit(world, 'boneRevival', { entityId: player.id, playerId: player.playerId });
+      return true;
+    }
     if (world.partySize > 1) {
       player.downed = true;
       player.reviveProgress = 0;

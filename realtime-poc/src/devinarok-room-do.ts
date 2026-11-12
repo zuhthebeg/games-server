@@ -6,6 +6,7 @@ import {
   step,
 } from './devinarok/js/sim/world.js';
 import { equipmentLook } from './devinarok/js/content/items.js';
+import { LINEAGES, lineageDisplayName, lineageOf } from './devinarok/js/content/lineages.js';
 import { SKILLS } from './devinarok/js/content/skills.js';
 import { normalizedTalents, talentsWithinBudget } from './devinarok/js/content/talents.js';
 import { isStageUnlocked } from './devinarok/js/content/stages.js';
@@ -46,6 +47,7 @@ type Character = {
   mastery?: Record<string, number>;
   talents?: Record<string, Record<string, number>>;
   clearedStages?: string[];
+  lineage?: string;
   [key: string]: unknown;
 };
 
@@ -121,6 +123,7 @@ export function normalizeCharacter(value: unknown): Character {
     : [];
   const normalized = {
     level,
+    lineage: lineageOf(character),
     equipment,
     potions: clamp(Math.trunc(Number(character.potions) || 0), 0, 5),
     clearedStages,
@@ -386,9 +389,10 @@ export class DevinarokRoomDO {
     for (const player of currentRoom.players) player.connected = connected.has(player.playerId);
     const players = currentRoom.players.map((player) => ({
       playerId: player.playerId,
-      name: player.name,
+      name: lineageDisplayName(player.name, player.character),
       level: player.character.level ?? 1,
-      family: equipmentLook(Array.isArray(player.character.equipment) ? player.character.equipment as any[] : []).family,
+      family: LINEAGES[lineageOf(player.character)]?.family
+        ?? equipmentLook(Array.isArray(player.character.equipment) ? player.character.equipment as any[] : []).family,
       ready: player.ready,
       connected: player.connected,
     }));
@@ -420,7 +424,7 @@ export class DevinarokRoomDO {
         event: !connected.size || !isPublic ? 'empty' : event,
         meta: {
           code: this.roomCode,
-          hostName: host?.name ?? '',
+          hostName: host ? lineageDisplayName(host.name, host.character) : '',
           stageId: room.stageId,
           difficulty: room.difficulty,
           hostLevel: host?.character.level ?? 1,
@@ -955,9 +959,15 @@ export class DevinarokRoomDO {
         ...(entity.kind === 'player' ? {
           characterKind: entity.characterKind,
           family: entity.family,
+          lineage: entity.lineage,
+          evolved: Boolean(entity.evolved),
           look: entity.look,
           mastery: [1, 2, 3, 4].map((slot) => entity.masteryRanks?.[slot] ?? 0),
         } : {}),
+      } : {}),
+      ...(entity.kind === 'player' ? {
+        boneRevivalReady: Boolean(entity.boneRevivalReady),
+        lastLichCooldownCastId: entity.lastLichCooldownCastId ?? null,
       } : {}),
       ...(entity.kind === 'player' && entity.playerId === playerId ? {
         motion: structuredClone(entity),

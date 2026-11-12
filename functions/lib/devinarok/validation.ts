@@ -2,8 +2,9 @@ import { AFFIXES } from './js/content/affixes.js';
 import { contractsFor, kstDateKey } from './js/content/contracts.js';
 import { ENEMIES } from './js/content/enemies.js';
 import {
-  FAMILY_STARTER_WEAPONS, ITEMS, LEGENDARIES, RARITIES,
+  equipmentLook, FAMILY_STARTER_WEAPONS, ITEMS, LEGENDARIES, RARITIES,
 } from './js/content/items.js';
+import { LINEAGES, lineageAllowsFamily } from './js/content/lineages.js';
 import { MASTERY_MAX_XP, MASTERY_MIN_COOLDOWN_TICKS } from './js/content/mastery.js';
 import { TALENT_MAX_RANK, TALENTS, talentsWithinBudget } from './js/content/talents.js';
 import {
@@ -18,7 +19,7 @@ import { normalizeCharacter } from './js/save/ops.js';
 
 const HUB_OPS = new Set([
   'createCharacter', 'equip', 'unequip', 'sellItem', 'buyPotion', 'spendGold', 'removeItem', 'updateTutorial',
-  'claimContract', 'salvageItem', 'contractDay', 'allocateTalent', 'resetTalents',
+  'claimContract', 'salvageItem', 'contractDay', 'allocateTalent', 'resetTalents', 'changeLineage',
 ]);
 const SETTLEMENT_OPS = new Set([
   'gainXp', 'gainMastery', 'grantGold', 'grantItem', 'clearStage', 'recordClear', 'setPotions', 'contractProgress', 'contractDay',
@@ -79,6 +80,23 @@ export function validateCharacterTalents(character) {
     ))) reject('invalid-talents');
   }
   if (!talentsWithinBudget(character)) reject('talent-budget-exceeded');
+}
+
+export function validateCharacterLineage(character, items = []) {
+  const lineage = character?.lineage;
+  if (lineage !== undefined && (typeof lineage !== 'string' || !Object.hasOwn(LINEAGES, lineage))) {
+    reject('invalid-lineage');
+  }
+  if (character?.lineageChanges !== undefined && !integer(character.lineageChanges, 0, 9999)) {
+    reject('invalid-lineage');
+  }
+  const weaponUid = character?.equipment?.weapon;
+  if (weaponUid == null) return;
+  const weapon = Array.isArray(items) ? items.find((item) => item?.uid === weaponUid) : null;
+  if (!weapon || !lineageAllowsFamily(
+    lineage ?? 'human',
+    equipmentLook([{ ...weapon, slot: 'weapon' }]).family,
+  )) reject('invalid-lineage');
 }
 
 function validateContractDate(dateKey, now) {
@@ -261,6 +279,17 @@ export function validateOps({ character, items = [], ops, context, lastSettlemen
 
   if (context.kind === 'hub') {
     if (ops.some((op) => !HUB_OPS.has(op.type) && op.type !== 'grantItem')) reject('hub-op-not-allowed');
+    for (const op of ops.filter(({ type }) => type === 'changeLineage')) {
+      if (typeof op.lineage !== 'string' || !Object.hasOwn(LINEAGES, op.lineage)) reject('invalid-lineage');
+      if (character && !integer(character.lineageChanges ?? 0, 0, 9998)) reject('invalid-lineage');
+      const weaponUid = character?.equipment?.weapon;
+      if (weaponUid == null) continue;
+      const weapon = items.find((item) => item?.uid === weaponUid);
+      if (!weapon || !lineageAllowsFamily(
+        op.lineage,
+        equipmentLook([{ ...weapon, slot: 'weapon' }]).family,
+      )) reject('invalid-lineage');
+    }
     for (const op of ops.filter(({ type }) => type === 'contractDay')) validateContractDate(op.dateKey, now);
     for (const op of ops.filter(({ type }) => type === 'claimContract')) {
       if (!character) reject('invalid-character');
@@ -415,6 +444,7 @@ export function validateImport(snapshot) {
   validateCharacterContracts(snapshot.character);
   validateCharacterMastery(snapshot.character);
   validateCharacterTalents(snapshot.character);
+  validateCharacterLineage(snapshot.character, snapshot.items);
   const character = normalizeCharacter(snapshot.character);
   delete character.cloudUserId;
   if (
