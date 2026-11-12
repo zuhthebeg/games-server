@@ -17,7 +17,7 @@ import {
 import { FAMILY_SKILLS, POTION, POTION_DROP, SKILLS } from '../content/skills.js';
 import { masteryBonus, masteryRank } from '../content/mastery.js';
 import {
-  isEvolved, isSkeletonLineage, LINEAGES, lineageOf,
+  isEvolved, isSkeletonLineage, lineageOf, playerFamily,
 } from '../content/lineages.js';
 import { normalizedTalents, TALENTS } from '../content/talents.js';
 import { objectiveBonusGold } from '../content/objectives.js';
@@ -447,7 +447,7 @@ export function addPlayer(world, {
   }));
   const look = equipmentLook(equipment);
   const lineage = lineageOf(character);
-  const lineageFamily = isSkeletonLineage(lineage) ? LINEAGES[lineage].family : look.family;
+  const lineageFamily = playerFamily(character, look);
   const stats = world.mode === 'stage' || world.mode === 'hub'
     ? calculatePlayerStats(level, equipment, character.talents, lineageFamily)
     : null;

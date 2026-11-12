@@ -23,6 +23,10 @@ export function lineageOf(character) {
   return Object.hasOwn(LINEAGES, id) ? id : 'human';
 }
 
+export function playerFamily(character, look) {
+  return LINEAGES[lineageOf(character)].family ?? look.family;
+}
+
 export function isSkeletonLineage(id) {
   return Boolean(LINEAGES[id]?.family);
 }
