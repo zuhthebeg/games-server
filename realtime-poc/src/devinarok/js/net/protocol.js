@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1;
 
-const ENTITY_FIELDS = [
+export const ENTITY_FIELDS = [
   'id',
   'kind',
   'x',
@@ -59,6 +59,10 @@ const ENTITY_DEFAULTS = {
   counterAttackerId: null,
   perfectPaid: false,
   dodgeStartTick: null,
+  lineage: 'human',
+  evolved: false,
+  boneRevivalReady: false,
+  lichRefundedCastIds: [],
 };
 
 export function roundToHundredth(value) {

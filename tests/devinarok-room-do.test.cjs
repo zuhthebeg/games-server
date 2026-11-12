@@ -45,12 +45,14 @@ function testNewPlayerStaticFieldsInDelta() {
     playerId: 'new-player',
     characterKind: 'rogue',
     family: 'crossbow',
+    lichRefundedCastIds: ['cast-1'],
     look,
     masteryRanks: { 1: 1, 2: 2, 3: 3, 4: 5 },
   };
   const firstDelta = room.renderEntity(player, 'viewer', false);
   assert.equal(firstDelta.characterKind, 'rogue');
   assert.equal(firstDelta.family, 'crossbow');
+  assert.deepEqual(firstDelta.lichRefundedCastIds, ['cast-1']);
   assert.deepEqual(firstDelta.look, look);
   assert.deepEqual(firstDelta.mastery, [1, 2, 3, 5]);
   const laterDelta = room.renderEntity(player, 'viewer', false);
@@ -117,6 +119,8 @@ async function testPartyTalentHpUsesNormalizedAllocation() {
       name: 'Talented',
       character: normalizeCharacter({
         level: 20,
+        lineage: 'skeleton_knight',
+        clearedStages: ['R10'],
         talents: { sword: { 'sw-vigor': 5 }, crossbow: {}, staff: {} },
       }),
       connected: true,
@@ -132,6 +136,19 @@ async function testPartyTalentHpUsesNormalizedAllocation() {
       ready: true,
       joinedAt: 1,
       order: 1,
+    },
+    {
+      playerId: 'archer',
+      name: 'Archer',
+      character: normalizeCharacter({
+        level: 20,
+        lineage: 'skeleton_archer',
+        clearedStages: ['R10'],
+      }),
+      connected: true,
+      ready: true,
+      joinedAt: 2,
+      order: 2,
     },
   ];
   const sockets = players.map(({ playerId }) => ({
@@ -155,7 +172,33 @@ async function testPartyTalentHpUsesNormalizedAllocation() {
   });
   const talented = room.world.entities.find((entity) => entity.kind === 'player' && entity.playerId === 'talented');
   const plain = room.world.entities.find((entity) => entity.kind === 'player' && entity.playerId === 'plain');
+  const archer = room.world.entities.find((entity) => entity.kind === 'player' && entity.playerId === 'archer');
   assert.equal(talented.maxHp, Math.round(plain.maxHp * 1.15));
+  assert.equal(talented.lineage, 'skeleton_knight');
+  assert.equal(talented.evolved, true);
+  assert.equal(talented.boneRevivalReady, true);
+  assert.equal(archer.lineage, 'skeleton_archer');
+  assert.equal(archer.evolved, true);
+  assert.equal(archer.boneRevivalReady, true);
+  const archerSnapshot = room.renderEntity(archer, 'plain', false);
+  assert.equal(archerSnapshot.lineage, 'skeleton_archer');
+  assert.equal(archerSnapshot.evolved, true);
+  assert.equal(archerSnapshot.boneRevivalReady, true);
+  archer.hp = 1;
+  const enemy = room.world.entities.find((entity) => entity.kind === 'enemy' && !entity.dead);
+  enemy.attack = 10000;
+  room.world.pendingHits.push({
+    resolveTick: room.world.tick + 1,
+    sourceId: enemy.id,
+    targetId: archer.id,
+    shape: { type: 'circle', originX: archer.x - 1, originZ: archer.z, radius: 2 },
+    motionMult: 1000,
+  });
+  room.stepWorld();
+  assert.equal(archer.hp, Math.round(archer.maxHp * 0.3));
+  assert.equal(archer.boneRevivalReady, false);
+  assert.ok(archer.iFrames >= 45);
+  assert.equal(room.world.events.some((event) => event.type === 'boneRevival'), true);
 }
 
 function testObjectiveSnapshotMetadataDelta() {
@@ -171,7 +214,11 @@ function testObjectiveSnapshotMetadataDelta() {
   const compiled = { exports: {} };
   new Function('module', 'exports', 'require', bundled)(compiled, compiled.exports, require);
   const room = new compiled.exports.DevinarokRoomDO({ storage: {} }, {});
-  const player = { id: 1, kind: 'player', playerId: 'hero', x: 0, z: 0, hp: 100, maxHp: 100 };
+  const player = {
+    id: 1, kind: 'player', playerId: 'hero', x: 0, z: 0, hp: 100, maxHp: 100,
+    lineage: 'skeleton_archer', evolved: true, boneRevivalReady: true,
+    lichRefundedCastIds: ['cast-1'],
+  };
   room.world = {
     tick: 0,
     stageId: 'C3',
@@ -186,6 +233,23 @@ function testObjectiveSnapshotMetadataDelta() {
   };
 
   const full = room.snapshotFor('hero', true, false);
+  const protocolBundle = esbuild.buildSync({
+    entryPoints: [path.join(ROOT, 'realtime-poc/src/devinarok/js/net/protocol.js')],
+    bundle: true,
+    format: 'cjs',
+    target: 'node22',
+    platform: 'node',
+    write: false,
+    logLevel: 'silent',
+  }).outputFiles[0].text;
+  const protocolModule = { exports: {} };
+  new Function('module', 'exports', 'require', protocolBundle)(protocolModule, protocolModule.exports, require);
+  const { compactEntity, expandEntity } = protocolModule.exports;
+  const fullPlayer = expandEntity(compactEntity(full.ents[0], full.full));
+  assert.equal(fullPlayer.lineage, 'skeleton_archer');
+  assert.equal(fullPlayer.evolved, true);
+  assert.equal(fullPlayer.boneRevivalReady, true);
+  assert.deepEqual(fullPlayer.lichRefundedCastIds, ['cast-1']);
   assert.deepEqual(full.objective, {
     type: 'defend',
     state: 'active',
@@ -196,7 +260,12 @@ function testObjectiveSnapshotMetadataDelta() {
   room.inputs.get('hero').snapshotAck = full.tick;
   room.world.tick += 1;
   room.world.objective.hp = 270;
+  room.world.entities[0].boneRevivalReady = false;
+  room.world.entities[0].lichRefundedCastIds = ['cast-1', 'cast-2'];
   const delta = room.snapshotFor('hero', false, false);
+  const deltaPlayer = expandEntity(compactEntity(delta.ents[0], delta.full));
+  assert.equal(deltaPlayer.boneRevivalReady, false);
+  assert.deepEqual(deltaPlayer.lichRefundedCastIds, ['cast-1', 'cast-2']);
   assert.equal(delta.full, false);
   assert.deepEqual(delta.objective, {
     type: 'defend',
@@ -673,7 +742,8 @@ async function run() {
     const fields = [
       'id', 'kind', 'x', 'z', 'facing', 'hp', 'state', 'anim', 'attackPhase', 'attackPattern',
       'attackShape', 'attackRemaining', 'skill', 'dodge', 'downed', 'ownerId', 'model',
-      'maxHp', 'name', 'item', 'radius', 'motion', 'characterKind', 'family', 'look', 'slowTicks',
+      'maxHp', 'name', 'item', 'radius', 'motion', 'characterKind', 'family',
+      'look', 'slowTicks',
     ];
     const expandEntity = (compact) => {
       const [mask, ...rest] = compact;

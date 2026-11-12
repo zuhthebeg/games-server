@@ -2,7 +2,10 @@
 import { AFFIXES } from '../content/affixes.js';
 import { rollAffixValue } from '../content/affix-value.js';
 import { contractsFor } from '../content/contracts.js';
-import { ITEMS } from '../content/items.js';
+import { equipmentLook, ITEMS } from '../content/items.js';
+import {
+  LINEAGES, lineageAllowsFamily, lineageChangeCost, lineageOf,
+} from '../content/lineages.js';
 import { MASTERY_MAX_XP } from '../content/mastery.js';
 import { SKILLS } from '../content/skills.js';
 import { riftFirstClearReward, riftFloorOf } from '../content/stages.js';
@@ -93,6 +96,10 @@ export function normalizeCharacter(character) {
   };
   normalized.mastery = normalizedMastery(character.mastery);
   normalized.talents = normalizedTalents(character.talents);
+  normalized.lineage = lineageOf(character);
+  normalized.lineageChanges = Number.isInteger(character.lineageChanges) && character.lineageChanges >= 0
+    ? character.lineageChanges
+    : 0;
   normalized.contracts = normalizedContracts(character.contracts, character);
   return normalized;
 }
@@ -121,10 +128,16 @@ export function applyOperations(character, itemMap, operations, characterId) {
       const name = String(operation.name ?? '').trim();
       if (name.length < 1 || name.length > 12) throw new TypeError('Character name must be 1–12 characters');
       if (operation.kind !== 'knight') throw new TypeError('Only the Knight class is available in M0');
+      const lineage = operation.lineage ?? 'human';
+      if (typeof lineage !== 'string' || !Object.hasOwn(LINEAGES, lineage)) {
+        throw new TypeError('Invalid lineage');
+      }
       nextCharacter = {
         id: characterId,
         name,
         kind: operation.kind,
+        lineage,
+        lineageChanges: 0,
         level: 1,
         xp: 0,
         gold: 0,
@@ -246,11 +259,36 @@ export function applyOperations(character, itemMap, operations, characterId) {
         if (nextItems[operation.uid].requiredLevel > nextCharacter.level) {
           throw new RangeError('Character level is too low');
         }
+        if (operation.slot === 'weapon' && !lineageAllowsFamily(
+          nextCharacter.lineage,
+          equipmentLook([{ ...item, slot: 'weapon' }]).family,
+        )) throw new RangeError('weapon-family');
         if (item.slot) nextCharacter.equipment[item.slot] = null;
         const previouslyEquipped = nextCharacter.equipment[operation.slot];
         if (previouslyEquipped && nextItems[previouslyEquipped]) nextItems[previouslyEquipped].slot = null;
         item.slot = operation.slot;
         nextCharacter.equipment[operation.slot] = item.uid;
+        break;
+      }
+      case 'changeLineage': {
+        const lineage = operation.lineage;
+        if (typeof lineage !== 'string' || !Object.hasOwn(LINEAGES, lineage)) {
+          throw new TypeError('Invalid lineage');
+        }
+        if (lineage === nextCharacter.lineage) throw new RangeError('Same lineage');
+        const weaponUid = nextCharacter.equipment?.weapon;
+        if (weaponUid != null) {
+          const weapon = nextItems[weaponUid];
+          if (!weapon || !lineageAllowsFamily(
+            lineage,
+            equipmentLook([{ ...weapon, slot: 'weapon' }]).family,
+          )) throw new RangeError('weapon-family');
+        }
+        const cost = lineageChangeCost(nextCharacter);
+        if (nextCharacter.gold < cost) throw new RangeError('Not enough gold');
+        nextCharacter.gold -= cost;
+        nextCharacter.lineage = lineage;
+        nextCharacter.lineageChanges += 1;
         break;
       }
       case 'unequip': {
@@ -305,6 +343,8 @@ export function applyOperations(character, itemMap, operations, characterId) {
         nextCharacter.xp = 0;
         nextCharacter.gold = 0;
         nextCharacter.potions = 0;
+        nextCharacter.lineage = 'human';
+        nextCharacter.lineageChanges = 0;
         nextCharacter.equipment = { weapon: null, head: null, body: null, hands: null, feet: null };
         nextCharacter.clearedStages = [];
         nextCharacter.records = {};
