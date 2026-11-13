@@ -84,6 +84,7 @@ function testNewPlayerStaticFieldsInDelta() {
   }).mastery, {
     spin: 300, dash: 0, guard: 0, quake: 0, pierce: 0, vault: 0,
     volley: 0, rain: 0, flame: 0, frost: 0, blink: 0, meteor: 0,
+    deadBurst: 0, poisonArrow: 0, cursedHands: 0,
   });
   assert.deepEqual(compiled.exports.normalizeCharacter({ level: 1 }).talents, {
     sword: {}, crossbow: {}, staff: {},
@@ -507,7 +508,7 @@ async function testMixedFamilyStageSnapshot() {
     const families = [
       { family: 'sword', characterKind: 'knight', weapon: '1H_Sword', itemId: 'rusted-sword' },
       { family: 'crossbow', characterKind: 'rogue', weapon: '1H_Crossbow', itemId: 'rusted-crossbow' },
-      { family: 'staff', characterKind: 'mage', weapon: '1H_Wand', itemId: 'apprentice-wand' },
+      { family: 'staff', characterKind: 'mage', weapon: '1H_Wand', itemId: 'apprentice-wand', lineage: 'skeleton_mage' },
     ];
     const party = [];
     for (const [index, family] of families.entries()) {
@@ -517,7 +518,13 @@ async function testMixedFamilyStageSnapshot() {
         `Family${index}`,
         null,
         SIM_HASH,
-        { level: 1, equipment: [{ itemId: family.itemId, slot: 'weapon' }], potions: 2, clearedStages: [] },
+        {
+          level: 1,
+          ...(family.lineage ? { lineage: family.lineage } : {}),
+          equipment: [{ itemId: family.itemId, slot: 'weapon' }],
+          potions: 2,
+          clearedStages: [],
+        },
       );
       clients.push(client);
       party.push({ client, family });
@@ -557,6 +564,20 @@ async function testMixedFamilyStageSnapshot() {
       assert.equal(player.look.family, expected.family);
       assert.equal(player.look.weapon, expected.weapon);
     }
+    const mage = players.find((player) => player.lineage === 'skeleton_mage');
+    assert(mage);
+    const magePartyMember = party.find((member) => member.family.lineage === 'skeleton_mage');
+    const mageSnapshot = snapshots[party.indexOf(magePartyMember)];
+    magePartyMember.client.send({
+      t: 'in',
+      ae: 0,
+      sa: mageSnapshot.tick,
+      inputs: [{ seq: 1, mx: 0, mz: 0, aim: 0, b: 8, vt: mageSnapshot.tick }],
+    });
+    await magePartyMember.client.waitFor((message) => (
+      message.t === 'snap'
+      && message.ev?.some((event) => event.type === 'cast' && event.skillKey === 'cursedHands')
+    ), 'skeleton mage cursedHands cast');
     const ownPlayer = players.find((entry) => entry.family === 'sword');
     assert.equal(ownPlayer.motion.counterReadyTicks, 0);
     assert.equal(ownPlayer.motion.counterAttackerId, null);

@@ -14,7 +14,7 @@ import {
   BOSS_RARITIES_NIGHTMARE,
   ELITE_RARITIES,
 } from '../content/items.js';
-import { FAMILY_SKILLS, POTION, POTION_DROP, SKILLS } from '../content/skills.js';
+import { POTION, POTION_DROP, SKILLS, skillsFor } from '../content/skills.js';
 import { masteryBonus, masteryRank } from '../content/mastery.js';
 import {
   isEvolved, isSkeletonLineage, lineageOf, playerFamily,
@@ -451,7 +451,7 @@ export function addPlayer(world, {
   const stats = world.mode === 'stage' || world.mode === 'hub'
     ? calculatePlayerStats(level, equipment, character.talents, lineageFamily)
     : null;
-  const familySkills = FAMILY_SKILLS[lineageFamily] ?? FAMILY_SKILLS.sword;
+  const familySkills = skillsFor(lineageFamily, lineage);
   const masteryRanks = Object.fromEntries(familySkills.map((skillKey, index) => (
     [index + 1, masteryRank(character.mastery?.[skillKey])]
   )));
@@ -802,6 +802,8 @@ function completeObjective(world, position = null) {
       stageLevel: world.effectiveLevel ?? world.stageLevel,
       elite: true,
       forcedRarity: 'rare',
+      family: player.family,
+      lineage: player.lineage,
     });
     spawnLoot(world, x, z, { ownerId: player.playerId, lootType: 'item', item });
   }
@@ -1166,17 +1168,36 @@ export function rollStageItem(world, options = {}) {
   const itemLevel = Math.min(20, stageLevel + (boss ? 2 : 0));
   const rarity = forcedRarity ?? rarityForRoll(random(world), { elite, boss, difficulty });
   if (!RARITIES[rarity]) throw new TypeError(`Unknown item rarity: ${rarity}`);
-  const playerFamily = world.entities?.find((entity) => entity.kind === 'player')?.family;
+  const firstPlayer = world.entities?.find((entity) => entity.kind === 'player');
+  const family = options.family ?? firstPlayer?.family;
+  const lineage = options.lineage ?? firstPlayer?.lineage ?? 'human';
   const setId = options.setId ?? (
     rarity === 'set'
-      ? Object.entries(ITEM_SETS).find(([, set]) => set.family === playerFamily)?.[0]
+      ? Object.entries(ITEM_SETS).find(([, set]) => set.family === family)?.[0]
       : null
   );
   const bases = rarity === 'set'
     ? eligibleSetBases(setId, itemLevel)
     : ITEM_BASES.filter((item) => !item.setId && item.requiredLevel <= stageLevel);
   if (!bases.length) throw new TypeError('No eligible item base for this drop');
-  const base = bases[Math.floor(random(world) * bases.length)];
+  const rolledBase = bases[Math.floor(random(world) * bases.length)];
+  let base = rolledBase;
+  if (
+    !rolledBase.setId
+    && isSkeletonLineage(lineage)
+    && rolledBase.slot === 'weapon'
+    && rolledBase.family !== family
+  ) {
+    const familyWeapons = ITEM_BASES.filter((item) => (
+      !item.setId
+      && item.slot === 'weapon'
+      && item.family === family
+      && item.requiredLevel <= stageLevel
+    ));
+    if (familyWeapons.length) {
+      base = familyWeapons[Math.floor(random(world) * familyWeapons.length)];
+    }
+  }
   const ilvl = itemLevel;
   const affixCount = RARITIES[rarity].affixes;
   const affixes = [];
@@ -1606,8 +1627,8 @@ function dropRewards(world, enemy) {
         const setAvailable = eligibleSetBases(setId, Math.min(20, stageLevel + 2)).length > 0;
         const setDrop = Boolean(setDropRoll && setAvailable);
         const item = rollStageItem(world, setDrop
-          ? { stageLevel, boss: true, forcedRarity: 'set', setId }
-          : { stageLevel, elite: enemy.elite, boss: enemy.boss });
+          ? { stageLevel, boss: true, forcedRarity: 'set', setId, family: player.family, lineage: player.lineage }
+          : { stageLevel, elite: enemy.elite, boss: enemy.boss, family: player.family, lineage: player.lineage });
         spawnLoot(world, enemy.x + (index ? 0.3 : -0.3), enemy.z, {
           ownerId: player.playerId,
           lootType: 'item',
@@ -1615,7 +1636,12 @@ function dropRewards(world, enemy) {
         });
       }
     } else if (random(world) < chance) {
-      const item = rollStageItem(world, { stageLevel, elite: enemy.elite });
+      const item = rollStageItem(world, {
+        stageLevel,
+        elite: enemy.elite,
+        family: player.family,
+        lineage: player.lineage,
+      });
       spawnLoot(world, enemy.x + (random(world) - 0.5) * 0.5, enemy.z + (random(world) - 0.5) * 0.5, {
         ownerId: player.playerId,
         lootType: 'item',
@@ -1685,6 +1711,7 @@ function killStageEnemy(
 export function playerStrike(world, player, shape, motionMult, castId, hitTargets, skillId = undefined, {
   rewind = true,
   maxTargets = Infinity,
+  targetEntityId = null,
   slowTicks = 0,
   stunTicks = 0,
   knockback = 0,
@@ -1709,7 +1736,7 @@ export function playerStrike(world, player, shape, motionMult, castId, hitTarget
       const target = historical ?? enemy;
       return attackShapeHit(shape, target, target.radius) ? { enemy, target } : null;
     })
-    .filter(Boolean);
+    .filter((candidate) => candidate && (targetEntityId === null || candidate.enemy.id === targetEntityId));
   if (Number.isFinite(maxTargets) && shape.type === 'line') {
     candidates.sort((a, b) => {
       const project = ({ target }) => (
@@ -1815,6 +1842,7 @@ function queuePendingImpact(world, impact) {
     endsTick: pending.endsTick,
     hitEvery: pending.hitEvery,
     hitsRemaining: pending.hitsRemaining,
+    ...(Number.isSafeInteger(pending.targetEntityId) ? { targetEntityId: pending.targetEntityId } : {}),
     viewLag: pending.viewLag,
     ...(Number.isSafeInteger(pending.viewTick) ? { viewTick: pending.viewTick } : {}),
     shape: copyShape(pending.shape),
@@ -1842,23 +1870,43 @@ function resolvePendingImpacts(world) {
       if (impact.hitsRemaining > 0) remaining.push(impact);
       continue;
     }
-    if (impact.kind === 'burn') {
+    if (impact.kind === 'burn' || impact.kind === 'poison') {
       if (world.tick < impact.resolveTick) {
         remaining.push(impact);
         continue;
       }
       if (world.tick > impact.endsTick) continue;
+      const target = impact.kind === 'poison'
+        ? world.entities.find((entity) => entity.id === impact.targetEntityId && !entity.dead)
+        : null;
+      if (impact.kind === 'poison' && !target) continue;
       const elapsed = world.tick - impact.resolveTick;
       if (elapsed > 0 && elapsed % impact.hitEvery === 0) {
         const player = world.entities.find((entity) => entity.kind === 'player' && entity.playerId === impact.ownerId);
         if (player && !player.dead && !player.downed && player.connected) {
-          playerStrike(world, player, impact.shape, impact.motionMult, impact.id, [], impact.skillId, {
+          const shape = target
+            ? { type: 'circle', originX: target.x, originZ: target.z, radius: impact.radius }
+            : impact.shape;
+          playerStrike(world, player, shape, impact.motionMult, impact.id, [], impact.skillId, {
+            targetEntityId: impact.targetEntityId ?? null,
             viewLag: impact.viewLag,
             viewTick: impact.viewTick,
+            rewind: impact.kind !== 'poison',
           });
+          if (target) {
+            emit(world, 'impact', {
+              id: impact.id,
+              ownerId: impact.ownerId,
+              castSeq: impact.castSeq,
+              resolveTick: world.tick,
+              targetEntityId: target.id,
+              shape: copyShape(shape),
+              kind: 'poison-puff',
+            });
+          }
         }
       }
-      if (world.tick < impact.endsTick) remaining.push(impact);
+      if (world.tick < impact.endsTick && (!target || !target.dead)) remaining.push(impact);
       continue;
     }
     if (world.tick < impact.resolveTick) {
@@ -1894,7 +1942,7 @@ function resolvePendingImpacts(world) {
 }
 
 function familySkillName(player, id) {
-  return FAMILY_SKILLS[player.family ?? 'sword']?.[id - 1] ?? null;
+  return skillsFor(player.family ?? 'sword', player.lineage)?.[id - 1] ?? null;
 }
 
 function skillDuration(name) {
@@ -1909,7 +1957,7 @@ function startSkillMotion(ctx, player, id, seq, input) {
   const skill = SKILLS[name];
   if (!skill) return null;
   const castId = `${player.playerId}:${seq}`;
-  const target = ['rain', 'meteor'].includes(name)
+  const target = ['rain', 'meteor', 'cursedHands'].includes(name)
     ? aimedPoint(ctx, player, skill.range, skill.fallbackDistance, input)
     : null;
   player.skillCast = {
@@ -1932,7 +1980,15 @@ function startSkillMotion(ctx, player, id, seq, input) {
       ? player.z + Math.sin(player.facing) * skill.forwardOffset
       : target?.z,
   };
-  return { entityId: player.id, playerId: player.playerId, castId, skill: id, skillName: skill.name, family: player.family ?? 'sword' };
+  return {
+    entityId: player.id,
+    playerId: player.playerId,
+    castId,
+    skill: id,
+    skillKey: name,
+    skillName: skill.name,
+    family: player.family ?? 'sword',
+  };
 }
 
 function applyPotion(world, player, seq) {
@@ -2017,7 +2073,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
       )));
       player.skillCooldowns[skillId] = cooldownTicks;
       events.push({ type: 'skill', payload, cooldownTicks });
-      if (skillId === 4) {
+      if (skillId === 4 && skillKey !== 'deadBurst') {
         const cast = player.skillCast;
         const shape = {
           type: 'circle',
@@ -2077,6 +2133,10 @@ export function stepPlayerMotion(ctx, player, rawInput) {
     const cast = player.skillCast;
     const skill = SKILLS[cast.name];
     cast.tick += 1;
+    if (cast.name === 'deadBurst' && cast.tick === 1) {
+      const hpCost = Math.max(1, Math.round(player.maxHp * skill.hpCostFraction));
+      player.hp = Math.max(1, player.hp - hpCost);
+    }
     if (cast.name === 'dash') {
       const stepDistance = skill.dashDistance / skill.dashTicks;
       moveEntity(ctx, player, Math.cos(cast.angle) * stepDistance, Math.sin(cast.angle) * stepDistance);
@@ -2137,6 +2197,53 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         stunTicks: skill.stunTicks,
       });
       skillImpacts.push({ castSeq: cast.seq, castId: cast.castId, shape, kind: 'quake' });
+    } else if (cast.name === 'deadBurst' && cast.tick === skill.windupTicks) {
+      const shape = {
+        type: 'circle',
+        originX: player.x,
+        originZ: player.z,
+        radius: skill.radius,
+      };
+      pendingImpacts.push({
+        id: cast.castId,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: cast.seq,
+        resolveTick: ctx.tick,
+        shape,
+        motionMult: skill.motionMult,
+        knockback: skill.knockback,
+        kind: 'deadBurst',
+        viewLag: player.viewLag,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+        sourceX: player.x,
+        sourceZ: player.z,
+      });
+    } else if (cast.name === 'cursedHands' && cast.tick === skill.windupTicks) {
+      const shape = {
+        type: 'circle',
+        originX: cast.targetX,
+        originZ: cast.targetZ,
+        radius: skill.radius,
+      };
+      addSkillStrike({
+        shape,
+        motionMult: skill.motionMult,
+        castId: cast.castId,
+        hitTargets: cast.hitTargets,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+        rootTicks: skill.rootTicks,
+        bossRootTicks: skill.bossRootTicks,
+      });
+      skillImpacts.push({
+        castSeq: cast.seq,
+        castId: cast.castId,
+        shape,
+        kind: 'cursedHands',
+        endsTick: ctx.tick + skill.rootTicks,
+      });
     } else if (cast.name === 'rain' && cast.tick === skill.windupTicks) {
       pendingImpacts.push({
         id: cast.castId,
@@ -2197,6 +2304,32 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         addSkillStrike({ shape, motionMult: skill.motionMult, castId: `${cast.castId}:${lineIndex}`, hitTargets: [], viewTick: input.viewTick, skillId: cast.id });
         shots.push({ ownerId: player.playerId, x: cast.originX, z: cast.originZ, angle, length: skill.length, castSeq: cast.seq, lineIndex });
       }
+    } else if (cast.name === 'poisonArrow' && cast.tick === skill.windupTicks) {
+      const shape = makeLineShape(cast.originX, cast.originZ, cast.angle, skill.length, skill.width);
+      addSkillStrike({
+        shape,
+        motionMult: skill.motionMult,
+        castId: cast.castId,
+        hitTargets: cast.hitTargets,
+        maxTargets: 1,
+        viewTick: input.viewTick,
+        skillId: cast.id,
+        poison: {
+          ticks: skill.poisonTicks,
+          hitEvery: skill.poisonEvery,
+          motionMult: skill.poisonMotionMult,
+          castSeq: cast.seq,
+        },
+      });
+      shots.push({
+        ownerId: player.playerId,
+        x: cast.originX,
+        z: cast.originZ,
+        angle: cast.angle,
+        length: skill.length,
+        castSeq: cast.seq,
+        skillKey: cast.name,
+      });
     } else if (cast.name === 'flame' && cast.tick === skill.windupTicks) {
       const point = aimedPoint(ctx, player, skill.range, 6, input);
       pendingImpacts.push({
@@ -2458,13 +2591,47 @@ function advanceStagePlayer(world, player, rawInput) {
     for (const blink of motion.blinks) emit(world, 'blink', blink);
     const skillStrikes = motion.skillStrikes.length ? motion.skillStrikes : motion.skillStrike ? [motion.skillStrike] : [];
     for (const strike of skillStrikes) {
-      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
+      const hitTargets = playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
         maxTargets: strike.maxTargets,
         stunTicks: strike.stunTicks,
         knockback: strike.knockback,
         viewLag: player.viewLag,
         viewTick: strike.viewTick ?? motion.input.viewTick,
       });
+      for (const enemyId of hitTargets) {
+        const enemy = world.entities.find((entity) => entity.id === enemyId);
+        if (!enemy || enemy.dead) continue;
+        if (strike.poison) {
+          world.pendingImpacts = world.pendingImpacts.filter((impact) => !(
+            impact.kind === 'poison'
+            && impact.ownerId === player.playerId
+            && impact.targetEntityId === enemy.id
+          ));
+          queuePendingImpact(world, {
+            id: strike.castId,
+            ownerId: player.playerId,
+            ownerEntityId: player.id,
+            castSeq: strike.poison.castSeq,
+            resolveTick: world.tick,
+            endsTick: world.tick + strike.poison.ticks,
+            hitEvery: strike.poison.hitEvery,
+            targetEntityId: enemy.id,
+            radius: enemy.radius ?? 0.3,
+            shape: { type: 'circle', originX: enemy.x, originZ: enemy.z, radius: enemy.radius ?? 0.3 },
+            motionMult: strike.poison.motionMult,
+            kind: 'poison',
+            skillId: strike.skillId,
+            viewLag: player.viewLag,
+            viewTick: strike.viewTick ?? motion.input.viewTick,
+            sourceX: player.x,
+            sourceZ: player.z,
+          });
+        }
+        if (strike.rootTicks) {
+          const rootTicks = enemy.boss ? strike.bossRootTicks : strike.rootTicks;
+          enemy.rootedTicks = Math.max(enemy.rootedTicks ?? 0, rootTicks);
+        }
+      }
     }
     for (const impact of motion.skillImpacts) {
       emit(world, 'impact', {
@@ -2474,6 +2641,7 @@ function advanceStagePlayer(world, player, rawInput) {
         castSeq: impact.castSeq,
         fireTick: world.tick,
         resolveTick: world.tick,
+        ...(Number.isSafeInteger(impact.endsTick) ? { endsTick: impact.endsTick } : {}),
         shape: impact.shape,
         kind: impact.kind,
       });
@@ -2830,6 +2998,7 @@ function activeEnemyAttack(world, enemy, target) {
 }
 
 function stepStageEnemy(world, enemy, players) {
+  const rooted = (enemy.rootedTicks ?? 0) > 0;
   if (enemy.boss && enemy.boneSpearCooldownTicks > 0) enemy.boneSpearCooldownTicks -= 1;
   if (enemy.summonCooldownTicks > 0) enemy.summonCooldownTicks -= 1;
   if (enemy.spawnTicksLeft > 0) {
@@ -2915,7 +3084,8 @@ function stepStageEnemy(world, enemy, players) {
       return;
     }
     if (enemy.attackPattern === 'blink-away') {
-      const destination = blinkDestination(world, enemy, players, ENEMIES.ashwarden.patterns['blink-away'].minPlayerDistance);
+      const destination = rooted ? null
+        : blinkDestination(world, enemy, players, ENEMIES.ashwarden.patterns['blink-away'].minPlayerDistance);
       if (destination) {
         const from = { x: enemy.x, z: enemy.z };
         enemy.x = destination.x;
@@ -2930,16 +3100,18 @@ function stepStageEnemy(world, enemy, players) {
       return;
     }
     if (enemy.attackPattern === 'charge') {
-      const startX = enemy.x;
-      const startZ = enemy.z;
-      const directionX = Math.cos(enemy.chargeAngle);
-      const directionZ = Math.sin(enemy.chargeAngle);
-      const slowFactor = enemy.slowTicks > 0 ? 0.5 : 1;
-      moveEntity(world, enemy, directionX * slowFactor, directionZ * slowFactor);
-      const travelled = Math.max(0, (enemy.x - startX) * directionX + (enemy.z - startZ) * directionZ);
-      enemy.lineTravelled += Math.min(1, travelled);
-      enemy.attackShape.length = enemy.lineTravelled;
-      if (travelled < 1 - 1e-3) enemy.attackRemaining = 1;
+      if (!rooted) {
+        const startX = enemy.x;
+        const startZ = enemy.z;
+        const directionX = Math.cos(enemy.chargeAngle);
+        const directionZ = Math.sin(enemy.chargeAngle);
+        const slowFactor = enemy.slowTicks > 0 ? 0.5 : 1;
+        moveEntity(world, enemy, directionX * slowFactor, directionZ * slowFactor);
+        const travelled = Math.max(0, (enemy.x - startX) * directionX + (enemy.z - startZ) * directionZ);
+        enemy.lineTravelled += Math.min(1, travelled);
+        enemy.attackShape.length = enemy.lineTravelled;
+        if (travelled < 1 - 1e-3) enemy.attackRemaining = 1;
+      }
     } else if (enemy.attackPattern === 'line-dash') {
       const shape = enemy.attackShape;
       const directionX = Math.cos(shape.angle);
@@ -2949,12 +3121,14 @@ function stepStageEnemy(world, enemy, players) {
         shape.length / Math.max(1, ENEMIES[enemy.enemyKind].activeTicks) * slowFactor,
         Math.max(0, shape.length - enemy.lineTravelled),
       );
-      const startX = enemy.x;
-      const startZ = enemy.z;
-      moveEntity(world, enemy, directionX * distance, directionZ * distance);
-      const travelled = Math.max(0, (enemy.x - startX) * directionX + (enemy.z - startZ) * directionZ);
-      enemy.lineTravelled += Math.min(distance, travelled);
-      if (travelled < distance - 0.001) enemy.attackRemaining = 1;
+      if (!rooted) {
+        const startX = enemy.x;
+        const startZ = enemy.z;
+        moveEntity(world, enemy, directionX * distance, directionZ * distance);
+        const travelled = Math.max(0, (enemy.x - startX) * directionX + (enemy.z - startZ) * directionZ);
+        enemy.lineTravelled += Math.min(distance, travelled);
+        if (travelled < distance - 0.001) enemy.attackRemaining = 1;
+      }
     }
     activeEnemyAttack(world, enemy, target);
     enemy.attackRemaining -= 1;
@@ -2997,15 +3171,15 @@ function stepStageEnemy(world, enemy, players) {
         length: rule.length,
         width: rule.width,
       }, 'shield-bash', rule.windupTicks);
-    } else {
+    } else if (!rooted) {
       moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
     }
     return;
   }
   if (rule.behavior === 'ground-circle' || rule.behavior === 'summoner') {
-    if (distance > rule.keepDistance + 0.8) {
+    if (!rooted && distance > rule.keepDistance + 0.8) {
       moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
-    } else if (distance < rule.keepDistance - 1.1) {
+    } else if (!rooted && distance < rule.keepDistance - 1.1) {
       moveEntity(world, enemy, -dx / distance * speed / TICK_HZ, -dz / distance * speed / TICK_HZ);
     } else if (rule.behavior === 'summoner' && enemy.summonCooldownTicks === 0
       && world.entities.filter((entry) => entry.kind === 'enemy' && !entry.dead && entry.summonedBy === enemy.id).length < rule.summon.maxAlive) {
@@ -3016,22 +3190,22 @@ function stepStageEnemy(world, enemy, players) {
     return;
   }
   if (rule.behavior === 'ranged-line') {
-    if (distance > rule.keepDistance + 0.8) moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
-    else if (distance < rule.keepDistance - 1.1) moveEntity(world, enemy, -dx / distance * speed / TICK_HZ, -dz / distance * speed / TICK_HZ);
+    if (!rooted && distance > rule.keepDistance + 0.8) moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
+    else if (!rooted && distance < rule.keepDistance - 1.1) moveEntity(world, enemy, -dx / distance * speed / TICK_HZ, -dz / distance * speed / TICK_HZ);
     else beginEnemyTelegraph(world, enemy, target, makeLineShape(enemy.x, enemy.z, enemy.facing, rule.length, rule.width), rule.behavior, rule.windupTicks);
     return;
   }
   if (rule.behavior === 'slam') {
     if (distance <= rule.slamRadius) beginEnemyTelegraph(world, enemy, target,
       { type: 'circle', originX: enemy.x, originZ: enemy.z, radius: rule.slamRadius }, rule.behavior, rule.windupTicks);
-    else moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
+    else if (!rooted) moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
     return;
   }
   if (rule.behavior === 'line-dash') {
     if (distance <= 6.5) {
       beginEnemyTelegraph(world, enemy, target, makeLineShape(enemy.x, enemy.z, enemy.facing, rule.length, rule.width), rule.behavior, rule.windupTicks);
       enemy.lineTravelled = 0;
-    } else if (distance > 0.001) {
+    } else if (!rooted && distance > 0.001) {
       moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
     }
     return;
@@ -3039,7 +3213,7 @@ function stepStageEnemy(world, enemy, players) {
   if (distance <= rule.range) {
     const shape = { type: 'sector', originX: enemy.x, originZ: enemy.z, angle: enemy.facing, range: rule.range, halfAngle: rule.halfAngle };
     beginEnemyTelegraph(world, enemy, target, shape, rule.behavior, rule.windupTicks);
-  } else if (distance > 0.001) {
+  } else if (!rooted && distance > 0.001) {
     moveEntity(world, enemy, dx / distance * speed / TICK_HZ, dz / distance * speed / TICK_HZ);
   }
 }
@@ -3235,6 +3409,7 @@ function stageStep(world, inputsByPlayerId) {
     if (enemy.kind === 'enemy') {
       enemy.hitFlashTicks = Math.max(0, enemy.hitFlashTicks - 1);
       enemy.slowTicks = Math.max(0, (enemy.slowTicks ?? 0) - 1);
+      if (enemy.rootedTicks > 0) enemy.rootedTicks -= 1;
     }
   }
   cleanupEntities(world);
