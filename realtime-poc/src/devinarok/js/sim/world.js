@@ -1891,6 +1891,7 @@ function resolvePendingImpacts(world) {
             targetEntityId: impact.targetEntityId ?? null,
             viewLag: impact.viewLag,
             viewTick: impact.viewTick,
+            rewind: impact.kind !== 'poison',
           });
           if (target) {
             emit(world, 'impact', {
