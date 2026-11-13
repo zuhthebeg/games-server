@@ -2226,7 +2226,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         originZ: cast.targetZ,
         radius: skill.radius,
       };
-      attackStrike = {
+      addSkillStrike({
         shape,
         motionMult: skill.motionMult,
         castId: cast.castId,
@@ -2235,7 +2235,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
         skillId: cast.id,
         rootTicks: skill.rootTicks,
         bossRootTicks: skill.bossRootTicks,
-      };
+      });
       skillImpacts.push({
         castSeq: cast.seq,
         castId: cast.castId,
@@ -2305,7 +2305,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
       }
     } else if (cast.name === 'poisonArrow' && cast.tick === skill.windupTicks) {
       const shape = makeLineShape(cast.originX, cast.originZ, cast.angle, skill.length, skill.width);
-      attackStrike = {
+      addSkillStrike({
         shape,
         motionMult: skill.motionMult,
         castId: cast.castId,
@@ -2319,7 +2319,7 @@ export function stepPlayerMotion(ctx, player, rawInput) {
           motionMult: skill.poisonMotionMult,
           castSeq: cast.seq,
         },
-      };
+      });
       shots.push({
         ownerId: player.playerId,
         x: cast.originX,
@@ -2590,41 +2590,10 @@ function advanceStagePlayer(world, player, rawInput) {
     for (const blink of motion.blinks) emit(world, 'blink', blink);
     const skillStrikes = motion.skillStrikes.length ? motion.skillStrikes : motion.skillStrike ? [motion.skillStrike] : [];
     for (const strike of skillStrikes) {
-      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
+      const hitTargets = playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
         maxTargets: strike.maxTargets,
         stunTicks: strike.stunTicks,
         knockback: strike.knockback,
-        viewLag: player.viewLag,
-        viewTick: strike.viewTick ?? motion.input.viewTick,
-      });
-    }
-    for (const impact of motion.skillImpacts) {
-      emit(world, 'impact', {
-        id: impact.castId,
-        ownerId: player.playerId,
-        ownerEntityId: player.id,
-        castSeq: impact.castSeq,
-        fireTick: world.tick,
-        resolveTick: world.tick,
-        ...(Number.isSafeInteger(impact.endsTick) ? { endsTick: impact.endsTick } : {}),
-        shape: impact.shape,
-        kind: impact.kind,
-      });
-    }
-    if (motion.counterStrike) {
-      const strike = motion.counterStrike;
-      emit(world, 'cast', strike.payload);
-      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
-        slowTicks: strike.slowTicks,
-        forceCritical: true,
-        viewLag: player.viewLag,
-        viewTick: strike.viewTick ?? motion.input.viewTick,
-      });
-    }
-    if (motion.attackStrike) {
-      const strike = motion.attackStrike;
-      const hitTargets = playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
-        maxTargets: strike.maxTargets,
         viewLag: player.viewLag,
         viewTick: strike.viewTick ?? motion.input.viewTick,
       });
@@ -2662,6 +2631,37 @@ function advanceStagePlayer(world, player, rawInput) {
           enemy.rootedTicks = Math.max(enemy.rootedTicks ?? 0, rootTicks);
         }
       }
+    }
+    for (const impact of motion.skillImpacts) {
+      emit(world, 'impact', {
+        id: impact.castId,
+        ownerId: player.playerId,
+        ownerEntityId: player.id,
+        castSeq: impact.castSeq,
+        fireTick: world.tick,
+        resolveTick: world.tick,
+        ...(Number.isSafeInteger(impact.endsTick) ? { endsTick: impact.endsTick } : {}),
+        shape: impact.shape,
+        kind: impact.kind,
+      });
+    }
+    if (motion.counterStrike) {
+      const strike = motion.counterStrike;
+      emit(world, 'cast', strike.payload);
+      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
+        slowTicks: strike.slowTicks,
+        forceCritical: true,
+        viewLag: player.viewLag,
+        viewTick: strike.viewTick ?? motion.input.viewTick,
+      });
+    }
+    if (motion.attackStrike) {
+      const strike = motion.attackStrike;
+      playerStrike(world, player, strike.shape, strike.motionMult, strike.castId, strike.hitTargets, strike.skillId, {
+        maxTargets: strike.maxTargets,
+        viewLag: player.viewLag,
+        viewTick: strike.viewTick ?? motion.input.viewTick,
+      });
     }
     if (motion.potionHeal > 0) {
       player.hp = Math.min(player.maxHp, player.hp + motion.potionHeal);
