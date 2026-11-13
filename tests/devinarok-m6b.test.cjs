@@ -96,6 +96,13 @@ test('gainMastery is settlement-only, capped by cooldown, and unique per skill',
 
   assert.doesNotThrow(() => validate([{ type: 'gainMastery', skill: 'spin', amount: cap }]));
   assert.throws(() => validate([{ type: 'gainMastery', skill: 'spin', amount: cap + 1 }]), /mastery-cap-exceeded/);
+  const poisonCap = Math.min(60, Math.floor(ticks / MASTERY_MIN_COOLDOWN_TICKS('poisonArrow')) + 1);
+  assert.equal(SKILLS.poisonArrow.cooldownTicks, 300);
+  assert.doesNotThrow(() => validate([{ type: 'gainMastery', skill: 'poisonArrow', amount: poisonCap }]));
+  assert.throws(
+    () => validate([{ type: 'gainMastery', skill: 'poisonArrow', amount: poisonCap + 1 }]),
+    /mastery-cap-exceeded/,
+  );
   assert.throws(() => validate([
     { type: 'gainMastery', skill: 'spin', amount: 1 },
     { type: 'gainMastery', skill: 'spin', amount: 1 },
