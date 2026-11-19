@@ -4,9 +4,9 @@
 // 응답은 언제나 204 — 카운터 실패가 게임 플로우에 신호를 주면 안 된다.
 import { BOT_UA } from '../auth/anonymous';
 
-const EV_SET = new Set(['visit', 'rec_start', 'analyze_done', 'result_view', 'share', 'login_tap']);
+const EV_SET = new Set(['visit', 'rec_start', 'analyze_done', 'result_view', 'share', 'login_tap', 'visit_return', 'newchip_tap', 'req_done_seen', 'daily_play', 'invite_open']);
 const LOC_SET = new Set(['ko', 'en', 'ja', 'es', 'pt', 'tw', 'id']);
-const REF_SET = new Set(['threads', 'instagram', 'facebook', 'x', 'google', 'direct', 'other']);
+const REF_SET = new Set(['threads', 'instagram', 'facebook', 'x', 'google', 'direct', 'other', 'share', 'invite', 'portal']);
 const MAX_BODY = 1024; // 1KB — 정상 페이로드는 수십 바이트
 
 // Origin이 있으면 game.cocy.io 계열만 허용한다. 반환값: 허용 오리진 / null(Origin 없음) / ''(거부)
