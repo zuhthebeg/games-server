@@ -35,6 +35,7 @@ function baseInput(over = {}) {
     voicematchSignups: 0,
     requestStatus: [],
     requestLatest: [],
+    eventRows: [],
     ...over,
   };
 }
@@ -151,4 +152,64 @@ test('범위 밖 데이터 무시 — entry/daily는 dayRange 밖 날짜 제외'
   assert.equal(r.entry.days.reduce((a, d) => a + d.total, 0), 0);
   assert.equal(r.daily.reduce((a, d) => a + d.submissions, 0), 0);
   assert.equal(r.retention.submitters, 0);
+});
+
+// — VM-I10 이벤트 퍼널
+test('funnel 빈 데이터 — 날짜는 0으로 채워지고 byLoc/byRef는 빈 배열', () => {
+  const r = assembleAnalytics(baseInput());
+  assert.equal(r.funnel.days.length, 14);
+  assert.ok(r.funnel.days.every(d => d.visit === 0 && d.share === 0 && d.login_tap === 0));
+  assert.equal(r.funnel.totals.visit, 0);
+  assert.deepEqual(r.funnel.byLoc, []);
+  assert.deepEqual(r.funnel.byRef, []);
+});
+
+test('funnel — 일별 ev 합계와 기간 totals', () => {
+  const r = assembleAnalytics(baseInput({
+    eventRows: [
+      { d: '2026-11-18', ev: 'visit', loc: 'ko', ref: 'threads', n: 5 },
+      { d: '2026-11-18', ev: 'visit', loc: 'tw', ref: 'threads', n: 3 },
+      { d: '2026-11-18', ev: 'rec_start', loc: 'ko', ref: 'threads', n: 4 },
+      { d: '2026-11-19', ev: 'visit', loc: 'ko', ref: 'direct', n: 2 },
+      { d: '2026-11-19', ev: 'analyze_done', loc: 'ko', ref: 'threads', n: 1 },
+      { d: '2026-11-19', ev: 'share', loc: 'ko', ref: 'threads', n: 1 },
+      { d: '2026-11-19', ev: 'login_tap', loc: 'en', ref: 'google', n: 7 },
+    ],
+  }));
+  const d18 = r.funnel.days.find(d => d.day === '2026-11-18');
+  const d19 = r.funnel.days.find(d => d.day === '2026-11-19');
+  assert.equal(d18.visit, 8);
+  assert.equal(d18.rec_start, 4);
+  assert.equal(d18.analyze_done, 0);
+  assert.equal(d19.visit, 2);
+  assert.equal(d19.analyze_done, 1);
+  assert.equal(d19.login_tap, 7);
+  assert.deepEqual(r.funnel.totals, { visit: 10, rec_start: 4, analyze_done: 1, result_view: 0, share: 1, login_tap: 7 });
+});
+
+test('funnel — byLoc/byRef는 visit만 집계, n 내림차순 정렬', () => {
+  const r = assembleAnalytics(baseInput({
+    eventRows: [
+      { d: '2026-11-18', ev: 'visit', loc: 'tw', ref: 'threads', n: 3 },
+      { d: '2026-11-18', ev: 'visit', loc: 'ko', ref: 'threads', n: 5 },
+      { d: '2026-11-18', ev: 'visit', loc: 'ko', ref: 'direct', n: 1 },
+      // 비-visit 이벤트의 loc/ref는 byLoc/byRef에 들어가지 않는다
+      { d: '2026-11-18', ev: 'rec_start', loc: 'ja', ref: 'x', n: 99 },
+      { d: '2026-11-19', ev: 'share', loc: 'es', ref: 'instagram', n: 50 },
+    ],
+  }));
+  assert.deepEqual(r.funnel.byLoc, [{ loc: 'ko', n: 6 }, { loc: 'tw', n: 3 }]);
+  assert.deepEqual(r.funnel.byRef, [{ ref: 'threads', n: 8 }, { ref: 'direct', n: 1 }]);
+});
+
+test('funnel — 화이트리스트 밖 ev와 범위 밖 날짜는 무시', () => {
+  const r = assembleAnalytics(baseInput({
+    eventRows: [
+      { d: '2026-11-18', ev: 'hacked', loc: 'ko', ref: 'x', n: 100 },
+      { d: '2026-11-01', ev: 'visit', loc: 'ko', ref: 'x', n: 100 },
+    ],
+  }));
+  assert.equal(r.funnel.totals.visit, 0);
+  assert.equal(r.funnel.days.every(d => d.visit === 0), true);
+  assert.deepEqual(r.funnel.byRef, []);
 });

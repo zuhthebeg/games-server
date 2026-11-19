@@ -7,6 +7,11 @@ export interface DailyRow { d: string; user_id: string; artist: string; pct: num
 export interface ArtistCntRow { artist: string; cnt: number }
 export interface ReqStatusRow { status: string; cnt: number }
 export interface ReqLatestRow { artist: string; status: string; created: string | null }
+export interface EventRow { d: string; ev: string; loc: string; ref: string; n: number }
+
+// /api/voicematch/event 화이트리스트와 동일 — 서버가 다른 값을 저장하지 않으므로 순서만 맞추면 된다 (VM-I10)
+export const EV_KEYS = ['visit', 'rec_start', 'analyze_done', 'result_view', 'share', 'login_tap'] as const;
+export type EvKey = typeof EV_KEYS[number];
 
 export interface AnalyticsInput {
   generatedAt: string;
@@ -21,6 +26,7 @@ export interface AnalyticsInput {
   voicematchSignups: number;
   requestStatus: ReqStatusRow[];
   requestLatest: ReqLatestRow[];
+  eventRows: EventRow[];          // voicematch_events (day는 YYYY-MM-DD 정규형)
 }
 
 export function addDays(ymd: string, delta: number): string {
@@ -134,6 +140,32 @@ export function assembleAnalytics(input: AnalyticsInput) {
   const byStatus: Record<string, number> = {};
   for (const r of input.requestStatus) byStatus[r.status] = r.cnt;
 
+  // — 이벤트 퍼널 (VM-I10): 일별 ev 합계 + 기간 합계 + 유입처/로케일 분포
+  // loc·ref는 방문자 속성이라 visit 이벤트 기준으로만 집계한다(전 이벤트 합산은 세션당 N배수라 분포가 왜곡됨)
+  const zeroEv = () => ({ visit: 0, rec_start: 0, analyze_done: 0, result_view: 0, share: 0, login_tap: 0 });
+  const evDayMap = new Map<string, ReturnType<typeof zeroEv>>();
+  for (const d of input.dayRange) evDayMap.set(d, zeroEv());
+  const evTotals = zeroEv();
+  const locCnt = new Map<string, number>();
+  const refCnt = new Map<string, number>();
+  for (const r of input.eventRows) {
+    if (!(EV_KEYS as readonly string[]).includes(r.ev)) continue;
+    const slot = evDayMap.get(r.d);
+    if (!slot) continue; // dayRange 밖
+    slot[r.ev as EvKey] += r.n;
+    evTotals[r.ev as EvKey] += r.n;
+    if (r.ev === 'visit') {
+      locCnt.set(r.loc, (locCnt.get(r.loc) || 0) + r.n);
+      refCnt.set(r.ref, (refCnt.get(r.ref) || 0) + r.n);
+    }
+  }
+  const funnel = {
+    days: input.dayRange.map(d => ({ day: d, ...evDayMap.get(d)! })),
+    totals: evTotals,
+    byLoc: [...locCnt.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([loc, n]) => ({ loc, n })),
+    byRef: [...refCnt.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ref, n]) => ({ ref, n })),
+  };
+
   return {
     generatedAt: input.generatedAt,
     days: input.dayRange.length,
@@ -162,5 +194,6 @@ export function assembleAnalytics(input: AnalyticsInput) {
       byStatus,
       latest: input.requestLatest.slice(0, 5).map(r => ({ artist: r.artist, status: r.status, created: r.created })),
     },
+    funnel,
   };
 }

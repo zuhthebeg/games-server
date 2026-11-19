@@ -14,7 +14,8 @@ interface PagesContext {
 
 // UA 기반 즉석 봇 판정. 여기서 못 잡는 정기 크롤러(headless가 아닌 척하는 것)는
 // /api/admin/bot-reclassify의 버스트 패턴 분석이 잡는다.
-const BOT_UA = /bot|crawl|spider|slurp|headless|python|curl|wget|scrapy|phantom|puppeteer|playwright|httpclient|axios|go-http/i;
+// export: /api/voicematch/event 카운터도 같은 시그니처로 봇을 제외한다 (VM-I10)
+export const BOT_UA = /bot|crawl|spider|slurp|headless|python|curl|wget|scrapy|phantom|puppeteer|playwright|httpclient|axios|go-http/i;
 
 export const onRequestPost = async (context: PagesContext): Promise<Response> => {
     const { env, request } = context;

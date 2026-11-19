@@ -1,7 +1,7 @@
 // GET /api/admin/voicematch-analytics?days=14 — 보이스매치 유입→제출→재방문·DB 상태 집계 (읽기 전용)
 // 집계 로직은 ./_vm_analytics.ts 순수 함수로 분리 (node --test 대상)
 import { addDays, assembleAnalytics, lastNDays } from './_vm_analytics';
-import type { ArtistCntRow, CountryRow, DailyRow, EntryRow, ReqLatestRow, ReqStatusRow } from './_vm_analytics';
+import type { ArtistCntRow, CountryRow, DailyRow, EntryRow, EventRow, ReqLatestRow, ReqStatusRow } from './_vm_analytics';
 
 const ADMIN_SECRET = 'cocy-admin-2026-r1';
 
@@ -35,7 +35,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async (ctx) => {
   // 리텐션의 직전 7일 창이 조회 범위(days<14)를 벗어날 수 있어 넉넉히 가져온다
   const fetchStart = addDays(today, -Math.max(days - 1, 13));
 
-  const [entryRows, countryRows, dailyRows, rankingTop, ranked, registeredRanked, vmSignups, reqStatus, reqLatest] = await Promise.all([
+  const [entryRows, countryRows, dailyRows, rankingTop, ranked, registeredRanked, vmSignups, reqStatus, reqLatest, eventRows] = await Promise.all([
     db.prepare(
       `SELECT substr(created_at,1,10) AS d, bot_status AS bs, COUNT(*) AS cnt
        FROM users WHERE signup_game = 'voicematch' AND substr(created_at,1,10) >= ? AND substr(created_at,1,10) <= ?
@@ -64,6 +64,10 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async (ctx) => {
     db.prepare(
       'SELECT artist, status, created_at AS created FROM voicematch_requests ORDER BY id DESC LIMIT 5'
     ).all<ReqLatestRow>().catch(() => ({ results: [] as ReqLatestRow[] })),
+    // VM-I10 익명 이벤트 카운터 — 테이블이 아직 없으면 빈 배열로 조용히 넘긴다
+    db.prepare(
+      'SELECT day AS d, ev, loc, ref, n FROM voicematch_events WHERE day >= ? AND day <= ?'
+    ).bind(rangeStart, today).all<EventRow>().catch(() => ({ results: [] as EventRow[] })),
   ]);
 
   const body = assembleAnalytics({
@@ -79,6 +83,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async (ctx) => {
     voicematchSignups: vmSignups?.cnt ?? 0,
     requestStatus: reqStatus.results || [],
     requestLatest: reqLatest.results || [],
+    eventRows: eventRows.results || [],
   });
 
   return Response.json(body, { headers: CORS });
