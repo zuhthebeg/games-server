@@ -184,7 +184,7 @@ test('funnel — 일별 ev 합계와 기간 totals', () => {
   assert.equal(d19.visit, 2);
   assert.equal(d19.analyze_done, 1);
   assert.equal(d19.login_tap, 7);
-  assert.deepEqual(r.funnel.totals, { visit: 10, rec_start: 4, analyze_done: 1, result_view: 0, share: 1, login_tap: 7 });
+  assert.deepEqual(r.funnel.totals, { visit: 10, rec_start: 4, analyze_done: 1, result_view: 0, share: 1, login_tap: 7, visit_return: 0, newchip_tap: 0, req_done_seen: 0, daily_play: 0, invite_open: 0 });
 });
 
 test('funnel — byLoc/byRef는 visit만 집계, n 내림차순 정렬', () => {
@@ -212,4 +212,44 @@ test('funnel — 화이트리스트 밖 ev와 범위 밖 날짜는 무시', () =
   assert.equal(r.funnel.totals.visit, 0);
   assert.equal(r.funnel.days.every(d => d.visit === 0), true);
   assert.deepEqual(r.funnel.byRef, []);
+});
+
+// VM-I12A: auxiliary counters are not user cohorts or funnel steps.
+const AUX_KEYS = ['visit_return', 'newchip_tap', 'req_done_seen', 'daily_play', 'invite_open'];
+test('auxiliary events — zero-fill every day and totals, including empty ranges', () => {
+  for (const dayRange of [range14, []]) {
+    const { funnel } = assembleAnalytics(baseInput({ dayRange }));
+    for (const ev of AUX_KEYS) {
+      assert.equal(funnel.totals[ev], 0, ev);
+      assert.ok(funnel.days.every(d => d[ev] === 0), ev);
+    }
+  }
+});
+test('auxiliary events — sum rows/days without altering primary funnel or visit distributions', () => {
+  const { funnel } = assembleAnalytics(baseInput({ eventRows: [
+    { d: TODAY, ev: 'visit', loc: 'ko', ref: 'direct', n: 2 },
+    ...AUX_KEYS.flatMap((ev, i) => [
+      { d: TODAY, ev, loc: 'en', ref: 'invite', n: i + 3 },
+      { d: TODAY, ev, loc: 'ja', ref: 'x', n: 2 },
+      { d: '2026-11-18', ev, loc: 'tw', ref: 'threads', n: 9 },
+      { d: '2026-11-01', ev, loc: 'es', ref: 'google', n: 100 },
+    ]),
+  ] }));
+  for (const [i, ev] of AUX_KEYS.entries()) {
+    assert.equal(funnel.totals[ev], i + 14);
+    assert.equal(funnel.days.at(-1)[ev], i + 5);
+    assert.equal(funnel.days.at(-2)[ev], 9);
+    assert.equal(funnel.days[0][ev], 0);
+  }
+  assert.equal(funnel.totals.visit, 2);
+  for (const ev of ['rec_start', 'analyze_done', 'result_view', 'share', 'login_tap']) assert.equal(funnel.totals[ev], 0);
+  assert.deepEqual(funnel.byLoc, [{ loc: 'ko', n: 2 }]);
+  assert.deepEqual(funnel.byRef, [{ ref: 'direct', n: 2 }]);
+});
+test('unknown events cannot add keys or contaminate auxiliary counts', () => {
+  const { funnel } = assembleAnalytics(baseInput({ eventRows:
+    ['unknown', '__proto__', 'constructor', 'Visit_return', 'invite_open '].map(ev => ({ d: TODAY, ev, loc: 'ko', ref: 'x', n: 99 })),
+  }));
+  assert.deepEqual(funnel, assembleAnalytics(baseInput()).funnel);
+  for (const ev of AUX_KEYS) assert.equal(funnel.totals[ev], 0);
 });

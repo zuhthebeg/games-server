@@ -9,8 +9,8 @@ export interface ReqStatusRow { status: string; cnt: number }
 export interface ReqLatestRow { artist: string; status: string; created: string | null }
 export interface EventRow { d: string; ev: string; loc: string; ref: string; n: number }
 
-// /api/voicematch/event 화이트리스트와 동일 — 서버가 다른 값을 저장하지 않으므로 순서만 맞추면 된다 (VM-I10)
-export const EV_KEYS = ['visit', 'rec_start', 'analyze_done', 'result_view', 'share', 'login_tap'] as const;
+// /api/voicematch/event 화이트리스트와 동일. 보조 이벤트도 횟수만 집계한다 (VM-I12A).
+export const EV_KEYS = ['visit', 'rec_start', 'analyze_done', 'result_view', 'share', 'login_tap', 'visit_return', 'newchip_tap', 'req_done_seen', 'daily_play', 'invite_open'] as const;
 export type EvKey = typeof EV_KEYS[number];
 
 export interface AnalyticsInput {
@@ -142,7 +142,7 @@ export function assembleAnalytics(input: AnalyticsInput) {
 
   // — 이벤트 퍼널 (VM-I10): 일별 ev 합계 + 기간 합계 + 유입처/로케일 분포
   // loc·ref는 방문자 속성이라 visit 이벤트 기준으로만 집계한다(전 이벤트 합산은 세션당 N배수라 분포가 왜곡됨)
-  const zeroEv = () => ({ visit: 0, rec_start: 0, analyze_done: 0, result_view: 0, share: 0, login_tap: 0 });
+  const zeroEv = (): Record<EvKey, number> => Object.fromEntries(EV_KEYS.map(ev => [ev, 0])) as Record<EvKey, number>;
   const evDayMap = new Map<string, ReturnType<typeof zeroEv>>();
   for (const d of input.dayRange) evDayMap.set(d, zeroEv());
   const evTotals = zeroEv();
