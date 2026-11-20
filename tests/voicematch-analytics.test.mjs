@@ -184,7 +184,7 @@ test('funnel — 일별 ev 합계와 기간 totals', () => {
   assert.equal(d19.visit, 2);
   assert.equal(d19.analyze_done, 1);
   assert.equal(d19.login_tap, 7);
-  assert.deepEqual(r.funnel.totals, { visit: 10, rec_start: 4, analyze_done: 1, result_view: 0, share: 1, login_tap: 7, visit_return: 0, newchip_tap: 0, req_done_seen: 0, daily_play: 0, invite_open: 0 });
+  assert.deepEqual(r.funnel.totals, { visit: 10, rec_start: 4, analyze_done: 1, result_view: 0, share: 1, login_tap: 7, visit_return: 0, newchip_tap: 0, req_done_seen: 0, daily_play: 0, invite_open: 0, social_tap_duet: 0, social_tap_group: 0 });
 });
 
 test('funnel — byLoc/byRef는 visit만 집계, n 내림차순 정렬', () => {
@@ -215,7 +215,7 @@ test('funnel — 화이트리스트 밖 ev와 범위 밖 날짜는 무시', () =
 });
 
 // VM-I12A: auxiliary counters are not user cohorts or funnel steps.
-const AUX_KEYS = ['visit_return', 'newchip_tap', 'req_done_seen', 'daily_play', 'invite_open'];
+const AUX_KEYS = ['visit_return', 'newchip_tap', 'req_done_seen', 'daily_play', 'invite_open', 'social_tap_duet', 'social_tap_group'];
 test('auxiliary events — zero-fill every day and totals, including empty ranges', () => {
   for (const dayRange of [range14, []]) {
     const { funnel } = assembleAnalytics(baseInput({ dayRange }));

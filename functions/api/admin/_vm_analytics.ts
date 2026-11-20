@@ -10,7 +10,7 @@ export interface ReqLatestRow { artist: string; status: string; created: string 
 export interface EventRow { d: string; ev: string; loc: string; ref: string; n: number }
 
 // /api/voicematch/event 화이트리스트와 동일. 보조 이벤트도 횟수만 집계한다 (VM-I12A).
-export const EV_KEYS = ['visit', 'rec_start', 'analyze_done', 'result_view', 'share', 'login_tap', 'visit_return', 'newchip_tap', 'req_done_seen', 'daily_play', 'invite_open'] as const;
+export const EV_KEYS = ['visit', 'rec_start', 'analyze_done', 'result_view', 'share', 'login_tap', 'visit_return', 'newchip_tap', 'req_done_seen', 'daily_play', 'invite_open', 'social_tap_duet', 'social_tap_group'] as const;
 export type EvKey = typeof EV_KEYS[number];
 
 export interface AnalyticsInput {
